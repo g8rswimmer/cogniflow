@@ -1,0 +1,15 @@
+# Environment
+.env
+
+# Go build artifacts
+backend/bin/
+*.test
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
