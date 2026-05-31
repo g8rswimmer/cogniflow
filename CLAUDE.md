@@ -14,6 +14,18 @@ The memory file `milestone-status.md` (in the project memory directory) tracks w
 
 ---
 
+## Definition of Done
+
+A milestone is not complete until all of the following pass from `backend/`:
+
+1. `go build ./...` — no compile errors
+2. `go test ./...` — all tests pass, coverage >80% on new packages
+3. `golangci-lint run ./...` — zero warnings (default linter set)
+
+Run these in order before marking a milestone done or committing final work.
+
+---
+
 ## Commands
 
 All Go commands must be run from `backend/` (the Go module root). All frontend commands run from `frontend/`.
@@ -27,6 +39,7 @@ go run ./cmd/server                    # run locally (requires DB_DSN env var)
 go test ./...                          # all tests
 go test ./internal/engine/...          # single package
 go test -run TestCycleDetect ./internal/engine/...  # single test
+golangci-lint run ./...                # lint (must be zero warnings before milestone complete)
 
 # Frontend (once scaffolded)
 cd frontend
@@ -123,6 +136,31 @@ Migrations live in `backend/internal/store/mysql/migrations/` and are embedded v
 | `PLUGIN_ADDRESSES` | no | Comma-separated `host:port` list of gRPC plugin processes |
 
 Copy `.env.example` → `.env` before running locally.
+
+### Go interface conventions
+
+Follow standard Go interface design:
+
+- **Interfaces belong to the consumer, not the producer.** A package that provides a concrete type does not declare an interface for it. The package that *depends on* the type declares the minimal interface it needs. This keeps packages decoupled and avoids forcing every consumer to satisfy a producer-owned contract.
+- **Constructors return concrete types.** `NewFoo()` returns `*Foo`, not an interface. Returning a concrete type gives callers full access to the type and lets them choose what interface (if any) to use at their call site.
+- **Accept interfaces, return concrete types.** Function parameters may use interfaces when the function genuinely needs to work with multiple implementations (e.g. `store.Store` in the API layer). Return values use concrete types.
+
+Example — correct:
+```go
+// node/registry.go — producer defines only the concrete type
+type NodeRegistry struct { ... }
+func NewRegistry() *NodeRegistry { ... }
+
+// crypto/config_vault.go — consumer takes the concrete type directly
+func NewConfigVault(inner store.Store, cipher *Cipher, registry *node.NodeRegistry) *ConfigVault
+```
+
+Example — incorrect:
+```go
+// node/registry.go — do NOT do this
+type Registry interface { ... }          // interface defined by producer ✗
+func NewRegistry() Registry { ... }     // constructor hides concrete type ✗
+```
 
 ### JSON conventions
 
