@@ -10,6 +10,9 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
+// Compile-time assertion that *ConfigVault implements store.Store.
+var _ store.Store = (*ConfigVault)(nil)
+
 // ConfigVault wraps a Store and transparently encrypts sensitive node config
 // values on write and decrypts them on read.
 type ConfigVault struct {
@@ -110,8 +113,13 @@ func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) {
 			if !ok {
 				continue
 			}
-			plaintext := fmt.Sprintf("%v", val)
-			ciphertext, err := v.cipher.Encrypt([]byte(plaintext))
+			strVal, ok := val.(string)
+			if !ok {
+				slog.Warn("config vault: sensitive value is not a string, skipping encryption",
+					"node", n.ID, "key", key, "type", fmt.Sprintf("%T", val))
+				continue
+			}
+			ciphertext, err := v.cipher.Encrypt([]byte(strVal))
 			if err != nil {
 				slog.Error("config vault: encrypt failed", "node", n.ID, "key", key, "error", err)
 				continue

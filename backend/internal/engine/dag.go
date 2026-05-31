@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
@@ -95,7 +96,14 @@ func topoSort(d *DAG) ([]string, error) {
 		return nil
 	}
 
+	// Sort IDs for a deterministic traversal order.
+	ids := make([]string, 0, len(d.Nodes))
 	for id := range d.Nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
 		if color[id] == white {
 			if err := visit(id); err != nil {
 				return nil, err

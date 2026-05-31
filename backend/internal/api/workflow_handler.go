@@ -3,12 +3,16 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
+
+const maxBodyBytes = 1 << 20 // 1 MB
 
 type workflowHandler struct {
 	store    store.Store
@@ -30,11 +34,15 @@ func (h *workflowHandler) list(w http.ResponseWriter, r *http.Request) {
 
 // create handles POST /workflows
 func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
 	var wf store.Workflow
 	if err := json.NewDecoder(r.Body).Decode(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body: "+err.Error())
 		return
 	}
+
+	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
@@ -56,9 +64,8 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.setWebhookURL(&created)
 	maskSensitiveConfig(created.Nodes)
-	writeJSON(w, http.StatusCreated, created)
+	writeJSON(w, http.StatusCreated, toWorkflowResponse(created))
 }
 
 // get handles GET /workflows/{id}
@@ -74,13 +81,13 @@ func (h *workflowHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.setWebhookURL(&wf)
 	maskSensitiveConfig(wf.Nodes)
-	writeJSON(w, http.StatusOK, wf)
+	writeJSON(w, http.StatusOK, toWorkflowResponse(wf))
 }
 
 // update handles PUT /workflows/{id}
 func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	id := r.PathValue("id")
 
 	var wf store.Workflow
@@ -89,6 +96,8 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wf.ID = id
+
+	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
@@ -114,9 +123,8 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.setWebhookURL(&updated)
 	maskSensitiveConfig(updated.Nodes)
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, toWorkflowResponse(updated))
 }
 
 // delete handles DELETE /workflows/{id}
@@ -134,22 +142,76 @@ func (h *workflowHandler) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// validate checks required fields.
+// applyDefaults fills in optional fields before validation.
+func applyDefaults(wf *store.Workflow) {
+	if wf.Trigger.Kind == "" {
+		wf.Trigger.Kind = "manual"
+	}
+}
+
+// validate rejects requests that are missing required fields or reference unknown node types.
 func (h *workflowHandler) validate(wf *store.Workflow) error {
 	if wf.Name == "" {
 		return errors.New("name is required")
 	}
-	if wf.Trigger.Kind == "" {
-		wf.Trigger.Kind = "manual"
+	for _, n := range wf.Nodes {
+		if _, err := h.registry.Lookup(n.TypeID); err != nil {
+			return fmt.Errorf("unknown node type_id %q", n.TypeID)
+		}
 	}
 	return nil
 }
 
-// setWebhookURL populates the computed webhook_url for webhook-triggered workflows.
-func (h *workflowHandler) setWebhookURL(wf *store.Workflow) {
-	if wf.Trigger.Kind == "webhook" {
-		wf.Trigger.WebhookURL = "/webhooks/" + wf.ID
+// ---- response types ------------------------------------------------------
+
+// workflowResponse is the API representation of a workflow. It keeps
+// WebhookURL in the API layer rather than the store domain type.
+type workflowResponse struct {
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Description    string               `json:"description,omitempty"`
+	Trigger        triggerResponse      `json:"trigger"`
+	TimeoutSeconds int                  `json:"timeout_seconds"`
+	Nodes          []store.WorkflowNode `json:"nodes"`
+	Edges          []store.WorkflowEdge `json:"edges"`
+	CreatedAt      time.Time            `json:"created_at"`
+	UpdatedAt      time.Time            `json:"updated_at"`
+}
+
+type triggerResponse struct {
+	Kind       string `json:"kind"`
+	CronExpr   string `json:"cron_expr,omitempty"`
+	WebhookURL string `json:"webhook_url,omitempty"`
+}
+
+func toWorkflowResponse(wf store.Workflow) workflowResponse {
+	nodes := wf.Nodes
+	if nodes == nil {
+		nodes = []store.WorkflowNode{}
 	}
+	edges := wf.Edges
+	if edges == nil {
+		edges = []store.WorkflowEdge{}
+	}
+
+	resp := workflowResponse{
+		ID:             wf.ID,
+		Name:           wf.Name,
+		Description:    wf.Description,
+		TimeoutSeconds: wf.TimeoutSeconds,
+		Trigger: triggerResponse{
+			Kind:     wf.Trigger.Kind,
+			CronExpr: wf.Trigger.CronExpr,
+		},
+		Nodes:     nodes,
+		Edges:     edges,
+		CreatedAt: wf.CreatedAt,
+		UpdatedAt: wf.UpdatedAt,
+	}
+	if wf.Trigger.Kind == "webhook" {
+		resp.Trigger.WebhookURL = "/webhooks/" + wf.ID
+	}
+	return resp
 }
 
 // maskSensitiveConfig replaces sensitive config values with "***" in API responses.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
@@ -15,6 +16,7 @@ func setupWorkflowHandler(t *testing.T) (*workflowHandler, *mockStore) {
 	t.Helper()
 	ms := newMockStore()
 	registry := node.NewRegistry()
+	registry.Register(httprequest.New())
 	return &workflowHandler{store: ms, registry: registry}, ms
 }
 
@@ -458,6 +460,25 @@ func TestWorkflowHandler_Update_MissingName(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	assertErrorCode(t, w.Body.Bytes(), "VALIDATION_FAILED")
+}
+
+func TestWorkflowHandler_Create_UnknownNodeType(t *testing.T) {
+	h, _ := setupWorkflowHandler(t)
+
+	body := `{
+		"name": "Unknown Node",
+		"trigger": {"kind": "manual"},
+		"nodes": [{"id":"n1","type_id":"does.not.exist","position":{"x":0,"y":0}}],
+		"edges": []
+	}`
+	r := httptest.NewRequest("POST", "/workflows", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.create(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 	assertErrorCode(t, w.Body.Bytes(), "VALIDATION_FAILED")
 }

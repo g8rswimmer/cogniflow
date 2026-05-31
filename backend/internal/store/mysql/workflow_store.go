@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
+
+// Compile-time assertion that *WorkflowStore implements store.Store.
+var _ store.Store = (*WorkflowStore)(nil)
 
 // WorkflowStore implements store.Store for MySQL.
 // Run, RAG, and trigger methods are stubbed until later milestones.
@@ -38,6 +42,10 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 		w.Trigger.Kind = "manual"
 	}
 
+	now := time.Now().UTC()
+	w.CreatedAt = now
+	w.UpdatedAt = now
+
 	triggerCfgBytes, err := json.Marshal(triggerExtra(w.Trigger))
 	if err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow store: marshal trigger: %w", err)
@@ -50,9 +58,10 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 	defer tx.Rollback() //nolint:errcheck
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO workflows (id, name, description, trigger_kind, trigger_config, timeout_seconds)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO workflows (id, name, description, trigger_kind, trigger_config, timeout_seconds, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.Name, w.Description, w.Trigger.Kind, string(triggerCfgBytes), w.TimeoutSeconds,
+		w.CreatedAt, w.UpdatedAt,
 	)
 	if err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow store: insert workflow: %w", err)
@@ -69,7 +78,7 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 		return store.Workflow{}, fmt.Errorf("workflow store: commit: %w", err)
 	}
 
-	return s.GetWorkflow(ctx, w.ID)
+	return w, nil
 }
 
 func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workflow, error) {
@@ -78,7 +87,7 @@ func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workf
 		`SELECT id, name, COALESCE(description,'') AS description, trigger_kind,
 		        trigger_config, timeout_seconds, created_at, updated_at
 		 FROM workflows WHERE id = ?`, id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return store.Workflow{}, store.ErrNotFound
 	}
 	if err != nil {
@@ -196,7 +205,19 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 		return store.Workflow{}, fmt.Errorf("workflow store: commit: %w", err)
 	}
 
-	return s.GetWorkflow(ctx, w.ID)
+	// Fetch only timestamps to avoid a full round-trip; MySQL controls updated_at via ON UPDATE.
+	var ts struct {
+		CreatedAt time.Time `db:"created_at"`
+		UpdatedAt time.Time `db:"updated_at"`
+	}
+	if err := s.db.GetContext(ctx, &ts,
+		`SELECT created_at, updated_at FROM workflows WHERE id=?`, w.ID); err != nil {
+		return store.Workflow{}, fmt.Errorf("workflow store: fetch timestamps: %w", err)
+	}
+	w.CreatedAt = ts.CreatedAt
+	w.UpdatedAt = ts.UpdatedAt
+
+	return w, nil
 }
 
 func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
@@ -344,17 +365,29 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 		 FROM workflow_nodes WHERE workflow_id=? ORDER BY id`, workflowID); err != nil {
 		return nil, fmt.Errorf("workflow store: load nodes: %w", err)
 	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	// Collect node IDs for a single batch config query.
+	nodeIDs := make([]string, len(rows))
+	for i, r := range rows {
+		nodeIDs[i] = r.ID
+	}
+	configs, sensitiveKeys, err := s.loadConfigs(ctx, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	nodes := make([]store.WorkflowNode, 0, len(rows))
 	for _, r := range rows {
 		n := store.WorkflowNode{
-			ID:     r.ID,
-			TypeID: r.TypeID,
-			Label:  r.Label,
-			Position: store.NodePosition{
-				X: r.PositionX,
-				Y: r.PositionY,
-			},
+			ID:            r.ID,
+			TypeID:        r.TypeID,
+			Label:         r.Label,
+			Position:      store.NodePosition{X: r.PositionX, Y: r.PositionY},
+			Config:        configs[r.ID],
+			SensitiveKeys: sensitiveKeys[r.ID],
 		}
 		if r.RetryMax > 0 {
 			n.RetryPolicy = &store.RetryPolicy{
@@ -362,37 +395,45 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 				BackoffMs:  r.RetryBackoffMs,
 			}
 		}
-
-		config, sensitiveKeys, err := s.loadConfig(ctx, r.ID)
-		if err != nil {
-			return nil, err
-		}
-		n.Config = config
-		n.SensitiveKeys = sensitiveKeys
 		nodes = append(nodes, n)
 	}
 	return nodes, nil
 }
 
-func (s *WorkflowStore) loadConfig(ctx context.Context, nodeID string) (map[string]any, map[string]bool, error) {
+// loadConfigs fetches all node_configs rows for the given node IDs in a single
+// query, eliminating the N+1 pattern in loadNodes.
+func (s *WorkflowStore) loadConfigs(ctx context.Context, nodeIDs []string) (map[string]map[string]any, map[string]map[string]bool, error) {
+	query, args, err := sqlx.In(
+		`SELECT node_id, config_key, plain_value, encrypted_value, is_sensitive
+		 FROM node_configs WHERE node_id IN (?)`, nodeIDs,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("workflow store: build config query: %w", err)
+	}
+	query = s.db.Rebind(query)
+
 	var rows []struct {
+		NodeID      string `db:"node_id"`
 		Key         string `db:"config_key"`
 		PlainValue  []byte `db:"plain_value"`
 		EncValue    []byte `db:"encrypted_value"`
 		IsSensitive bool   `db:"is_sensitive"`
 	}
-	if err := s.db.SelectContext(ctx, &rows,
-		`SELECT config_key, plain_value, encrypted_value, is_sensitive
-		 FROM node_configs WHERE node_id=?`, nodeID); err != nil {
-		return nil, nil, fmt.Errorf("workflow store: load config for %q: %w", nodeID, err)
+	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, nil, fmt.Errorf("workflow store: load configs: %w", err)
 	}
 
-	config := make(map[string]any, len(rows))
-	sensitive := make(map[string]bool, len(rows))
+	configs := make(map[string]map[string]any, len(nodeIDs))
+	sensitives := make(map[string]map[string]bool, len(nodeIDs))
+	for _, id := range nodeIDs {
+		configs[id] = make(map[string]any)
+		sensitives[id] = make(map[string]bool)
+	}
+
 	for _, r := range rows {
 		if r.IsSensitive {
-			config[r.Key] = r.EncValue
-			sensitive[r.Key] = true
+			configs[r.NodeID][r.Key] = r.EncValue
+			sensitives[r.NodeID][r.Key] = true
 		} else {
 			var val any
 			if len(r.PlainValue) > 0 {
@@ -400,11 +441,11 @@ func (s *WorkflowStore) loadConfig(ctx context.Context, nodeID string) (map[stri
 					val = string(r.PlainValue)
 				}
 			}
-			config[r.Key] = val
-			sensitive[r.Key] = false
+			configs[r.NodeID][r.Key] = val
+			sensitives[r.NodeID][r.Key] = false
 		}
 	}
-	return config, sensitive, nil
+	return configs, sensitives, nil
 }
 
 func (s *WorkflowStore) loadEdges(ctx context.Context, workflowID string) ([]store.WorkflowEdge, error) {

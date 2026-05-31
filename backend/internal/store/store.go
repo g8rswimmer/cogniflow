@@ -42,9 +42,8 @@ type WorkflowEdge struct {
 
 // Trigger describes how a workflow is activated.
 type Trigger struct {
-	Kind       string `json:"kind"`                  // manual | webhook | cron
-	CronExpr   string `json:"cron_expr,omitempty"`   // when kind == cron
-	WebhookURL string `json:"webhook_url,omitempty"` // computed on read; not stored
+	Kind     string `json:"kind"`                // manual | webhook | cron
+	CronExpr string `json:"cron_expr,omitempty"` // when kind == cron
 }
 
 // Workflow is the full definition of a workflow including its graph.
