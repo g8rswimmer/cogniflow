@@ -17,10 +17,10 @@ var inputSchema = json.RawMessage(`{
   "type": "object",
   "required": ["url", "method"],
   "properties": {
-    "url":     { "type": "string",  "title": "URL" },
+    "url":     { "type": "string",  "title": "URL",    "x-template": true },
     "method":  { "type": "string",  "title": "Method", "enum": ["GET","POST","PUT","PATCH","DELETE"], "default": "GET" },
-    "headers": { "type": "object",  "title": "Headers", "additionalProperties": { "type": "string" } },
-    "body":    { "type": "string",  "title": "Body" },
+    "headers": { "type": "object",  "title": "Headers", "additionalProperties": { "type": "string", "x-template": true } },
+    "body":    { "type": "string",  "title": "Body",   "x-template": true },
     "timeout_seconds": { "type": "integer", "title": "Timeout (seconds)", "default": 30 }
   }
 }`)

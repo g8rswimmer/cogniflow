@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
@@ -45,6 +47,11 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := h.validateTemplates(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -100,6 +107,11 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := h.validateTemplates(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -160,6 +172,47 @@ func (h *workflowHandler) validate(wf *store.Workflow) error {
 		}
 	}
 	return nil
+}
+
+// validateTemplates parses any x-template:true config field value that contains
+// "{{" to catch syntax errors before the workflow is saved. This mirrors the
+// CEL validation pattern used by the Conditional node.
+func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
+	for _, n := range wf.Nodes {
+		handler, err := h.registry.Lookup(n.TypeID)
+		if err != nil {
+			continue // unknown type already caught by validate()
+		}
+		for _, key := range parseTemplateKeys(handler.Meta().InputSchema) {
+			val, ok := n.Config[key].(string)
+			if !ok || !strings.Contains(val, "{{") {
+				continue
+			}
+			if _, err := template.New("").Parse(val); err != nil {
+				return fmt.Errorf("node %q field %q: invalid template: %w", n.ID, key, err)
+			}
+		}
+	}
+	return nil
+}
+
+// parseTemplateKeys returns the config keys in schema marked "x-template":true.
+func parseTemplateKeys(schema json.RawMessage) []string {
+	var s struct {
+		Properties map[string]struct {
+			XTemplate bool `json:"x-template"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil
+	}
+	var keys []string
+	for k, prop := range s.Properties {
+		if prop.XTemplate {
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // ---- response types ------------------------------------------------------
