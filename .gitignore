@@ -4,6 +4,7 @@
 # Go build artifacts
 backend/bin/
 *.test
+coverage.out
 
 # Frontend
 frontend/node_modules/

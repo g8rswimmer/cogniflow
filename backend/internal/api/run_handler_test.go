@@ -237,6 +237,47 @@ func TestRunHandler_ListRuns_WorkflowNotFound(t *testing.T) {
 	assertErrorCode(t, w.Body.Bytes(), "NOT_FOUND")
 }
 
+func TestRunHandler_ListRuns_SinceUntilFilter(t *testing.T) {
+	h, ms, _ := setupRunHandler(t)
+	ms.workflows["wf-1"] = store.Workflow{ID: "wf-1", Trigger: store.Trigger{Kind: "manual"}}
+	now := time.Now().UTC()
+	ms.runs["r1"] = store.Run{ID: "r1", WorkflowID: "wf-1", Status: store.RunStatusSucceeded, StartedAt: &now}
+
+	since := now.Add(-time.Hour).Format(time.RFC3339)
+	until := now.Add(time.Hour).Format(time.RFC3339)
+
+	r := httptest.NewRequest("GET", "/workflows/wf-1/runs?since="+since+"&until="+until, nil)
+	r.SetPathValue("id", "wf-1")
+	w := httptest.NewRecorder()
+	h.listRuns(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := resp["runs"]; !ok {
+		t.Error("expected runs key in response")
+	}
+}
+
+func TestRunHandler_ListRuns_InvalidSinceIgnored(t *testing.T) {
+	h, ms, _ := setupRunHandler(t)
+	ms.workflows["wf-1"] = store.Workflow{ID: "wf-1", Trigger: store.Trigger{Kind: "manual"}}
+
+	// An invalid since value should be silently ignored (not a 400).
+	r := httptest.NewRequest("GET", "/workflows/wf-1/runs?since=not-a-date", nil)
+	r.SetPathValue("id", "wf-1")
+	w := httptest.NewRecorder()
+	h.listRuns(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestRunHandler_TriggerRun_MalformedBody(t *testing.T) {
 	h, ms, _ := setupRunHandler(t)
 	ms.workflows["wf-1"] = store.Workflow{ID: "wf-1", Trigger: store.Trigger{Kind: "manual"}}

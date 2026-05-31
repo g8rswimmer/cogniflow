@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
@@ -96,10 +97,21 @@ func (h *runHandler) listRuns(w http.ResponseWriter, r *http.Request) {
 		Status:     store.RunStatus(r.URL.Query().Get("status")),
 		Limit:      50, // default cap
 	}
-	if l := r.URL.Query().Get("limit"); l != "" {
+	q := r.URL.Query()
+	if l := q.Get("limit"); l != "" {
 		var n int
 		if _, err := fmt.Sscanf(l, "%d", &n); err == nil && n > 0 {
 			filter.Limit = n
+		}
+	}
+	if s := q.Get("since"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			filter.Since = t
+		}
+	}
+	if s := q.Get("until"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			filter.Until = t
 		}
 	}
 
