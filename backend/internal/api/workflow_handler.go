@@ -183,36 +183,66 @@ func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
 		if err != nil {
 			continue // unknown type already caught by validate()
 		}
-		for _, key := range parseTemplateKeys(handler.Meta().InputSchema) {
-			val, ok := n.Config[key].(string)
-			if !ok || !strings.Contains(val, "{{") {
-				continue
-			}
-			if _, err := template.New("").Parse(val); err != nil {
-				return fmt.Errorf("node %q field %q: invalid template: %w", n.ID, key, err)
+		fields := parseTemplateFields(handler.Meta().InputSchema)
+		for _, f := range fields {
+			if f.isMap {
+				// e.g. headers: map[string]string where each value may be a template.
+				m, ok := n.Config[f.key].(map[string]any)
+				if !ok {
+					continue
+				}
+				for mapKey, v := range m {
+					val, ok := v.(string)
+					if !ok || !strings.Contains(val, "{{") {
+						continue
+					}
+					if _, err := template.New("").Parse(val); err != nil {
+						return fmt.Errorf("node %q field %q[%q]: invalid template: %w", n.ID, f.key, mapKey, err)
+					}
+				}
+			} else {
+				val, ok := n.Config[f.key].(string)
+				if !ok || !strings.Contains(val, "{{") {
+					continue
+				}
+				if _, err := template.New("").Parse(val); err != nil {
+					return fmt.Errorf("node %q field %q: invalid template: %w", n.ID, f.key, err)
+				}
 			}
 		}
 	}
 	return nil
 }
 
-// parseTemplateKeys returns the config keys in schema marked "x-template":true.
-func parseTemplateKeys(schema json.RawMessage) []string {
+// templateField describes a single config key whose value(s) may contain Go templates.
+type templateField struct {
+	key   string
+	isMap bool // true when the field value is map[string]any with template string values
+}
+
+// parseTemplateFields returns fields in schema marked "x-template":true, including
+// fields whose additionalProperties carry the marker (e.g. the headers map).
+func parseTemplateFields(schema json.RawMessage) []templateField {
 	var s struct {
 		Properties map[string]struct {
-			XTemplate bool `json:"x-template"`
+			XTemplate            bool `json:"x-template"`
+			AdditionalProperties *struct {
+				XTemplate bool `json:"x-template"`
+			} `json:"additionalProperties"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(schema, &s); err != nil {
 		return nil
 	}
-	var keys []string
+	var fields []templateField
 	for k, prop := range s.Properties {
 		if prop.XTemplate {
-			keys = append(keys, k)
+			fields = append(fields, templateField{key: k, isMap: false})
+		} else if prop.AdditionalProperties != nil && prop.AdditionalProperties.XTemplate {
+			fields = append(fields, templateField{key: k, isMap: true})
 		}
 	}
-	return keys
+	return fields
 }
 
 // ---- response types ------------------------------------------------------

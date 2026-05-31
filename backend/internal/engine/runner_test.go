@@ -270,3 +270,21 @@ func TestRetryPolicy(t *testing.T) {
 		t.Errorf("expected 3 calls, got %d", calls)
 	}
 }
+
+func TestRunDAG_NodePanic_ReturnsError(t *testing.T) {
+	// A NodeHandler that panics must not hang the supervisor loop.
+	registry := newTestRegistry(&funcHandler{
+		meta: newMeta("panicky"),
+		execFn: func(_ context.Context, _ node.NodeInput) (node.NodeOutput, error) {
+			panic("something went very wrong")
+		},
+	})
+
+	dag, _ := Build([]store.WorkflowNode{makeNode("n1", "panicky")}, nil)
+
+	bus := NewEventBus()
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err == nil {
+		t.Fatal("expected error from panicking node")
+	}
+}

@@ -69,12 +69,12 @@ func (b *EventBus) Subscribe(runID string) (<-chan NodeEvent, func()) {
 
 // Publish sends an event to all subscribers for the event's RunID.
 // Slow subscribers are skipped (non-blocking send).
+// The read lock is held for the entire send loop so that a concurrent cleanup()
+// cannot close a channel while we still hold a reference to it.
 func (b *EventBus) Publish(event NodeEvent) {
 	b.mu.RLock()
-	subs := b.subscribers[event.RunID]
-	b.mu.RUnlock()
-
-	for _, ch := range subs {
+	defer b.mu.RUnlock()
+	for _, ch := range b.subscribers[event.RunID] {
 		select {
 		case ch <- event:
 		default:

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -34,8 +35,10 @@ func (h *runHandler) triggerRun(w http.ResponseWriter, r *http.Request) {
 		InitialData map[string]any `json:"initial_data"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		// Allow empty body (no initial data).
-		body.InitialData = map[string]any{}
+		if !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body: "+err.Error())
+			return
+		}
 	}
 	if body.InitialData == nil {
 		body.InitialData = map[string]any{}
@@ -78,6 +81,15 @@ func (h *runHandler) getRun(w http.ResponseWriter, r *http.Request) {
 // listRuns handles GET /workflows/{id}/runs.
 func (h *runHandler) listRuns(w http.ResponseWriter, r *http.Request) {
 	workflowID := r.PathValue("id")
+
+	if _, err := h.store.GetWorkflow(r.Context(), workflowID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "workflow not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
 
 	filter := store.RunFilter{
 		WorkflowID: workflowID,

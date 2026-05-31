@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -100,21 +99,11 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 }
 
 // flattenOutput converts map[string]map[string]any to map[string]any for JSON storage.
+// Direct assignment preserves original Go types (e.g. int stays int, not float64).
 func flattenOutput(m map[string]map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		// Store as raw JSON to preserve nested structure.
-		b, err := json.Marshal(v)
-		if err != nil {
-			out[k] = v
-			continue
-		}
-		var decoded any
-		if err := json.Unmarshal(b, &decoded); err != nil {
-			out[k] = v
-			continue
-		}
-		out[k] = decoded
+		out[k] = v
 	}
 	return out
 }

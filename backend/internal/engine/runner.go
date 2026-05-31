@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
@@ -107,6 +108,16 @@ func executeNode(
 	runID string,
 	resultCh chan<- nodeResult,
 ) {
+	// Recover from panics in NodeHandler.Execute so the supervisor loop is
+	// always unblocked and the run terminates with a failure instead of hanging.
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("panic: %v", r)
+			bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeFailed, Error: msg, Timestamp: time.Now().UTC()})
+			resultCh <- nodeResult{nodeID: nodeID, err: fmt.Errorf("node %s panicked: %v", nodeID, r)}
+		}
+	}()
+
 	bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeRunning, Timestamp: time.Now().UTC()})
 
 	n := dag.Nodes[nodeID]
@@ -147,10 +158,12 @@ func executeWithRetry(ctx context.Context, n store.WorkflowNode, input node.Node
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := time.Duration(backoffMs*attempt) * time.Millisecond
+			t := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				t.Stop()
 				return node.NodeOutput{}, ctx.Err()
-			case <-time.After(delay):
+			case <-t.C:
 			}
 		}
 		out, err := handler.Execute(ctx, input)
