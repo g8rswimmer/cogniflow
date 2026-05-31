@@ -14,6 +14,18 @@ The memory file `milestone-status.md` (in the project memory directory) tracks w
 
 ---
 
+## Definition of Done
+
+A milestone is not complete until all of the following pass from `backend/`:
+
+1. `go build ./...` — no compile errors
+2. `go test ./...` — all tests pass, coverage >80% on new packages
+3. `golangci-lint run ./...` — zero warnings (default linter set)
+
+Run these in order before marking a milestone done or committing final work.
+
+---
+
 ## Commands
 
 All Go commands must be run from `backend/` (the Go module root). All frontend commands run from `frontend/`.
@@ -27,6 +39,7 @@ go run ./cmd/server                    # run locally (requires DB_DSN env var)
 go test ./...                          # all tests
 go test ./internal/engine/...          # single package
 go test -run TestCycleDetect ./internal/engine/...  # single test
+golangci-lint run ./...                # lint (must be zero warnings before milestone complete)
 
 # Frontend (once scaffolded)
 cd frontend
