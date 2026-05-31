@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,7 +68,9 @@ func readEvent(t *testing.T, conn *websocket.Conn) engine.NodeEvent {
 	return evt
 }
 
-// expectClose reads one more message from conn and expects an error (close frame / EOF).
+// expectClose reads one more message from conn and expects a server-side close.
+// It fails the test if the read succeeds (server didn't close) or if the only
+// error is a deadline timeout (server stalled without closing).
 func expectClose(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
@@ -76,6 +79,10 @@ func expectClose(t *testing.T, conn *websocket.Conn) {
 	_, _, err := conn.ReadMessage()
 	if err == nil {
 		t.Error("expected connection to be closed by server, but read succeeded")
+		return
+	}
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		t.Errorf("timed out waiting for server to close the connection: %v", err)
 	}
 }
 

@@ -43,7 +43,7 @@ func NewEventBus() *EventBus {
 // Subscribe registers a channel that will receive events for runID.
 // The returned cleanup function unregisters and closes the channel.
 func (b *EventBus) Subscribe(runID string) (<-chan NodeEvent, func()) {
-	ch := make(chan NodeEvent, 64)
+	ch := make(chan NodeEvent, 256)
 
 	b.mu.Lock()
 	b.subscribers[runID] = append(b.subscribers[runID], ch)

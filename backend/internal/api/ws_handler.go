@@ -29,9 +29,9 @@ type wsHandler struct {
 // It upgrades to WebSocket and streams NodeEvent JSON frames until the run
 // reaches a terminal state (run.succeeded or run.failed) or the client closes.
 //
-// Subscribe is called before the upgrade so no events are missed during the
-// WebSocket handshake. If the run is already terminal when the client connects,
-// a synthetic terminal event is sent immediately from the DB record.
+// For already-terminal runs, a synthetic event is sent immediately from the
+// DB record with no subscription overhead. For live runs, Subscribe is called
+// before the WebSocket upgrade to avoid missing events during the handshake.
 func (h *wsHandler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("run_id")
 
@@ -47,7 +47,21 @@ func (h *wsHandler) streamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Subscribe before upgrading so no events are missed during the handshake.
+	// Fast path: run already finished — upgrade, send synthetic event, close.
+	// No subscription needed; terminal state is authoritative in the DB.
+	if isTerminalStatus(run.Status) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			slog.Error("ws: upgrade failed", "run_id", runID, "error", err)
+			return
+		}
+		defer conn.Close()
+		sendTerminalEvent(conn, run)
+		return
+	}
+
+	// Live run: subscribe BEFORE upgrading to avoid missing events published
+	// during the WebSocket handshake.
 	events, cleanup := h.bus.Subscribe(runID)
 	defer cleanup()
 
@@ -58,14 +72,10 @@ func (h *wsHandler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Run already finished; synthesize the terminal event from the DB record and close.
-	if isTerminalStatus(run.Status) {
-		sendTerminalEvent(conn, run)
-		return
-	}
-
 	// Read pump: gorilla/websocket requires continuous reads to process control
 	// frames (ping/pong/close). Closing clientGone signals a disconnect.
+	// r.Context() is not used here — the net/http context is cancelled by the
+	// server after hijack, so clientGone is the authoritative disconnect signal.
 	clientGone := make(chan struct{})
 	go func() {
 		defer close(clientGone)
@@ -90,8 +100,6 @@ func (h *wsHandler) streamEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-clientGone:
-			return
-		case <-r.Context().Done():
 			return
 		}
 	}
@@ -118,11 +126,15 @@ func sendTerminalEvent(conn *websocket.Conn, run store.Run) {
 			}
 		}
 	}
+	ts := time.Now().UTC()
+	if run.FinishedAt != nil {
+		ts = *run.FinishedAt
+	}
 	_ = writeWSEvent(conn, engine.NodeEvent{
 		RunID:     run.ID,
 		Type:      evtType,
 		Error:     errMsg,
-		Timestamp: time.Now().UTC(),
+		Timestamp: ts,
 	})
 }
 
