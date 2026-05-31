@@ -36,6 +36,8 @@ func (e *WorkflowEngine) Dispatch(ctx context.Context, req trigger.RunRequest) (
 	if err != nil {
 		return "", err
 	}
+	// Drain the events channel so its buffer never fills and blocks Publish for other subscribers.
+	go func() { for range handle.Events {} }()
 	return handle.RunID, nil
 }
 

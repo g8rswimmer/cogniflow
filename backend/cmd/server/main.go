@@ -61,7 +61,7 @@ func main() {
 		port = "8080"
 	}
 
-	router := api.NewRouter(db, vault, registry, wfEngine)
+	router := api.NewRouter(db, vault, registry, wfEngine, bus)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)
