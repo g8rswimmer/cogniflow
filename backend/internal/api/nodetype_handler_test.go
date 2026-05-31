@@ -43,7 +43,9 @@ func TestNodeTypeHandler_List_Empty(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	types, ok := resp["node_types"].([]any)
 	if !ok {
@@ -69,7 +71,9 @@ func TestNodeTypeHandler_List_ReturnsSortedTypes(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	types := resp["node_types"].([]any)
 	if len(types) != 3 {
@@ -92,7 +96,9 @@ func TestNodeTypeHandler_List_HTTPRequestRegistered(t *testing.T) {
 	h.list(w, r)
 
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	types := resp["node_types"].([]any)
 	found := false
@@ -134,7 +140,9 @@ func TestNodeTypeHandler_List_SchemaFields(t *testing.T) {
 	h.list(w, r)
 
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	types := resp["node_types"].([]any)
 	nt := types[0].(map[string]any)

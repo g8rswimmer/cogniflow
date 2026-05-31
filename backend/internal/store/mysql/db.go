@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -25,14 +26,14 @@ func Open(dsn string) (*sqlx.DB, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 
-	if err := runMigrations(db, dsn); err != nil {
+	if err := runMigrations(db); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
 	return db, nil
 }
 
-func runMigrations(db *sqlx.DB, dsn string) error {
+func runMigrations(db *sqlx.DB) error {
 	src, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
 		return err
@@ -48,7 +49,7 @@ func runMigrations(db *sqlx.DB, dsn string) error {
 		return err
 	}
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return err
 	}
 	return nil

@@ -1,10 +1,14 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 )
+
+// ErrNodeNotFound is returned by Lookup when a type ID is not registered.
+var ErrNodeNotFound = errors.New("node: type not found")
 
 // NodeRegistry is the central catalog of all available node types.
 // It is safe for concurrent use.
@@ -37,7 +41,7 @@ func (r *NodeRegistry) Lookup(typeID string) (NodeHandler, error) {
 	defer r.mu.RUnlock()
 	h, ok := r.handlers[typeID]
 	if !ok {
-		return nil, fmt.Errorf("node type %q not found", typeID)
+		return nil, fmt.Errorf("node type %q: %w", typeID, ErrNodeNotFound)
 	}
 	return h, nil
 }

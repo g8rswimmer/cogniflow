@@ -20,20 +20,6 @@ func setupWorkflowHandler(t *testing.T) (*workflowHandler, *mockStore) {
 	return &workflowHandler{store: ms, registry: registry}, ms
 }
 
-func doRequest(t *testing.T, handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	var r *http.Request
-	if body != "" {
-		r = httptest.NewRequest(method, path, strings.NewReader(body))
-		r.Header.Set("Content-Type", "application/json")
-	} else {
-		r = httptest.NewRequest(method, path, nil)
-	}
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, r)
-	return w
-}
-
 // ---- List ----------------------------------------------------------------
 
 func TestWorkflowHandler_List_Empty(t *testing.T) {
@@ -46,7 +32,9 @@ func TestWorkflowHandler_List_Empty(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	workflows := resp["workflows"].([]any)
 	if len(workflows) != 0 {
 		t.Fatalf("expected empty list, got %v", workflows)
@@ -66,7 +54,9 @@ func TestWorkflowHandler_List_WithWorkflows(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	workflows := resp["workflows"].([]any)
 	if len(workflows) != 2 {
 		t.Fatalf("expected 2 workflows, got %d", len(workflows))
@@ -97,7 +87,9 @@ func TestWorkflowHandler_Create_Success(t *testing.T) {
 		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["name"] != "Test Flow" {
 		t.Fatalf("expected name='Test Flow', got %v", resp["name"])
 	}
@@ -171,7 +163,9 @@ func TestWorkflowHandler_Create_WebhookURLInResponse(t *testing.T) {
 		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	trigger := resp["trigger"].(map[string]any)
 	webhookURL, _ := trigger["webhook_url"].(string)
@@ -199,7 +193,9 @@ func TestWorkflowHandler_Get_Found(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["name"] != "My Flow" {
 		t.Fatalf("expected 'My Flow', got %v", resp["name"])
 	}
@@ -244,7 +240,9 @@ func TestWorkflowHandler_Get_MasksSensitiveFields(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	nodes := resp["nodes"].([]any)
 	config := nodes[0].(map[string]any)["config"].(map[string]any)
@@ -276,7 +274,9 @@ func TestWorkflowHandler_Update_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["name"] != "Updated" {
 		t.Fatalf("expected name='Updated', got %v", resp["name"])
 	}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/api"
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
@@ -60,7 +61,14 @@ func main() {
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)
-	if err := http.ListenAndServe(addr, router); err != nil {
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}

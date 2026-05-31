@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -23,10 +22,9 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		dbStatus = "error"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"status":  "ok",
-		"db":      dbStatus,
-		"uptime":  int(time.Since(h.startTime).Seconds()),
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"db":     dbStatus,
+		"uptime": int(time.Since(h.startTime).Seconds()),
 	})
 }

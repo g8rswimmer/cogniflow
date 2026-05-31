@@ -187,17 +187,7 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 	}
 
 	// Replace nodes and edges; CASCADE DELETE handles node_configs.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id=?`, w.ID); err != nil {
-		return store.Workflow{}, fmt.Errorf("workflow store: delete nodes: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_edges WHERE workflow_id=?`, w.ID); err != nil {
-		return store.Workflow{}, fmt.Errorf("workflow store: delete edges: %w", err)
-	}
-
-	if err := insertNodes(ctx, tx, w.ID, w.Nodes); err != nil {
-		return store.Workflow{}, err
-	}
-	if err := insertEdges(ctx, tx, w.ID, w.Edges); err != nil {
+	if err := replaceNodesAndEdges(ctx, tx, w.ID, w.Nodes, w.Edges); err != nil {
 		return store.Workflow{}, err
 	}
 
@@ -278,6 +268,19 @@ type dbWorkflow struct {
 	TimeoutSeconds int       `db:"timeout_seconds"`
 	CreatedAt      time.Time `db:"created_at"`
 	UpdatedAt      time.Time `db:"updated_at"`
+}
+
+func replaceNodesAndEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode, edges []store.WorkflowEdge) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id=?`, workflowID); err != nil {
+		return fmt.Errorf("workflow store: delete nodes: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_edges WHERE workflow_id=?`, workflowID); err != nil {
+		return fmt.Errorf("workflow store: delete edges: %w", err)
+	}
+	if err := insertNodes(ctx, tx, workflowID, nodes); err != nil {
+		return err
+	}
+	return insertEdges(ctx, tx, workflowID, edges)
 }
 
 func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode) error {
