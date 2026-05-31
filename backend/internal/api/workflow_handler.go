@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
@@ -45,6 +47,11 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := h.validateTemplates(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -100,6 +107,11 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := h.validateTemplates(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -160,6 +172,77 @@ func (h *workflowHandler) validate(wf *store.Workflow) error {
 		}
 	}
 	return nil
+}
+
+// validateTemplates parses any x-template:true config field value that contains
+// "{{" to catch syntax errors before the workflow is saved. This mirrors the
+// CEL validation pattern used by the Conditional node.
+func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
+	for _, n := range wf.Nodes {
+		handler, err := h.registry.Lookup(n.TypeID)
+		if err != nil {
+			continue // unknown type already caught by validate()
+		}
+		fields := parseTemplateFields(handler.Meta().InputSchema)
+		for _, f := range fields {
+			if f.isMap {
+				// e.g. headers: map[string]string where each value may be a template.
+				m, ok := n.Config[f.key].(map[string]any)
+				if !ok {
+					continue
+				}
+				for mapKey, v := range m {
+					val, ok := v.(string)
+					if !ok || !strings.Contains(val, "{{") {
+						continue
+					}
+					if _, err := template.New("").Parse(val); err != nil {
+						return fmt.Errorf("node %q field %q[%q]: invalid template: %w", n.ID, f.key, mapKey, err)
+					}
+				}
+			} else {
+				val, ok := n.Config[f.key].(string)
+				if !ok || !strings.Contains(val, "{{") {
+					continue
+				}
+				if _, err := template.New("").Parse(val); err != nil {
+					return fmt.Errorf("node %q field %q: invalid template: %w", n.ID, f.key, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// templateField describes a single config key whose value(s) may contain Go templates.
+type templateField struct {
+	key   string
+	isMap bool // true when the field value is map[string]any with template string values
+}
+
+// parseTemplateFields returns fields in schema marked "x-template":true, including
+// fields whose additionalProperties carry the marker (e.g. the headers map).
+func parseTemplateFields(schema json.RawMessage) []templateField {
+	var s struct {
+		Properties map[string]struct {
+			XTemplate            bool `json:"x-template"`
+			AdditionalProperties *struct {
+				XTemplate bool `json:"x-template"`
+			} `json:"additionalProperties"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil
+	}
+	var fields []templateField
+	for k, prop := range s.Properties {
+		if prop.XTemplate {
+			fields = append(fields, templateField{key: k, isMap: false})
+		} else if prop.AdditionalProperties != nil && prop.AdditionalProperties.XTemplate {
+			fields = append(fields, templateField{key: k, isMap: true})
+		}
+	}
+	return fields
 }
 
 // ---- response types ------------------------------------------------------

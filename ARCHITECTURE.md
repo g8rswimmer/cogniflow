@@ -15,9 +15,10 @@
 8. [MySQL Schema](#8-mysql-schema)
 9. [REST API Contract](#9-rest-api-contract)
 10. [CEL Expression Evaluation](#10-cel-expression-evaluation)
-11. [Security](#11-security)
-12. [Docker Compose Services](#12-docker-compose-services)
-13. [Implementation Sequencing](#13-implementation-sequencing)
+11. [Template Variable Syntax](#11-template-variable-syntax)
+12. [Security](#12-security)
+13. [Docker Compose Services](#13-docker-compose-services)
+14. [Implementation Sequencing](#14-implementation-sequencing)
 
 ---
 
@@ -198,8 +199,9 @@ cogniflow/                              # Repository root
 │   │   │   │   ├── NodePalette.tsx     # Left sidebar; grouped + searchable node list
 │   │   │   │   └── PaletteNodeCard.tsx # Draggable node type card
 │   │   │   ├── sidebar/
-│   │   │   │   ├── ConfigSidebar.tsx   # Right sidebar; shown when a node is selected
-│   │   │   │   └── SchemaForm.tsx      # @rjsf/core form driven by node input_schema
+│   │   │   │   ├── ConfigSidebar.tsx          # Right sidebar; shown when a node is selected
+│   │   │   │   ├── SchemaForm.tsx             # @rjsf/core form driven by node input_schema
+│   │   │   │   └── TemplateVariablePicker.tsx # Variable browser for x-template:true fields
 │   │   │   ├── run/
 │   │   │   │   ├── RunStatusPanel.tsx  # Bottom drawer; live per-node status
 │   │   │   │   ├── RunSummary.tsx      # run_id, status, elapsed time
@@ -852,7 +854,8 @@ App
 │   ├── ConfigSidebar        (right sidebar — shown when a node is selected)
 │   │   ├── NodeTypeHeader   (icon, display_name, description)
 │   │   └── SchemaForm       (@rjsf/core renders the node's input_schema)
-│   │       └── SensitiveField  (password input for x-sensitive:true fields)
+│   │       ├── SensitiveField          (password input for x-sensitive:true fields)
+│   │       └── TemplateVariablePicker  (variable browser for x-template:true fields)
 │   │
 │   ├── TriggerPanel         (modal/sheet — workflow-level trigger config)
 │   │   ├── TriggerTypeSelect (manual / webhook / cron)
@@ -885,7 +888,11 @@ App
 />
 ```
 
-`buildUiSchema()` walks the schema and sets `ui:widget: "password"` for any property with `x-sensitive: true`. No other custom widget code is needed for v1.
+`buildUiSchema()` walks the schema and:
+- Sets `ui:widget: "password"` for any property with `x-sensitive: true`
+- Marks any property with `x-template: true` so `SchemaForm` renders a `TemplateVariablePicker` below that field
+
+Template fields still accept plain text — the picker is optional and can be ignored. No other custom widget code is needed for v1.
 
 ### State Management — Zustand
 
@@ -1126,8 +1133,8 @@ The `node_configs` table stores sensitive values in `encrypted_value` (MEDIUMBLO
         "properties": {
           "api_key":     { "type": "string", "title": "API Key", "x-sensitive": true },
           "model":       { "type": "string", "title": "Model", "default": "gpt-4o" },
-          "system_msg":  { "type": "string", "title": "System Message" },
-          "prompt":      { "type": "string", "title": "Prompt (supports {{var}} templates)" },
+          "system_msg":  { "type": "string", "title": "System Message", "x-template": true },
+          "prompt":      { "type": "string", "title": "Prompt", "x-template": true },
           "max_tokens":  { "type": "integer", "title": "Max Tokens", "default": 1024 },
           "temperature": { "type": "number", "title": "Temperature", "default": 0.7 }
         }
@@ -1317,7 +1324,131 @@ ctx["classify"]["category"] in ["billing", "refund"]
 
 ---
 
-## 11. Security
+## 11. Template Variable Syntax
+
+### Overview
+
+Node config fields can reference the outputs of upstream nodes using Go `text/template` syntax. This enables workflows like "use the LLM completion as the body of the next HTTP request" without writing code.
+
+The mechanism is enabled field-by-field via a JSON Schema extension, consistent with the existing `"x-sensitive": true` convention.
+
+### JSON Schema Extension: `x-template`
+
+Any `input_schema` property marked `"x-template": true` accepts template expressions. Fields without this marker are stored and passed as literal strings.
+
+Example — HTTP Request node `url` field:
+
+```json
+"url": {
+  "type": "string",
+  "title": "URL",
+  "x-template": true
+}
+```
+
+Example — LLM Call node `prompt` field:
+
+```json
+"prompt": {
+  "type": "string",
+  "title": "Prompt",
+  "x-template": true
+}
+```
+
+Fields may carry both `x-sensitive: true` and `x-template: true` simultaneously (e.g., a URL that contains an auth token derived from an upstream node).
+
+### Template Syntax
+
+Go `text/template` is used. The template data is `NodeInput.UpstreamData` — a `map[string]any` keyed by node ID, where each value is that node's output map.
+
+| Expression | Meaning |
+|-----------|---------|
+| `{{.n1.status_code}}` | `status_code` field from the output of node with ID `n1` |
+| `{{.n1.body}}` | `body` string from node `n1`'s output |
+| `{{._initial.customer_id}}` | `customer_id` from the run's initial data |
+| `{{index .n1 "some-key"}}` | key with a hyphen or special character |
+
+The template data map shape at runtime:
+
+```go
+// template data = NodeInput.UpstreamData
+map[string]any{
+    "_initial": map[string]any{"customer_id": 42},  // run initial data
+    "n1":       map[string]any{"status_code": 200, "body": "..."},
+    "n2":       map[string]any{"completion": "Hello!"},
+}
+```
+
+Templates are evaluated per field using Go's `text/template` with `Option("missingkey=zero")` so missing keys produce an empty string rather than an error.
+
+### Optionality
+
+Template syntax is **always optional**. A field marked `"x-template": true` behaves exactly like a plain string field unless the stored value contains `{{`. This means:
+
+- `https://api.example.com/items` → stored and used as-is, no template processing
+- `https://api.example.com/{{.n1.path}}` → `{{.n1.path}}` is resolved at execution time
+
+The `TemplateVariablePicker` in the UI is a convenience helper — users can dismiss it and type literal values freely. Existing workflows with no template references are unaffected by this feature.
+
+### Save-Time Validation
+
+When a workflow is saved (`POST /workflows` or `PUT /workflows/:id`), the API validates every `x-template: true` field value that contains `{{`:
+
+```go
+// internal/api/workflow_handler.go — validateTemplates()
+
+func validateTemplates(nodes []store.WorkflowNode, registry *node.NodeRegistry) error {
+    for _, n := range nodes {
+        h, err := registry.Lookup(n.TypeID)
+        if err != nil {
+            continue // unknown type caught by node-type validation
+        }
+        templateKeys := parseTemplateKeys(h.Meta().InputSchema)
+        for _, key := range templateKeys {
+            val, ok := n.Config[key].(string)
+            if !ok || !strings.Contains(val, "{{") {
+                continue
+            }
+            if _, err := template.New("").Parse(val); err != nil {
+                return fmt.Errorf("node %q field %q: invalid template: %w", n.ID, key, err)
+            }
+        }
+    }
+    return nil
+}
+```
+
+Parse errors return `VALIDATION_FAILED` — identical to the CEL validation pattern for Conditional nodes (§10). Valid templates are stored as-is; expansion happens at execution time inside `Execute()`.
+
+### Which Node Types Support Templates
+
+| Node Type | Template-capable fields |
+|-----------|------------------------|
+| `http.request` | `url`, `body`, header values |
+| `llm.openai` / `llm.anthropic` | `prompt`, `system_msg` |
+| `embedding` | `input` |
+| `data_transform` | `template` expression |
+| `db_query` / `db_write` | parameterised query values |
+
+### Frontend Integration
+
+`ConfigSidebar` checks whether the focused field has `"x-template": true` in the node's `input_schema`. If so, it renders a `TemplateVariablePicker` component below the input:
+
+```
+TemplateVariablePicker
+  └── walks upstream edges in useWorkflowStore to find predecessor node IDs
+  └── for each predecessor node:
+        looks up its NodeMeta.output_schema from useNodeTypeStore
+        renders a tree of clickable {{.nodeID.field}} snippets
+  └── clicking a snippet: inserts it at the cursor position in the focused input field
+```
+
+This gives users a discoverable, click-to-insert experience without memorising upstream node IDs or output field names.
+
+---
+
+## 12. Security
 
 ### AES-256-GCM Encryption of Sensitive Config Values
 
@@ -1351,7 +1482,7 @@ The `ConfigVault` wraps the Store: it decrypts `encrypted_value` blobs on `GetWo
 
 ---
 
-## 12. Docker Compose Services
+## 13. Docker Compose Services
 
 ```yaml
 version: "3.9"
@@ -1494,7 +1625,7 @@ The backend binary applies any pending `golang-migrate` migrations at startup be
 
 ---
 
-## 13. Implementation Sequencing
+## 14. Implementation Sequencing
 
 Recommended build order respecting inter-package dependencies:
 

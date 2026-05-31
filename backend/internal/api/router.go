@@ -7,10 +7,11 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
+	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
 // NewRouter wires all HTTP routes and returns the configured mux.
-func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry) *http.ServeMux {
+func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /health", newHealthHandler(db))
@@ -24,6 +25,11 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry) *http.S
 
 	nth := &nodeTypeHandler{registry: registry}
 	mux.HandleFunc("GET /node-types", nth.list)
+
+	rh := &runHandler{store: st, dispatcher: dispatcher}
+	mux.HandleFunc("POST /workflows/{id}/runs", rh.triggerRun)
+	mux.HandleFunc("GET /workflows/{id}/runs", rh.listRuns)
+	mux.HandleFunc("GET /runs/{run_id}", rh.getRun)
 
 	return mux
 }
