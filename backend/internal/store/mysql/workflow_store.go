@@ -57,11 +57,19 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	_, err = tx.ExecContext(ctx,
+	_, err = tx.NamedExecContext(ctx,
 		`INSERT INTO workflows (id, name, description, trigger_kind, trigger_config, timeout_seconds, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.Name, w.Description, w.Trigger.Kind, string(triggerCfgBytes), w.TimeoutSeconds,
-		w.CreatedAt, w.UpdatedAt,
+		 VALUES (:id, :name, :description, :trigger_kind, :trigger_config, :timeout_seconds, :created_at, :updated_at)`,
+		workflowWriteRow{
+			ID:             w.ID,
+			Name:           w.Name,
+			Description:    w.Description,
+			TriggerKind:    w.Trigger.Kind,
+			TriggerConfig:  string(triggerCfgBytes),
+			TimeoutSeconds: w.TimeoutSeconds,
+			CreatedAt:      w.CreatedAt,
+			UpdatedAt:      w.UpdatedAt,
+		},
 	)
 	if err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow store: insert workflow: %w", err)
@@ -174,10 +182,19 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	res, err := tx.ExecContext(ctx,
-		`UPDATE workflows SET name=?, description=?, trigger_kind=?, trigger_config=?, timeout_seconds=?
-		 WHERE id=?`,
-		w.Name, w.Description, w.Trigger.Kind, string(triggerCfgBytes), w.TimeoutSeconds, w.ID,
+	res, err := tx.NamedExecContext(ctx,
+		`UPDATE workflows
+		 SET name=:name, description=:description, trigger_kind=:trigger_kind,
+		     trigger_config=:trigger_config, timeout_seconds=:timeout_seconds
+		 WHERE id=:id`,
+		workflowWriteRow{
+			ID:             w.ID,
+			Name:           w.Name,
+			Description:    w.Description,
+			TriggerKind:    w.Trigger.Kind,
+			TriggerConfig:  string(triggerCfgBytes),
+			TimeoutSeconds: w.TimeoutSeconds,
+		},
 	)
 	if err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow store: update workflow: %w", err)
@@ -259,15 +276,59 @@ func (s *WorkflowStore) ListTriggerConfigs(_ context.Context) ([]store.WorkflowT
 
 // ---- internal helpers ----------------------------------------------------
 
+// dbWorkflow is the read-side row struct for SELECT queries against the workflows table.
 type dbWorkflow struct {
 	ID             string    `db:"id"`
 	Name           string    `db:"name"`
 	Description    string    `db:"description"`
 	TriggerKind    string    `db:"trigger_kind"`
-	TriggerConfig  *string   `db:"trigger_config"`
+	TriggerConfig  *string   `db:"trigger_config"` // nullable on read
 	TimeoutSeconds int       `db:"timeout_seconds"`
 	CreatedAt      time.Time `db:"created_at"`
 	UpdatedAt      time.Time `db:"updated_at"`
+}
+
+// workflowWriteRow is the write-side row struct for INSERT/UPDATE named queries.
+type workflowWriteRow struct {
+	ID             string    `db:"id"`
+	Name           string    `db:"name"`
+	Description    string    `db:"description"`
+	TriggerKind    string    `db:"trigger_kind"`
+	TriggerConfig  string    `db:"trigger_config"`
+	TimeoutSeconds int       `db:"timeout_seconds"`
+	CreatedAt      time.Time `db:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at"`
+}
+
+// nodeWriteRow is the write-side row struct for INSERT into workflow_nodes.
+type nodeWriteRow struct {
+	ID             string  `db:"id"`
+	WorkflowID     string  `db:"workflow_id"`
+	TypeID         string  `db:"type_id"`
+	Label          string  `db:"label"`
+	PositionX      float64 `db:"position_x"`
+	PositionY      float64 `db:"position_y"`
+	RetryMax       int     `db:"retry_max"`
+	RetryBackoffMs int     `db:"retry_backoff_ms"`
+}
+
+// edgeWriteRow is the write-side row struct for INSERT into workflow_edges.
+type edgeWriteRow struct {
+	ID          string  `db:"id"`
+	WorkflowID  string  `db:"workflow_id"`
+	SourceID    string  `db:"source_id"`
+	TargetID    string  `db:"target_id"`
+	BranchLabel *string `db:"branch_label"`
+}
+
+// configWriteRow is the write-side row struct for INSERT into node_configs.
+// PlainValue and EncValue are mutually exclusive: one is nil depending on IsSensitive.
+type configWriteRow struct {
+	NodeID      string  `db:"node_id"`
+	Key         string  `db:"config_key"`
+	PlainValue  *string `db:"plain_value"`
+	EncValue    []byte  `db:"encrypted_value"`
+	IsSensitive bool    `db:"is_sensitive"`
 }
 
 func replaceNodesAndEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode, edges []store.WorkflowEdge) error {
@@ -290,11 +351,19 @@ func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []st
 			retryMax = n.RetryPolicy.MaxRetries
 			retryMs = n.RetryPolicy.BackoffMs
 		}
-		_, err := tx.ExecContext(ctx,
+		_, err := tx.NamedExecContext(ctx,
 			`INSERT INTO workflow_nodes (id, workflow_id, type_id, label, position_x, position_y, retry_max, retry_backoff_ms)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			n.ID, workflowID, n.TypeID, n.Label,
-			n.Position.X, n.Position.Y, retryMax, retryMs,
+			 VALUES (:id, :workflow_id, :type_id, :label, :position_x, :position_y, :retry_max, :retry_backoff_ms)`,
+			nodeWriteRow{
+				ID:             n.ID,
+				WorkflowID:     workflowID,
+				TypeID:         n.TypeID,
+				Label:          n.Label,
+				PositionX:      n.Position.X,
+				PositionY:      n.Position.Y,
+				RetryMax:       retryMax,
+				RetryBackoffMs: retryMs,
+			},
 		)
 		if err != nil {
 			return fmt.Errorf("workflow store: insert node %q: %w", n.ID, err)
@@ -308,32 +377,29 @@ func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []st
 
 func insertConfigs(ctx context.Context, tx *sqlx.Tx, n store.WorkflowNode) error {
 	for key, val := range n.Config {
+		row := configWriteRow{NodeID: n.ID, Key: key}
 		if n.SensitiveKeys[key] {
 			ciphertext, ok := val.([]byte)
 			if !ok {
 				return fmt.Errorf("workflow store: sensitive value for %q is not []byte", key)
 			}
-			_, err := tx.ExecContext(ctx,
-				`INSERT INTO node_configs (node_id, config_key, plain_value, encrypted_value, is_sensitive)
-				 VALUES (?, ?, NULL, ?, 1)`,
-				n.ID, key, ciphertext,
-			)
-			if err != nil {
-				return fmt.Errorf("workflow store: insert encrypted config %q: %w", key, err)
-			}
+			row.EncValue = ciphertext
+			row.IsSensitive = true
 		} else {
 			encoded, err := json.Marshal(val)
 			if err != nil {
 				return fmt.Errorf("workflow store: marshal config %q: %w", key, err)
 			}
-			_, err = tx.ExecContext(ctx,
-				`INSERT INTO node_configs (node_id, config_key, plain_value, encrypted_value, is_sensitive)
-				 VALUES (?, ?, ?, NULL, 0)`,
-				n.ID, key, string(encoded),
-			)
-			if err != nil {
-				return fmt.Errorf("workflow store: insert plain config %q: %w", key, err)
-			}
+			s := string(encoded)
+			row.PlainValue = &s
+		}
+		_, err := tx.NamedExecContext(ctx,
+			`INSERT INTO node_configs (node_id, config_key, plain_value, encrypted_value, is_sensitive)
+			 VALUES (:node_id, :config_key, :plain_value, :encrypted_value, :is_sensitive)`,
+			row,
+		)
+		if err != nil {
+			return fmt.Errorf("workflow store: insert config %q: %w", key, err)
 		}
 	}
 	return nil
@@ -341,10 +407,16 @@ func insertConfigs(ctx context.Context, tx *sqlx.Tx, n store.WorkflowNode) error
 
 func insertEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, edges []store.WorkflowEdge) error {
 	for _, e := range edges {
-		_, err := tx.ExecContext(ctx,
+		_, err := tx.NamedExecContext(ctx,
 			`INSERT INTO workflow_edges (id, workflow_id, source_id, target_id, branch_label)
-			 VALUES (?, ?, ?, ?, ?)`,
-			e.ID, workflowID, e.SourceID, e.TargetID, e.BranchLabel,
+			 VALUES (:id, :workflow_id, :source_id, :target_id, :branch_label)`,
+			edgeWriteRow{
+				ID:          e.ID,
+				WorkflowID:  workflowID,
+				SourceID:    e.SourceID,
+				TargetID:    e.TargetID,
+				BranchLabel: e.BranchLabel,
+			},
 		)
 		if err != nil {
 			return fmt.Errorf("workflow store: insert edge %q: %w", e.ID, err)
