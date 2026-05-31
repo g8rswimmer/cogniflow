@@ -116,12 +116,14 @@ All nodes (built-in and extended) must conform to the following interface:
 | ND-04 | Every node has a configuration form rendered in the UI sidebar |
 | ND-05 | Every node exposes an `Execute(ctx, input) → (output, error)` operation that the engine calls |
 | ND-06 | Nodes can emit structured errors with a human-readable message |
+| ND-07 | Node config fields marked `"x-template": true` in their `input_schema` optionally accept Go template syntax (`{{.nodeID.field}}`) to reference upstream node outputs at runtime; `{{._initial.key}}` references the run's initial data. Template syntax is **opt-in** — a plain literal value is always accepted; template evaluation is only triggered when the value contains `{{`. |
+| ND-08 | Template expressions in config fields are validated at workflow save time (parse error → `VALIDATION_FAILED`) so broken templates are caught before execution. A field with no `{{` is stored and used as a literal string with no validation overhead. |
 
 #### 5.2.2 Built-In AI Nodes
 
 | ID | Node Type | Description |
 |----|-----------|-------------|
-| AI-01 | **LLM Call** | Send a prompt (with optional system message and message history) to an LLM provider (OpenAI, Anthropic, etc.). Returns the completion text and token usage. Provider and model are configurable. |
+| AI-01 | **LLM Call** | Send a prompt (with optional system message) to an LLM provider (OpenAI, Anthropic, etc.). Returns the completion text and token usage. Provider and model are configurable. The `prompt` and `system_msg` fields support template variable syntax so upstream node outputs (e.g. a previous HTTP response body or user-supplied initial data) can be injected into the prompt before the model is called. |
 | AI-02 | **Embedding** | Generate a vector embedding for one or more text inputs using a configurable provider and model. Returns the embedding vector(s). |
 | AI-03 | **RAG Retrieve** | Given a query, generate an embedding and retrieve the top-K most relevant chunks using MySQL 9.0+ native vector search (`VEC_DISTANCE_COSINE` / `VEC_DISTANCE_L2`). Returns matching chunks with scores. |
 | AI-04 | **RAG Ingest** | Chunk and embed a document or set of documents and upsert the resulting vectors into a MySQL `VECTOR` column. No separate vector store infrastructure is required. |
@@ -166,7 +168,7 @@ All nodes (built-in and extended) must conform to the following interface:
 |----|-------------|
 | EE-01 | The engine executes a workflow as a strict DAG (directed acyclic graph) — cycles are not permitted. The system validates acyclicity when a workflow is saved and rejects any graph containing a cycle. |
 | EE-02 | Nodes with no unresolved upstream dependencies execute concurrently (parallel branch support) |
-| EE-03 | Data flows between nodes: each node receives the merged output context of its immediate upstream nodes |
+| EE-03 | Data flows between nodes: each node receives the merged output context of its immediate upstream nodes; this context is also available for template expansion in config fields (see ND-07) |
 | EE-04 | Each execution is assigned a unique run ID |
 | EE-05 | The engine records per-node execution status: pending, running, succeeded, failed |
 | EE-06 | On node failure, the engine stops execution of dependent downstream nodes and marks the run as failed |
@@ -191,6 +193,7 @@ All nodes (built-in and extended) must conform to the following interface:
 | UI-01 | A visual workflow canvas where nodes can be dragged, dropped, and connected with edges |
 | UI-02 | A node palette listing all available node types (built-in + extensions), searchable |
 | UI-03 | Clicking a node opens a configuration sidebar with a generated form for that node's config schema |
+| UI-11 | For config fields marked `"x-template": true`, the sidebar displays a variable picker listing the outputs of all upstream nodes (derived from their `output_schema`); clicking a variable inserts the `{{.nodeID.field}}` snippet into the field |
 | UI-04 | Users can name/rename a workflow |
 | UI-05 | A "Save" button persists the current workflow definition |
 | UI-06 | A "Run" button manually triggers a workflow (with optional initial data input) |

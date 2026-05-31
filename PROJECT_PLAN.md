@@ -80,6 +80,7 @@ None — this is the starting point.
 - `backend/internal/api/workflow_handler.go` — `GET/POST/PUT/DELETE /workflows`
 - `backend/internal/api/nodetype_handler.go` — `GET /node-types`
 - First built-in node registered: **HTTP Request** (`http.request`) — `Meta()` only, `Execute()` stubbed to return an empty output (full implementation in M3)
+- `"x-template": true` added to `url`, `body`, and header value properties in the `http.request` input schema (see ARCHITECTURE.md §11)
 
 ### Testable Criteria
 
@@ -136,6 +137,7 @@ M1
 - `backend/internal/store/mysql/run_store.go` — `CreateRun`, `UpdateRunStatus`, `GetRun`, `ListRuns`
 - `backend/internal/api/run_handler.go` — `POST /workflows/:id/runs` (manual trigger), `GET /runs/:run_id`, `GET /workflows/:id/runs`
 - `backend/internal/trigger/types.go` — `RunRequest`, `Dispatcher` interface
+- Template validation at workflow save (`validateTemplates()` in `workflow_handler.go`): for every node, any `x-template: true` config field containing `{{` is parsed with `text/template`; parse errors return `VALIDATION_FAILED`
 
 ### Testable Criteria
 
@@ -148,6 +150,17 @@ RUN=$(curl -s -X POST http://localhost:8080/workflows/$WF_ID/runs \
 # Poll until done (or sleep 3s)
 curl http://localhost:8080/runs/$RUN | jq '{status, final_output}'
 # → {"status":"succeeded","final_output":{"n2":{"status_code":200,"body":"..."}}}
+
+# Verify template substitution: n1 returns {"path":"items"}; n2 URL is "https://httpbin.org/anything/{{.n1.path}}"
+curl http://localhost:8080/runs/$RUN2 | jq '.final_output.n2.status_code'
+# → 200  (URL correctly resolved to /anything/items)
+
+# Verify invalid templates are rejected at save time
+curl -s -X POST http://localhost:8080/workflows \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Bad","nodes":[{"id":"n1","type_id":"http.request","position":{"x":0,"y":0},
+      "config":{"url":"{{.broken","method":"GET"}}],"edges":[]}' | jq '.error.code'
+# → "VALIDATION_FAILED"
 
 # Verify a parallel-branch workflow (fan-out from n1 to n2 and n3, merge at n4)
 # Both n2 and n3 should execute concurrently; n4 waits for both
@@ -256,9 +269,9 @@ M1, M2, M3
 - `backend/internal/aiprovider/provider.go` — `LLMClient` and `EmbeddingClient` interfaces
 - `backend/internal/aiprovider/openai/client.go` — OpenAI chat completions + embeddings
 - `backend/internal/aiprovider/anthropic/client.go` — Anthropic Messages API
-- `backend/internal/node/builtin/llm/handler.go` — LLM Call node: prompt template expansion using upstream data, calls `LLMClient`, returns `completion`, `prompt_tokens`, `completion_tokens`
-- `backend/internal/node/builtin/embedding/handler.go` — Embedding node: calls `EmbeddingClient`, returns `embedding` (float32 slice)
-- Both nodes registered in the node registry with full `input_schema` / `output_schema`
+- `backend/internal/node/builtin/llm/handler.go` — LLM Call node: expands `prompt` and `system_msg` via `renderTemplate()` before calling `LLMClient`; returns `completion`, `prompt_tokens`, `completion_tokens`
+- `backend/internal/node/builtin/embedding/handler.go` — Embedding node: `input` field is `"x-template": true`; calls `EmbeddingClient`, returns `embedding` (float32 slice)
+- Both nodes registered with full `input_schema` / `output_schema`; `prompt`, `system_msg`, and `input` fields carry `"x-template": true`
 - CEL expression validation wired to workflow save (needed to unblock M8 Conditional node, but the validation helper can be added here)
 
 ### Testable Criteria
@@ -285,6 +298,20 @@ RUN=$(curl -sX POST http://localhost:8080/workflows/$WF_ID/runs -d '{}' | jq -r 
 sleep 5
 curl http://localhost:8080/runs/$RUN | jq '.final_output.n1.completion'
 # → "Hello! How can I assist you today?"
+
+# Prompt template: n1 (HTTP Request) feeds n2 (LLM Call)
+# n2 prompt = "Summarise this HTTP response: {{.n1.body}}"
+# n1 hits httpbin.org/json and returns a JSON body
+RUN3=$(curl -sX POST http://localhost:8080/workflows/$TEMPLATE_WF_ID/runs -d '{}' | jq -r '.run_id')
+sleep 8
+curl http://localhost:8080/runs/$RUN3 | jq '.final_output.n2.completion'
+# → a natural-language summary of the httpbin JSON response
+# (confirms {{.n1.body}} was resolved before the model call)
+
+# Prompt without template: literal string is sent unchanged
+# n1 prompt = "Say hello." — no {{ }} syntax
+curl http://localhost:8080/runs/$RUN | jq '.final_output.n1.completion'
+# → works normally; template picker shows but was not used
 
 # Embedding node returns a vector
 # (workflow: manual → Embedding node)
@@ -428,6 +455,7 @@ M1, M2, M3
 - `src/pages/WorkflowEditorPage.tsx` — React Flow canvas; drag-and-drop from palette; edge drawing
 - `src/components/palette/NodePalette.tsx` + `PaletteNodeCard.tsx` — grouped, searchable
 - `src/components/sidebar/ConfigSidebar.tsx` + `SchemaForm.tsx` — `@rjsf/core` form from `input_schema`; `x-sensitive` fields rendered as password inputs
+- `src/components/sidebar/TemplateVariablePicker.tsx` — rendered below any field with `"x-template": true`; walks upstream edges via `useWorkflowStore` to find predecessor node IDs; for each predecessor, looks up its `output_schema` from `useNodeTypeStore`; renders a clickable tree of `{{.nodeID.field}}` snippets; clicking inserts the snippet at the cursor in the focused input
 - `src/components/shared/Navbar.tsx` — workflow name (editable), Save button, trigger settings icon
 - `TriggerPanel` — modal for selecting manual / webhook / cron trigger; shows computed webhook URL; validates cron expression
 - Save wires to `POST /workflows` (new) or `PUT /workflows/:id` (existing)
@@ -456,6 +484,13 @@ M1, M2, M3
 
 7. Open TriggerPanel → select "webhook"
    → Webhook URL displayed; save persists the trigger type
+
+8. Select the second HTTP Request node (n2) which has n1 connected upstream
+   → URL field (x-template: true) shows a "Variables" section below it
+   → n1's outputs are listed: n1.status_code, n1.body, n1.headers
+   → Click "n1.body" → {{.n1.body}} is inserted into the URL field
+   → Click Save; trigger a run
+   → Run succeeds; n2's URL used the resolved value from n1's output
 ```
 
 ### Dependencies
