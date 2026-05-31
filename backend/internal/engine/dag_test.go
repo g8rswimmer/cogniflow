@@ -1,0 +1,199 @@
+package engine
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/g8rswimmer/cogniflow/internal/store"
+)
+
+func node(id string) store.WorkflowNode { return store.WorkflowNode{ID: id} }
+func edge(id, src, dst string) store.WorkflowEdge {
+	return store.WorkflowEdge{ID: id, SourceID: src, TargetID: dst}
+}
+
+// TestBuild_LinearChain verifies topological order for a -> b -> c.
+func TestBuild_LinearChain(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a"), node("b"), node("c")}
+	edges := []store.WorkflowEdge{edge("e1", "a", "b"), edge("e2", "b", "c")}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertOrder(t, dag.TopologicalOrder, "a", "b", "c")
+}
+
+// TestBuild_SingleNode ensures a solo node builds without error.
+func TestBuild_SingleNode(t *testing.T) {
+	dag, err := Build([]store.WorkflowNode{node("solo")}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dag.TopologicalOrder) != 1 || dag.TopologicalOrder[0] != "solo" {
+		t.Fatalf("expected [solo], got %v", dag.TopologicalOrder)
+	}
+}
+
+// TestBuild_FanOut verifies a -> b, a -> c (parallel branches).
+func TestBuild_FanOut(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a"), node("b"), node("c")}
+	edges := []store.WorkflowEdge{edge("e1", "a", "b"), edge("e2", "a", "c")}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dag.TopologicalOrder[0] != "a" {
+		t.Fatalf("a must be first, got %v", dag.TopologicalOrder)
+	}
+	if len(dag.Successors["a"]) != 2 {
+		t.Fatalf("a should have 2 successors")
+	}
+}
+
+// TestBuild_FanIn verifies b -> d, c -> d (merge).
+func TestBuild_FanIn(t *testing.T) {
+	nodes := []store.WorkflowNode{node("b"), node("c"), node("d")}
+	edges := []store.WorkflowEdge{edge("e1", "b", "d"), edge("e2", "c", "d")}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dag.TopologicalOrder[len(dag.TopologicalOrder)-1] != "d" {
+		t.Fatalf("d must be last, got %v", dag.TopologicalOrder)
+	}
+	if len(dag.Predecessors["d"]) != 2 {
+		t.Fatalf("d should have 2 predecessors")
+	}
+}
+
+// TestBuild_DisconnectedNodes verifies nodes with no edges are all present.
+func TestBuild_DisconnectedNodes(t *testing.T) {
+	nodes := []store.WorkflowNode{node("x"), node("y"), node("z")}
+	dag, err := Build(nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dag.TopologicalOrder) != 3 {
+		t.Fatalf("expected 3 nodes, got %v", dag.TopologicalOrder)
+	}
+}
+
+// TestBuild_SimpleCycle detects a -> b -> a.
+func TestBuild_SimpleCycle(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a"), node("b")}
+	edges := []store.WorkflowEdge{edge("e1", "a", "b"), edge("e2", "b", "a")}
+
+	_, err := Build(nodes, edges)
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Fatalf("expected ErrCycleDetected, got %v", err)
+	}
+}
+
+// TestBuild_SelfLoop detects a -> a.
+func TestBuild_SelfLoop(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a")}
+	edges := []store.WorkflowEdge{edge("e1", "a", "a")}
+
+	_, err := Build(nodes, edges)
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Fatalf("expected ErrCycleDetected, got %v", err)
+	}
+}
+
+// TestBuild_ThreeNodeCycle detects a -> b -> c -> a.
+func TestBuild_ThreeNodeCycle(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a"), node("b"), node("c")}
+	edges := []store.WorkflowEdge{
+		edge("e1", "a", "b"),
+		edge("e2", "b", "c"),
+		edge("e3", "c", "a"),
+	}
+
+	_, err := Build(nodes, edges)
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Fatalf("expected ErrCycleDetected, got %v", err)
+	}
+}
+
+// TestBuild_UnknownSourceNode rejects edges referencing non-existent nodes.
+func TestBuild_UnknownSourceNode(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a")}
+	edges := []store.WorkflowEdge{edge("e1", "ghost", "a")}
+
+	_, err := Build(nodes, edges)
+	if err == nil {
+		t.Fatal("expected error for unknown source node")
+	}
+}
+
+// TestBuild_UnknownTargetNode rejects edges to non-existent target nodes.
+func TestBuild_UnknownTargetNode(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a")}
+	edges := []store.WorkflowEdge{edge("e1", "a", "ghost")}
+
+	_, err := Build(nodes, edges)
+	if err == nil {
+		t.Fatal("expected error for unknown target node")
+	}
+}
+
+// TestCycleDetect_Valid passes for an acyclic graph.
+func TestCycleDetect_Valid(t *testing.T) {
+	nodes := []store.WorkflowNode{node("n1"), node("n2")}
+	edges := []store.WorkflowEdge{edge("e1", "n1", "n2")}
+	if err := CycleDetect(nodes, edges); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+// TestCycleDetect_Invalid fails for a cyclic graph.
+func TestCycleDetect_Invalid(t *testing.T) {
+	nodes := []store.WorkflowNode{node("n1"), node("n2")}
+	edges := []store.WorkflowEdge{
+		edge("e1", "n1", "n2"),
+		edge("e2", "n2", "n1"),
+	}
+	if err := CycleDetect(nodes, edges); !errors.Is(err, ErrCycleDetected) {
+		t.Fatalf("expected ErrCycleDetected, got %v", err)
+	}
+}
+
+// TestBuild_DiamondDAG verifies a -> b, a -> c, b -> d, c -> d (diamond).
+func TestBuild_DiamondDAG(t *testing.T) {
+	nodes := []store.WorkflowNode{node("a"), node("b"), node("c"), node("d")}
+	edges := []store.WorkflowEdge{
+		edge("e1", "a", "b"),
+		edge("e2", "a", "c"),
+		edge("e3", "b", "d"),
+		edge("e4", "c", "d"),
+	}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	order := dag.TopologicalOrder
+	if order[0] != "a" {
+		t.Fatalf("a must be first, got %v", order)
+	}
+	if order[len(order)-1] != "d" {
+		t.Fatalf("d must be last, got %v", order)
+	}
+}
+
+// assertOrder checks that got starts with expected in the given sequence.
+func assertOrder(t *testing.T, got []string, expected ...string) {
+	t.Helper()
+	if len(got) != len(expected) {
+		t.Fatalf("order length: expected %d, got %d (%v)", len(expected), len(got), got)
+	}
+	for i, want := range expected {
+		if got[i] != want {
+			t.Fatalf("position %d: expected %q, got %q (full: %v)", i, want, got[i], got)
+		}
+	}
+}
