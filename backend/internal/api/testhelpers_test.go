@@ -6,23 +6,30 @@ import (
 	"sync"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
+	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
 // mockStore is an in-memory store.Store implementation for handler tests.
 type mockStore struct {
 	mu        sync.RWMutex
 	workflows map[string]store.Workflow
+	runs      map[string]store.Run
 
 	// Per-method error overrides.
-	createErr error
-	listErr   error
-	getErr    error
-	updateErr error
-	deleteErr error
+	createErr    error
+	listErr      error
+	getErr       error
+	updateErr    error
+	deleteErr    error
+	createRunErr error
+	getRunErr    error
 }
 
 func newMockStore() *mockStore {
-	return &mockStore{workflows: make(map[string]store.Workflow)}
+	return &mockStore{
+		workflows: make(map[string]store.Workflow),
+		runs:      make(map[string]store.Run),
+	}
 }
 
 var errInternal = errors.New("simulated internal error")
@@ -97,15 +104,61 @@ func (m *mockStore) DeleteWorkflow(_ context.Context, id string) error {
 	return nil
 }
 
-// Stub implementations for unrelated Store methods.
+// Run store methods — used by run_handler tests.
 
-func (m *mockStore) CreateRun(_ context.Context, r store.Run) (store.Run, error) { return r, nil }
-func (m *mockStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {
+func (m *mockStore) CreateRun(_ context.Context, r store.Run) (store.Run, error) {
+	if m.createRunErr != nil {
+		return store.Run{}, m.createRunErr
+	}
+	if r.ID == "" {
+		r.ID = "run-generated-id"
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+	return r, nil
+}
+func (m *mockStore) UpdateRunStatus(_ context.Context, runID string, status store.RunStatus, _ map[string]any) error {
+	m.mu.Lock()
+	r := m.runs[runID]
+	r.Status = status
+	m.runs[runID] = r
+	m.mu.Unlock()
 	return nil
 }
-func (m *mockStore) GetRun(_ context.Context, _ string) (store.Run, error) { return store.Run{}, nil }
-func (m *mockStore) ListRuns(_ context.Context, _ store.RunFilter) ([]store.Run, error) {
-	return nil, nil
+func (m *mockStore) GetRun(_ context.Context, id string) (store.Run, error) {
+	if m.getRunErr != nil {
+		return store.Run{}, m.getRunErr
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return store.Run{}, store.ErrNotFound
+	}
+	return r, nil
+}
+func (m *mockStore) ListRuns(_ context.Context, f store.RunFilter) ([]store.Run, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []store.Run
+	for _, r := range m.runs {
+		if f.WorkflowID != "" && r.WorkflowID != f.WorkflowID {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// mockDispatcher implements trigger.Dispatcher for tests.
+type mockDispatcher struct {
+	runID   string
+	dispErr error
+}
+
+func (d *mockDispatcher) Dispatch(_ context.Context, _ trigger.RunRequest) (string, error) {
+	return d.runID, d.dispErr
 }
 func (m *mockStore) UpsertChunks(_ context.Context, _ []store.RAGChunk) error { return nil }
 func (m *mockStore) SearchChunks(_ context.Context, _ []float32, _ int, _ string) ([]store.RAGChunkResult, error) {

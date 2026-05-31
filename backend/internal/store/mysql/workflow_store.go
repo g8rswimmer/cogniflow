@@ -238,20 +238,6 @@ func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
 }
 
-// ---- Runs (stub — implemented in M3) -------------------------------------
-
-func (s *WorkflowStore) CreateRun(_ context.Context, _ store.Run) (store.Run, error) {
-	return store.Run{}, fmt.Errorf("runs: not implemented until M3")
-}
-func (s *WorkflowStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {
-	return fmt.Errorf("runs: not implemented until M3")
-}
-func (s *WorkflowStore) GetRun(_ context.Context, _ string) (store.Run, error) {
-	return store.Run{}, fmt.Errorf("runs: not implemented until M3")
-}
-func (s *WorkflowStore) ListRuns(_ context.Context, _ store.RunFilter) ([]store.Run, error) {
-	return nil, fmt.Errorf("runs: not implemented until M3")
-}
 
 // ---- RAG (stub — implemented in M7) -------------------------------------
 

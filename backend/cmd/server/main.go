@@ -10,8 +10,9 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/api"
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
-	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
+	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
 )
 
@@ -52,12 +53,15 @@ func main() {
 	rawStore := mysqlstore.NewWorkflowStore(db)
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
 
+	bus := engine.NewEventBus()
+	wfEngine := engine.NewWorkflowEngine(vault, registry, bus)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	router := api.NewRouter(db, vault, registry)
+	router := api.NewRouter(db, vault, registry, wfEngine)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)
