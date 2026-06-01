@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -47,6 +48,8 @@ func (cs *cronScheduler) add(workflowID, expr string, fn func()) error {
 	}
 	entryID, err := cs.c.AddFunc(expr, fn)
 	if err != nil {
+		// Remove the stale map entry so future Upserts don't see a ghost job.
+		delete(cs.entries, workflowID)
 		return fmt.Errorf("cron: schedule %q: %w", expr, err)
 	}
 	cs.entries[workflowID] = entryID
@@ -72,4 +75,8 @@ func (cs *cronScheduler) entryCount() int {
 }
 
 func (cs *cronScheduler) start() { cs.c.Start() }
-func (cs *cronScheduler) stop()  { cs.c.Stop() }
+
+// stop halts the scheduler and returns a drain context that is cancelled once
+// all in-flight job goroutines have returned. Callers should wait on it for a
+// clean shutdown.
+func (cs *cronScheduler) stop() context.Context { return cs.c.Stop() }

@@ -18,6 +18,7 @@ type Manager struct {
 	dispatcher Dispatcher
 	cron       *cronScheduler
 	webhook    *webhookHandler
+	done       chan struct{} // closed by Stop() to signal shutdown to in-flight cron dispatches
 }
 
 // NewManager creates a Manager. Call LoadAll then Start before serving requests.
@@ -27,6 +28,7 @@ func NewManager(st store.Store, disp Dispatcher) *Manager {
 		dispatcher: disp,
 		cron:       newCronScheduler(),
 		webhook:    &webhookHandler{store: st, dispatcher: disp},
+		done:       make(chan struct{}),
 	}
 }
 
@@ -56,7 +58,6 @@ func (m *Manager) Upsert(workflowID string, cfg store.TriggerConfig) error {
 	if m == nil {
 		return nil
 	}
-	m.cron.remove(workflowID) // always deactivate first
 	return m.activate(workflowID, cfg)
 }
 
@@ -72,8 +73,13 @@ func (m *Manager) Remove(workflowID string) {
 // Start begins the cron scheduler. Call after LoadAll.
 func (m *Manager) Start() { m.cron.start() }
 
-// Stop halts the cron scheduler gracefully.
-func (m *Manager) Stop() { m.cron.stop() }
+// Stop signals shutdown to any in-flight cron dispatches, halts the scheduler,
+// and waits for all running cron job goroutines to finish before returning.
+func (m *Manager) Stop() {
+	close(m.done)
+	drainCtx := m.cron.stop()
+	<-drainCtx.Done()
+}
 
 // WebhookHandler returns an http.HandlerFunc suitable for POST /webhooks/{workflow_id}.
 func (m *Manager) WebhookHandler() http.HandlerFunc { return m.webhook.handle }
@@ -81,8 +87,22 @@ func (m *Manager) WebhookHandler() http.HandlerFunc { return m.webhook.handle }
 func (m *Manager) activate(workflowID string, cfg store.TriggerConfig) error {
 	switch cfg.Kind {
 	case "cron":
+		// cron.add atomically removes any existing job for workflowID before
+		// scheduling the new one, so no pre-remove is needed here.
+		done := m.done
 		return m.cron.add(workflowID, cfg.CronExpr, func() {
-			if _, err := m.dispatcher.Dispatch(context.Background(), RunRequest{
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// Mirror the done signal into the per-fire context so that a
+			// shutdown in progress cancels the Dispatch call.
+			go func() {
+				select {
+				case <-done:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			if _, err := m.dispatcher.Dispatch(ctx, RunRequest{
 				WorkflowID:  workflowID,
 				TriggeredBy: "cron",
 			}); err != nil {
@@ -91,6 +111,8 @@ func (m *Manager) activate(workflowID string, cfg store.TriggerConfig) error {
 			}
 		})
 	case "webhook", "manual", "":
+		// If the workflow previously had a cron trigger, disarm it now.
+		m.cron.remove(workflowID)
 		// Webhook is handled statically at request time; manual is on-demand only.
 		return nil
 	default:

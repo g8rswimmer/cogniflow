@@ -94,6 +94,8 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		CronExpr: created.Trigger.CronExpr,
 	}); err != nil {
 		slog.Error("workflow create: trigger activation failed", "workflow_id", created.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "TRIGGER_ACTIVATION_FAILED", err.Error())
+		return
 	}
 
 	maskSensitiveConfig(created.Nodes)
@@ -172,6 +174,8 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		CronExpr: updated.Trigger.CronExpr,
 	}); err != nil {
 		slog.Error("workflow update: trigger activation failed", "workflow_id", updated.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "TRIGGER_ACTIVATION_FAILED", err.Error())
+		return
 	}
 
 	maskSensitiveConfig(updated.Nodes)

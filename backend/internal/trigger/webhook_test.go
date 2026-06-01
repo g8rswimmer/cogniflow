@@ -14,6 +14,18 @@ import (
 
 // ---- test doubles -----------------------------------------------------------
 
+// mockConfigGetter satisfies triggerConfigGetter — the only interface webhookHandler needs.
+type mockConfigGetter struct {
+	cfg    store.TriggerConfig
+	getErr error
+}
+
+func (m *mockConfigGetter) GetTriggerConfig(_ context.Context, _ string) (store.TriggerConfig, error) {
+	return m.cfg, m.getErr
+}
+
+// mockTriggerStore implements the full store.Store so fullMockStore (in manager_test.go)
+// can embed it while satisfying NewManager's parameter type.
 type mockTriggerStore struct {
 	cfg    store.TriggerConfig
 	getErr error
@@ -22,8 +34,6 @@ type mockTriggerStore struct {
 func (m *mockTriggerStore) GetTriggerConfig(_ context.Context, _ string) (store.TriggerConfig, error) {
 	return m.cfg, m.getErr
 }
-
-// Unused store methods — satisfy the interface by delegating to a nil-safe stub.
 func (m *mockTriggerStore) CreateWorkflow(_ context.Context, w store.Workflow) (store.Workflow, error) {
 	return store.Workflow{}, nil
 }
@@ -71,7 +81,7 @@ func (m *mockDispatcher) Dispatch(_ context.Context, _ RunRequest) (string, erro
 
 // ---- helpers ----------------------------------------------------------------
 
-func newWebhookTestServer(t *testing.T, st store.Store, disp Dispatcher) *httptest.Server {
+func newWebhookTestServer(t *testing.T, st triggerConfigGetter, disp Dispatcher) *httptest.Server {
 	t.Helper()
 	h := &webhookHandler{store: st, dispatcher: disp}
 	mux := http.NewServeMux()
@@ -101,7 +111,7 @@ func postWebhook(t *testing.T, srv *httptest.Server, workflowID, body string) *h
 // ---- tests ------------------------------------------------------------------
 
 func TestWebhookHandler_DispatchesRun(t *testing.T) {
-	ms := &mockTriggerStore{cfg: store.TriggerConfig{Kind: "webhook"}}
+	ms := &mockConfigGetter{cfg: store.TriggerConfig{Kind: "webhook"}}
 	disp := &mockDispatcher{runID: "run-xyz"}
 	srv := newWebhookTestServer(t, ms, disp)
 
@@ -121,7 +131,7 @@ func TestWebhookHandler_DispatchesRun(t *testing.T) {
 }
 
 func TestWebhookHandler_EmptyBody(t *testing.T) {
-	ms := &mockTriggerStore{cfg: store.TriggerConfig{Kind: "webhook"}}
+	ms := &mockConfigGetter{cfg: store.TriggerConfig{Kind: "webhook"}}
 	disp := &mockDispatcher{runID: "run-empty"}
 	srv := newWebhookTestServer(t, ms, disp)
 
@@ -134,7 +144,7 @@ func TestWebhookHandler_EmptyBody(t *testing.T) {
 }
 
 func TestWebhookHandler_WorkflowNotFound(t *testing.T) {
-	ms := &mockTriggerStore{getErr: store.ErrNotFound}
+	ms := &mockConfigGetter{getErr: store.ErrNotFound}
 	disp := &mockDispatcher{}
 	srv := newWebhookTestServer(t, ms, disp)
 
@@ -147,7 +157,7 @@ func TestWebhookHandler_WorkflowNotFound(t *testing.T) {
 }
 
 func TestWebhookHandler_StoreError(t *testing.T) {
-	ms := &mockTriggerStore{getErr: errors.New("db down")}
+	ms := &mockConfigGetter{getErr: errors.New("db down")}
 	disp := &mockDispatcher{}
 	srv := newWebhookTestServer(t, ms, disp)
 
@@ -160,7 +170,7 @@ func TestWebhookHandler_StoreError(t *testing.T) {
 }
 
 func TestWebhookHandler_NotWebhookTrigger(t *testing.T) {
-	ms := &mockTriggerStore{cfg: store.TriggerConfig{Kind: "manual"}}
+	ms := &mockConfigGetter{cfg: store.TriggerConfig{Kind: "manual"}}
 	disp := &mockDispatcher{}
 	srv := newWebhookTestServer(t, ms, disp)
 
@@ -181,7 +191,7 @@ func TestWebhookHandler_NotWebhookTrigger(t *testing.T) {
 }
 
 func TestWebhookHandler_DispatchError(t *testing.T) {
-	ms := &mockTriggerStore{cfg: store.TriggerConfig{Kind: "webhook"}}
+	ms := &mockConfigGetter{cfg: store.TriggerConfig{Kind: "webhook"}}
 	disp := &mockDispatcher{dispErr: errors.New("engine down")}
 	srv := newWebhookTestServer(t, ms, disp)
 

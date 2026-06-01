@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -9,8 +10,14 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
+// triggerConfigGetter is the only store capability the webhook handler needs.
+// Defined here (consumer side) per the project's interface convention.
+type triggerConfigGetter interface {
+	GetTriggerConfig(ctx context.Context, workflowID string) (store.TriggerConfig, error)
+}
+
 type webhookHandler struct {
-	store      store.Store
+	store      triggerConfigGetter
 	dispatcher Dispatcher
 }
 

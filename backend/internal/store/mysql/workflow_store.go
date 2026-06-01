@@ -102,21 +102,15 @@ func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workf
 		return store.Workflow{}, fmt.Errorf("workflow store: get workflow: %w", err)
 	}
 
+	tc := unmarshalTriggerConfig(row.TriggerKind, row.TriggerConfig)
 	w := store.Workflow{
 		ID:             row.ID,
 		Name:           row.Name,
 		Description:    row.Description,
 		TimeoutSeconds: row.TimeoutSeconds,
-		Trigger:        store.Trigger{Kind: row.TriggerKind},
+		Trigger:        store.Trigger(tc),
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
-	}
-	if row.TriggerConfig != nil {
-		var extra struct {
-			CronExpr string `json:"cron_expr"`
-		}
-		_ = json.Unmarshal([]byte(*row.TriggerConfig), &extra)
-		w.Trigger.CronExpr = extra.CronExpr
 	}
 
 	nodes, err := s.loadNodes(ctx, id)
@@ -289,15 +283,7 @@ func (s *WorkflowStore) GetTriggerConfig(ctx context.Context, workflowID string)
 	if err != nil {
 		return store.TriggerConfig{}, fmt.Errorf("trigger store: get trigger config: %w", err)
 	}
-	cfg := store.TriggerConfig{Kind: row.TriggerKind}
-	if row.TriggerConfig != nil {
-		var extra struct {
-			CronExpr string `json:"cron_expr"`
-		}
-		_ = json.Unmarshal([]byte(*row.TriggerConfig), &extra)
-		cfg.CronExpr = extra.CronExpr
-	}
-	return cfg, nil
+	return unmarshalTriggerConfig(row.TriggerKind, row.TriggerConfig), nil
 }
 
 // ListTriggerConfigs returns trigger configurations for all workflows that have
@@ -315,20 +301,26 @@ func (s *WorkflowStore) ListTriggerConfigs(ctx context.Context) ([]store.Workflo
 	}
 	result := make([]store.WorkflowTrigger, 0, len(rows))
 	for _, r := range rows {
-		cfg := store.TriggerConfig{Kind: r.TriggerKind}
-		if r.TriggerConfig != nil {
-			var extra struct {
-				CronExpr string `json:"cron_expr"`
-			}
-			_ = json.Unmarshal([]byte(*r.TriggerConfig), &extra)
-			cfg.CronExpr = extra.CronExpr
-		}
 		result = append(result, store.WorkflowTrigger{
 			WorkflowID: r.ID,
-			Config:     cfg,
+			Config:     unmarshalTriggerConfig(r.TriggerKind, r.TriggerConfig),
 		})
 	}
 	return result, nil
+}
+
+// unmarshalTriggerConfig builds a TriggerConfig from the raw DB columns,
+// extracting any kind-specific fields from the JSON trigger_config blob.
+func unmarshalTriggerConfig(kind string, raw *string) store.TriggerConfig {
+	cfg := store.TriggerConfig{Kind: kind}
+	if raw != nil {
+		var extra struct {
+			CronExpr string `json:"cron_expr"`
+		}
+		_ = json.Unmarshal([]byte(*raw), &extra)
+		cfg.CronExpr = extra.CronExpr
+	}
+	return cfg
 }
 
 // ---- internal helpers ----------------------------------------------------
