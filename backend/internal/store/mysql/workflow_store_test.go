@@ -486,3 +486,103 @@ func TestWorkflowStore_Delete_CascadesNodesToConfigs(t *testing.T) {
 		t.Errorf("expected 0 configs after cascade delete, got %d", cfgCount)
 	}
 }
+
+// ---- Trigger store methods --------------------------------------------------
+
+func TestTriggerStore_GetTriggerConfig_Default(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.CreateWorkflow(ctx, store.Workflow{ID: "wf-1", Name: "w"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	cfg, err := s.GetTriggerConfig(ctx, "wf-1")
+	if err != nil {
+		t.Fatalf("GetTriggerConfig: %v", err)
+	}
+	if cfg.Kind != "manual" {
+		t.Errorf("want kind=manual, got %q", cfg.Kind)
+	}
+}
+
+func TestTriggerStore_GetTriggerConfig_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.GetTriggerConfig(context.Background(), "ghost")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestTriggerStore_SaveAndGetCronConfig(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.CreateWorkflow(ctx, store.Workflow{ID: "wf-cron", Name: "cron"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	in := store.TriggerConfig{Kind: "cron", CronExpr: "0 * * * *"}
+	if err := s.SaveTriggerConfig(ctx, "wf-cron", in); err != nil {
+		t.Fatalf("SaveTriggerConfig: %v", err)
+	}
+
+	got, err := s.GetTriggerConfig(ctx, "wf-cron")
+	if err != nil {
+		t.Fatalf("GetTriggerConfig: %v", err)
+	}
+	if got.Kind != "cron" {
+		t.Errorf("kind: want cron, got %q", got.Kind)
+	}
+	if got.CronExpr != "0 * * * *" {
+		t.Errorf("cron_expr: want %q, got %q", "0 * * * *", got.CronExpr)
+	}
+}
+
+func TestTriggerStore_SaveTriggerConfig_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	err := s.SaveTriggerConfig(context.Background(), "ghost", store.TriggerConfig{Kind: "webhook"})
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestTriggerStore_ListTriggerConfigs_OnlyNonManual(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"wf-m", "wf-h", "wf-c"} {
+		if _, err := s.CreateWorkflow(ctx, store.Workflow{ID: id, Name: id}); err != nil {
+			t.Fatalf("CreateWorkflow %s: %v", id, err)
+		}
+	}
+	// Leave wf-m as manual; set the others.
+	_ = s.SaveTriggerConfig(ctx, "wf-h", store.TriggerConfig{Kind: "webhook"})
+	_ = s.SaveTriggerConfig(ctx, "wf-c", store.TriggerConfig{Kind: "cron", CronExpr: "* * * * *"})
+
+	got, err := s.ListTriggerConfigs(ctx)
+	if err != nil {
+		t.Fatalf("ListTriggerConfigs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 non-manual triggers, got %d", len(got))
+	}
+	kinds := make(map[string]bool)
+	for _, wt := range got {
+		kinds[wt.Config.Kind] = true
+	}
+	if !kinds["webhook"] || !kinds["cron"] {
+		t.Errorf("expected webhook and cron in results, got %v", kinds)
+	}
+}
+
+func TestTriggerStore_ListTriggerConfigs_Empty(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.ListTriggerConfigs(context.Background())
+	if err != nil {
+		t.Fatalf("ListTriggerConfigs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want empty list, got %d", len(got))
+	}
+}

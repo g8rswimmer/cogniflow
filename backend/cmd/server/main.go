@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
+	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
 func main() {
@@ -56,12 +58,22 @@ func main() {
 	bus := engine.NewEventBus()
 	wfEngine := engine.NewWorkflowEngine(vault, registry, bus)
 
+	triggerMgr := trigger.NewManager(vault, wfEngine)
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer loadCancel()
+	if err := triggerMgr.LoadAll(loadCtx); err != nil {
+		slog.Error("failed to load trigger configs", "error", err)
+		os.Exit(1)
+	}
+	triggerMgr.Start()
+	defer triggerMgr.Stop()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	router := api.NewRouter(db, vault, registry, wfEngine, bus)
+	router := api.NewRouter(db, vault, registry, wfEngine, bus, triggerMgr)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)

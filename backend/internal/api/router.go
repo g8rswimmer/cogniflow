@@ -12,12 +12,12 @@ import (
 )
 
 // NewRouter wires all HTTP routes and returns the configured mux.
-func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus) *http.ServeMux {
+func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus, tm *trigger.Manager) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /health", newHealthHandler(db))
 
-	wh := &workflowHandler{store: st, registry: registry}
+	wh := &workflowHandler{store: st, registry: registry, triggers: tm}
 	mux.HandleFunc("GET /workflows", wh.list)
 	mux.HandleFunc("POST /workflows", wh.create)
 	mux.HandleFunc("GET /workflows/{id}", wh.get)
@@ -34,6 +34,8 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatc
 
 	wsh := &wsHandler{store: st, bus: bus}
 	mux.HandleFunc("GET /runs/{run_id}/events", wsh.streamEvents)
+
+	mux.HandleFunc("POST /webhooks/{workflow_id}", tm.WebhookHandler())
 
 	return mux
 }
