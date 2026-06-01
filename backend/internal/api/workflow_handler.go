@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"text/template"
@@ -12,13 +13,23 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
+	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
+
+// triggerManager is the subset of trigger.Manager that the workflow handler
+// needs. Defined here (consumer) so tests can substitute a lightweight stub
+// without importing the full trigger package.
+type triggerManager interface {
+	Upsert(workflowID string, cfg store.TriggerConfig) error
+	Remove(workflowID string)
+}
 
 const maxBodyBytes = 1 << 20 // 1 MB
 
 type workflowHandler struct {
 	store    store.Store
 	registry *node.NodeRegistry
+	triggers triggerManager
 }
 
 // list handles GET /workflows
@@ -56,6 +67,13 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if wf.Trigger.Kind == "cron" {
+		if err := trigger.ValidateCronExpr(wf.Trigger.CronExpr); err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+			return
+		}
+	}
+
 	if err := engine.CycleDetect(wf.Nodes, wf.Edges); err != nil {
 		if errors.Is(err, engine.ErrCycleDetected) {
 			writeError(w, http.StatusBadRequest, "CYCLE_DETECTED", err.Error())
@@ -69,6 +87,13 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "WORKFLOW_SAVE_FAILED", err.Error())
 		return
+	}
+
+	if err := h.triggers.Upsert(created.ID, store.TriggerConfig{
+		Kind:     created.Trigger.Kind,
+		CronExpr: created.Trigger.CronExpr,
+	}); err != nil {
+		slog.Error("workflow create: trigger activation failed", "workflow_id", created.ID, "error", err)
 	}
 
 	maskSensitiveConfig(created.Nodes)
@@ -116,6 +141,13 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if wf.Trigger.Kind == "cron" {
+		if err := trigger.ValidateCronExpr(wf.Trigger.CronExpr); err != nil {
+			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+			return
+		}
+	}
+
 	if err := engine.CycleDetect(wf.Nodes, wf.Edges); err != nil {
 		if errors.Is(err, engine.ErrCycleDetected) {
 			writeError(w, http.StatusBadRequest, "CYCLE_DETECTED", err.Error())
@@ -135,6 +167,13 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.triggers.Upsert(updated.ID, store.TriggerConfig{
+		Kind:     updated.Trigger.Kind,
+		CronExpr: updated.Trigger.CronExpr,
+	}); err != nil {
+		slog.Error("workflow update: trigger activation failed", "workflow_id", updated.ID, "error", err)
+	}
+
 	maskSensitiveConfig(updated.Nodes)
 	writeJSON(w, http.StatusOK, toWorkflowResponse(updated))
 }
@@ -151,6 +190,7 @@ func (h *workflowHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+	h.triggers.Remove(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

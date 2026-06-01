@@ -248,16 +248,87 @@ func (s *WorkflowStore) SearchChunks(_ context.Context, _ []float32, _ int, _ st
 	return nil, fmt.Errorf("rag: not implemented until M7")
 }
 
-// ---- Triggers (stub — implemented in M5) ---------------------------------
+// ---- Triggers ------------------------------------------------------------
 
-func (s *WorkflowStore) SaveTriggerConfig(_ context.Context, _ string, _ store.TriggerConfig) error {
-	return fmt.Errorf("triggers: not implemented until M5")
+// SaveTriggerConfig updates the trigger_kind and trigger_config columns for the
+// given workflow. It uses the same columns as CreateWorkflow/UpdateWorkflow so
+// no additional table or migration is needed.
+func (s *WorkflowStore) SaveTriggerConfig(ctx context.Context, workflowID string, cfg store.TriggerConfig) error {
+	extra := map[string]any{}
+	if cfg.CronExpr != "" {
+		extra["cron_expr"] = cfg.CronExpr
+	}
+	b, err := json.Marshal(extra)
+	if err != nil {
+		return fmt.Errorf("trigger store: marshal config: %w", err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE workflows SET trigger_kind=?, trigger_config=? WHERE id=?`,
+		cfg.Kind, string(b), workflowID,
+	)
+	if err != nil {
+		return fmt.Errorf("trigger store: save trigger config: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
-func (s *WorkflowStore) GetTriggerConfig(_ context.Context, _ string) (store.TriggerConfig, error) {
-	return store.TriggerConfig{}, fmt.Errorf("triggers: not implemented until M5")
+
+// GetTriggerConfig returns the trigger configuration for the given workflow.
+func (s *WorkflowStore) GetTriggerConfig(ctx context.Context, workflowID string) (store.TriggerConfig, error) {
+	var row struct {
+		TriggerKind   string  `db:"trigger_kind"`
+		TriggerConfig *string `db:"trigger_config"`
+	}
+	err := s.db.GetContext(ctx, &row,
+		`SELECT trigger_kind, trigger_config FROM workflows WHERE id=?`, workflowID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.TriggerConfig{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.TriggerConfig{}, fmt.Errorf("trigger store: get trigger config: %w", err)
+	}
+	cfg := store.TriggerConfig{Kind: row.TriggerKind}
+	if row.TriggerConfig != nil {
+		var extra struct {
+			CronExpr string `json:"cron_expr"`
+		}
+		_ = json.Unmarshal([]byte(*row.TriggerConfig), &extra)
+		cfg.CronExpr = extra.CronExpr
+	}
+	return cfg, nil
 }
-func (s *WorkflowStore) ListTriggerConfigs(_ context.Context) ([]store.WorkflowTrigger, error) {
-	return nil, fmt.Errorf("triggers: not implemented until M5")
+
+// ListTriggerConfigs returns trigger configurations for all workflows that have
+// a non-manual trigger (webhook or cron). Used by TriggerManager.LoadAll.
+func (s *WorkflowStore) ListTriggerConfigs(ctx context.Context) ([]store.WorkflowTrigger, error) {
+	var rows []struct {
+		ID            string  `db:"id"`
+		TriggerKind   string  `db:"trigger_kind"`
+		TriggerConfig *string `db:"trigger_config"`
+	}
+	if err := s.db.SelectContext(ctx, &rows,
+		`SELECT id, trigger_kind, trigger_config FROM workflows WHERE trigger_kind != 'manual'`,
+	); err != nil {
+		return nil, fmt.Errorf("trigger store: list trigger configs: %w", err)
+	}
+	result := make([]store.WorkflowTrigger, 0, len(rows))
+	for _, r := range rows {
+		cfg := store.TriggerConfig{Kind: r.TriggerKind}
+		if r.TriggerConfig != nil {
+			var extra struct {
+				CronExpr string `json:"cron_expr"`
+			}
+			_ = json.Unmarshal([]byte(*r.TriggerConfig), &extra)
+			cfg.CronExpr = extra.CronExpr
+		}
+		result = append(result, store.WorkflowTrigger{
+			WorkflowID: r.ID,
+			Config:     cfg,
+		})
+	}
+	return result, nil
 }
 
 // ---- internal helpers ----------------------------------------------------

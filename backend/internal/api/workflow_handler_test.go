@@ -12,12 +12,19 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
+// noopTriggerManager satisfies triggerManager with no-op behaviour for tests
+// that focus on workflow CRUD and don't need to verify trigger side-effects.
+type noopTriggerManager struct{}
+
+func (noopTriggerManager) Upsert(_ string, _ store.TriggerConfig) error { return nil }
+func (noopTriggerManager) Remove(_ string)                               {}
+
 func setupWorkflowHandler(t *testing.T) (*workflowHandler, *mockStore) {
 	t.Helper()
 	ms := newMockStore()
 	registry := node.NewRegistry()
 	registry.Register(httprequest.New())
-	return &workflowHandler{store: ms, registry: registry}, ms
+	return &workflowHandler{store: ms, registry: registry, triggers: noopTriggerManager{}}, ms
 }
 
 // ---- List ----------------------------------------------------------------
