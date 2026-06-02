@@ -202,21 +202,23 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 		return store.Workflow{}, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return store.Workflow{}, fmt.Errorf("workflow store: commit: %w", err)
-	}
-
-	// Fetch only timestamps to avoid a full round-trip; MySQL controls updated_at via ON UPDATE.
+	// Read MySQL-managed timestamps inside the transaction so the value is
+	// guaranteed visible and no concurrent DeleteWorkflow can delete the row
+	// between our Commit and a post-commit SELECT.
 	var ts struct {
 		CreatedAt time.Time `db:"created_at"`
 		UpdatedAt time.Time `db:"updated_at"`
 	}
-	if err := s.db.GetContext(ctx, &ts,
+	if err := tx.GetContext(ctx, &ts,
 		`SELECT created_at, updated_at FROM workflows WHERE id=?`, w.ID); err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow store: fetch timestamps: %w", err)
 	}
 	w.CreatedAt = ts.CreatedAt
 	w.UpdatedAt = ts.UpdatedAt
+
+	if err := tx.Commit(); err != nil {
+		return store.Workflow{}, fmt.Errorf("workflow store: commit: %w", err)
+	}
 
 	return w, nil
 }
@@ -230,10 +232,8 @@ func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
 
 	// Explicitly delete all child rows in dependency order.
 	// node_configs must go before workflow_nodes since they reference node IDs.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_configs WHERE node_id IN (SELECT id FROM workflow_nodes WHERE workflow_id = ?)`, id,
-	); err != nil {
-		return fmt.Errorf("workflow store: delete node configs: %w", err)
+	if err := deleteNodeConfigs(ctx, tx, id); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id = ?`, id); err != nil {
 		return fmt.Errorf("workflow store: delete workflow nodes: %w", err)
@@ -405,11 +405,9 @@ type configWriteRow struct {
 }
 
 func replaceNodesAndEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode, edges []store.WorkflowEdge) error {
-	// Delete node_configs before workflow_nodes; without FK cascade this is explicit.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM node_configs WHERE node_id IN (SELECT id FROM workflow_nodes WHERE workflow_id = ?)`, workflowID,
-	); err != nil {
-		return fmt.Errorf("workflow store: delete node configs: %w", err)
+	// Delete node_configs before workflow_nodes; without FK cascade this must be explicit.
+	if err := deleteNodeConfigs(ctx, tx, workflowID); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id=?`, workflowID); err != nil {
 		return fmt.Errorf("workflow store: delete nodes: %w", err)
@@ -660,6 +658,19 @@ func triggerExtra(t store.Trigger) map[string]any {
 		m["cron_expr"] = t.CronExpr
 	}
 	return m
+}
+
+// deleteNodeConfigs removes all node_configs rows whose node_id belongs to a
+// node in the given workflow. Must be called inside a transaction before
+// workflow_nodes are deleted, since node_configs references node IDs.
+func deleteNodeConfigs(ctx context.Context, tx *sqlx.Tx, workflowID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM node_configs WHERE node_id IN (SELECT id FROM workflow_nodes WHERE workflow_id = ?)`,
+		workflowID,
+	); err != nil {
+		return fmt.Errorf("workflow store: delete node configs: %w", err)
+	}
+	return nil
 }
 
 func newUUID() string {

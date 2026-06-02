@@ -96,6 +96,9 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		if err != nil {
 			return node.NodeOutput{}, fmt.Errorf("rag.retrieve: render document_id: %w", err)
 		}
+		if docFilter == "" {
+			return node.NodeOutput{}, fmt.Errorf("rag.retrieve: document_id rendered to an empty string; check template references")
+		}
 	}
 
 	topK := nodeutil.ToInt(input.Config["top_k"], defaultTopK)

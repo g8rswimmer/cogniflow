@@ -181,6 +181,25 @@ func TestRAGRetrieveHandler_Execute_NegativeTopK_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestRAGRetrieveHandler_Execute_EmptyRenderedDocumentID_ReturnsError(t *testing.T) {
+	client := &mockEmbedClient{resp: aiprovider.EmbeddingResponse{Embedding: []float32{0.1}}}
+	h := New(client, &mockRetrieveStore{})
+
+	// document_id is configured but renders to "" — must error, not silently drop the filter.
+	_, err := h.Execute(context.Background(), node.NodeInput{
+		Config: map[string]any{
+			"query":       "what is RAG?",
+			"document_id": "{{._initial.scope}}",
+		},
+		UpstreamData: map[string]any{
+			"_initial": map[string]any{"scope": ""},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when document_id renders to empty string")
+	}
+}
+
 func TestRAGRetrieveHandler_Execute_MissingQuery(t *testing.T) {
 	h := New(&mockEmbedClient{}, &mockRetrieveStore{})
 	_, err := h.Execute(context.Background(), node.NodeInput{

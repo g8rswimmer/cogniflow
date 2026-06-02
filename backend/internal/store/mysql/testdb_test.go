@@ -1,11 +1,12 @@
 package mysql
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/jmoiron/sqlx"
 )
 
 // testSchema is a SQLite-compatible equivalent of the MySQL migrations.
@@ -102,6 +103,21 @@ func openTestDB(t *testing.T) *sqlx.DB {
 func newTestStore(t *testing.T) *WorkflowStore {
 	t.Helper()
 	return NewWorkflowStore(openTestDB(t))
+}
+
+// insertTestWorkflow inserts a minimal workflow row so that CreateRun's
+// workflow-existence check passes in tests that are focused on run behaviour
+// rather than workflow creation.
+func insertTestWorkflow(t *testing.T, s *WorkflowStore, id string) {
+	t.Helper()
+	_, err := s.db.ExecContext(context.Background(),
+		`INSERT INTO workflows (id, name, trigger_kind, timeout_seconds, created_at, updated_at)
+		 VALUES (?, ?, 'manual', 300, datetime('now'), datetime('now'))`,
+		id, id,
+	)
+	if err != nil {
+		t.Fatalf("insertTestWorkflow %q: %v", id, err)
+	}
 }
 
 // withinSecond fails the test if want and got differ by more than one second.
