@@ -64,6 +64,20 @@ CREATE TABLE IF NOT EXISTS runs (
     final_output TEXT,
     error_detail TEXT
 );
+
+CREATE TABLE IF NOT EXISTS rag_documents (
+    id         TEXT     NOT NULL PRIMARY KEY,
+    source     TEXT     NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rag_chunks (
+    id          TEXT    NOT NULL PRIMARY KEY,
+    document_id TEXT    NOT NULL DEFAULT '',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    chunk_text  TEXT    NOT NULL DEFAULT '',
+    embedding   TEXT    NOT NULL DEFAULT '[]'
+);
 `
 
 // openTestDB opens an in-memory SQLite database, applies the test schema, and

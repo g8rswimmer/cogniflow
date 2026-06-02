@@ -234,15 +234,6 @@ func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
 }
 
 
-// ---- RAG (stub — implemented in M7) -------------------------------------
-
-func (s *WorkflowStore) UpsertChunks(_ context.Context, _ []store.RAGChunk) error {
-	return fmt.Errorf("rag: not implemented until M7")
-}
-func (s *WorkflowStore) SearchChunks(_ context.Context, _ []float32, _ int, _ string) ([]store.RAGChunkResult, error) {
-	return nil, fmt.Errorf("rag: not implemented until M7")
-}
-
 // ---- Triggers ------------------------------------------------------------
 
 // SaveTriggerConfig updates the trigger_kind and trigger_config columns for the

@@ -19,6 +19,8 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/embedding"
 	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/llm"
+	ragingest "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_ingest"
+	ragretrieve "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_retrieve"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -73,14 +75,18 @@ func main() {
 	openaiClient := openai.New()
 	anthropicClient := anthropic.New()
 
+	rawStore := mysqlstore.NewWorkflowStore(db)
+
 	registry := node.NewRegistry()
 	registry.Register(httprequest.New())
 	registry.Register(llm.NewOpenAI(openaiClient))
 	registry.Register(llm.NewAnthropic(anthropicClient))
 	registry.Register(embedding.New(openaiClient))
 
-	rawStore := mysqlstore.NewWorkflowStore(db)
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
+
+	registry.Register(ragingest.New(openaiClient, vault))
+	registry.Register(ragretrieve.New(openaiClient, vault))
 
 	bus := engine.NewEventBus()
 	wfEngine := engine.NewWorkflowEngine(vault, registry, bus)

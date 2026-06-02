@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"text/template"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/nodeutil"
 )
 
 // defaultTimeout is the client-level deadline applied when no per-request
@@ -103,7 +103,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	}
 
 	// Render templates using upstream data as the context.
-	urlStr, err := renderTemplate(rawURL, input.UpstreamData)
+	urlStr, err := nodeutil.RenderTemplate(rawURL, input.UpstreamData)
 	if err != nil {
 		return node.NodeOutput{}, fmt.Errorf("http.request: render url: %w", err)
 	}
@@ -111,7 +111,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	// Build optional body.
 	var bodyReader io.Reader
 	if rawBody, ok := input.Config["body"].(string); ok && rawBody != "" {
-		rendered, err := renderTemplate(rawBody, input.UpstreamData)
+		rendered, err := nodeutil.RenderTemplate(rawBody, input.UpstreamData)
 		if err != nil {
 			return node.NodeOutput{}, fmt.Errorf("http.request: render body: %w", err)
 		}
@@ -128,7 +128,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		if headersMap, ok := headersRaw.(map[string]any); ok {
 			for k, v := range headersMap {
 				val, _ := v.(string)
-				rendered, err := renderTemplate(val, input.UpstreamData)
+				rendered, err := nodeutil.RenderTemplate(val, input.UpstreamData)
 				if err != nil {
 					return node.NodeOutput{}, fmt.Errorf("http.request: render header %q: %w", k, err)
 				}
@@ -161,20 +161,6 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		"body":        string(respBody),
 		"headers":     respHeaders,
 	}}, nil
-}
-
-// renderTemplate applies Go text/template to s with data as the template context.
-// No-op if s contains no template directives.
-func renderTemplate(s string, data map[string]any) (string, error) {
-	t, err := template.New("").Option("missingkey=error").Parse(s)
-	if err != nil {
-		return s, err
-	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return s, err
-	}
-	return buf.String(), nil
 }
 
 // toInt converts numeric config values (JSON unmarshals numbers as float64).

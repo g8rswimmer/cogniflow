@@ -4,14 +4,13 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"text/template"
 
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/nodeutil"
 )
 
 var openAIInputSchema = json.RawMessage(`{
@@ -100,13 +99,13 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	if rawPrompt == "" {
 		return node.NodeOutput{}, fmt.Errorf("%s: prompt is required", h.typeID)
 	}
-	prompt, err := renderTemplate(rawPrompt, input.UpstreamData)
+	prompt, err := nodeutil.RenderTemplate(rawPrompt, input.UpstreamData)
 	if err != nil {
 		return node.NodeOutput{}, fmt.Errorf("%s: render prompt: %w", h.typeID, err)
 	}
 
 	rawSystem, _ := input.Config["system_msg"].(string)
-	systemMsg, err := renderTemplate(rawSystem, input.UpstreamData)
+	systemMsg, err := nodeutil.RenderTemplate(rawSystem, input.UpstreamData)
 	if err != nil {
 		return node.NodeOutput{}, fmt.Errorf("%s: render system_msg: %w", h.typeID, err)
 	}
@@ -137,18 +136,6 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		"prompt_tokens":     resp.PromptTokens,
 		"completion_tokens": resp.CompletionTokens,
 	}}, nil
-}
-
-func renderTemplate(s string, data map[string]any) (string, error) {
-	t, err := template.New("").Option("missingkey=error").Parse(s)
-	if err != nil {
-		return s, err
-	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return s, err
-	}
-	return buf.String(), nil
 }
 
 func toInt(v any) (int, bool) {
