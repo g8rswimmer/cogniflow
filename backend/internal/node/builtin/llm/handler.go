@@ -31,11 +31,12 @@ var anthropicInputSchema = json.RawMessage(`{
   "type": "object",
   "required": ["prompt"],
   "properties": {
-    "api_key":    { "type": "string",  "title": "API Key",        "x-sensitive": true },
-    "model":      { "type": "string",  "title": "Model",          "default": "claude-sonnet-4-6" },
-    "system_msg": { "type": "string",  "title": "System Message", "x-template": true },
-    "prompt":     { "type": "string",  "title": "Prompt",         "x-template": true },
-    "max_tokens": { "type": "integer", "title": "Max Tokens",     "default": 1024 }
+    "api_key":     { "type": "string",  "title": "API Key",        "x-sensitive": true },
+    "model":       { "type": "string",  "title": "Model",          "default": "claude-sonnet-4-6" },
+    "system_msg":  { "type": "string",  "title": "System Message", "x-template": true },
+    "prompt":      { "type": "string",  "title": "Prompt",         "x-template": true },
+    "max_tokens":  { "type": "integer", "title": "Max Tokens",     "default": 1024 },
+    "temperature": { "type": "number",  "title": "Temperature",    "default": 0.7 }
   }
 }`)
 
@@ -139,7 +140,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 }
 
 func renderTemplate(s string, data map[string]any) (string, error) {
-	t, err := template.New("").Option("missingkey=zero").Parse(s)
+	t, err := template.New("").Option("missingkey=error").Parse(s)
 	if err != nil {
 		return s, err
 	}

@@ -63,6 +63,11 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.validateRequiredFields(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	if err := h.validateTemplates(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
@@ -140,6 +145,11 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 	applyDefaults(&wf)
 
 	if err := h.validate(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := h.validateRequiredFields(&wf); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -227,6 +237,40 @@ func (h *workflowHandler) validate(wf *store.Workflow) error {
 		}
 	}
 	return nil
+}
+
+// validateRequiredFields checks that every field listed in a node's InputSchema
+// "required" array is present and non-empty in the node's config. This catches
+// missing required fields at save time rather than deferring the error to the
+// first execution.
+func (h *workflowHandler) validateRequiredFields(wf *store.Workflow) error {
+	for _, n := range wf.Nodes {
+		handler, err := h.registry.Lookup(n.TypeID)
+		if err != nil {
+			continue // unknown type caught by validate()
+		}
+		for _, field := range parseRequiredFields(handler.Meta().InputSchema) {
+			v, ok := n.Config[field]
+			if !ok || v == nil {
+				return fmt.Errorf("node %q: required field %q is missing", n.ID, field)
+			}
+			if s, ok := v.(string); ok && s == "" {
+				return fmt.Errorf("node %q: required field %q must not be empty", n.ID, field)
+			}
+		}
+	}
+	return nil
+}
+
+// parseRequiredFields extracts the "required" array from a JSON Schema.
+func parseRequiredFields(schema json.RawMessage) []string {
+	var s struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil
+	}
+	return s.Required
 }
 
 // validateTemplates parses any x-template:true config field value that contains

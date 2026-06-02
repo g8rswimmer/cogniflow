@@ -172,6 +172,41 @@ func TestWorkflowStore_Create_WithRetryPolicy(t *testing.T) {
 	}
 }
 
+func TestWorkflowStore_Create_RetryPolicy_ZeroMaxRetries_NonDefaultBackoff(t *testing.T) {
+	// RetryPolicy{MaxRetries:0, BackoffMs:500} must survive a DB round-trip.
+	// Previously loadNodes only reconstructed the policy when RetryMax > 0,
+	// silently dropping any policy with MaxRetries == 0.
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	in := store.Workflow{
+		ID:   "wf-retry-zero",
+		Name: "zero-retries-custom-backoff",
+		Nodes: []store.WorkflowNode{
+			{
+				ID:          "n1",
+				TypeID:      "http.request",
+				RetryPolicy: &store.RetryPolicy{MaxRetries: 0, BackoffMs: 500},
+			},
+		},
+	}
+	if _, err := s.CreateWorkflow(ctx, in); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	got, err := s.GetWorkflow(ctx, "wf-retry-zero")
+	if err != nil {
+		t.Fatalf("GetWorkflow: %v", err)
+	}
+	rp := got.Nodes[0].RetryPolicy
+	if rp == nil {
+		t.Fatal("RetryPolicy with MaxRetries=0 and non-default BackoffMs must not be nil after round-trip")
+	}
+	if rp.MaxRetries != 0 || rp.BackoffMs != 500 {
+		t.Errorf("retry policy: want {0, 500}, got %+v", rp)
+	}
+}
+
 func TestWorkflowStore_Create_WithEdgeBranchLabel(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

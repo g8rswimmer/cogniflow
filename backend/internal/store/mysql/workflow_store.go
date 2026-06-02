@@ -326,6 +326,11 @@ func unmarshalTriggerConfig(kind string, raw *string) store.TriggerConfig {
 
 // ---- internal helpers ----------------------------------------------------
 
+// defaultRetryBackoffMs is the backoff stored when a node has no RetryPolicy.
+// loadNodes uses this sentinel to distinguish a saved nil policy from an explicit
+// RetryPolicy{MaxRetries:0, BackoffMs:defaultRetryBackoffMs}.
+const defaultRetryBackoffMs = 1000
+
 // dbWorkflow is the read-side row struct for SELECT queries against the workflows table.
 type dbWorkflow struct {
 	ID             string    `db:"id"`
@@ -397,7 +402,7 @@ func replaceNodesAndEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, n
 
 func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode) error {
 	for _, n := range nodes {
-		retryMax, retryMs := 0, 1000
+		retryMax, retryMs := 0, defaultRetryBackoffMs
 		if n.RetryPolicy != nil {
 			retryMax = n.RetryPolicy.MaxRetries
 			retryMs = n.RetryPolicy.BackoffMs
@@ -529,7 +534,11 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 			Config:        configs[r.ID],
 			SensitiveKeys: sensitiveKeys[r.ID],
 		}
-		if r.RetryMax > 0 {
+		// Reconstruct RetryPolicy when either MaxRetries is positive OR the backoff
+		// differs from the nil-policy default. This preserves RetryPolicy{MaxRetries:0,
+		// BackoffMs:N} for N != defaultRetryBackoffMs, which would otherwise be silently
+		// dropped because RetryMax == 0.
+		if r.RetryMax > 0 || r.RetryBackoffMs != defaultRetryBackoffMs {
 			n.RetryPolicy = &store.RetryPolicy{
 				MaxRetries: r.RetryMax,
 				BackoffMs:  r.RetryBackoffMs,

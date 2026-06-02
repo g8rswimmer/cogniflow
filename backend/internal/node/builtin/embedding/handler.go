@@ -69,6 +69,9 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	if err != nil {
 		return node.NodeOutput{}, fmt.Errorf("embedding.openai: render input: %w", err)
 	}
+	if rendered == "" {
+		return node.NodeOutput{}, fmt.Errorf("embedding.openai: rendered input is empty — check upstream template references")
+	}
 
 	resp, err := h.client.Embed(ctx, aiprovider.EmbeddingRequest{
 		APIKey: apiKey,
@@ -91,7 +94,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 }
 
 func renderTemplate(s string, data map[string]any) (string, error) {
-	t, err := template.New("").Option("missingkey=zero").Parse(s)
+	t, err := template.New("").Option("missingkey=error").Parse(s)
 	if err != nil {
 		return s, err
 	}

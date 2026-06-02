@@ -132,6 +132,29 @@ func TestWorkflowHandler_Create_InvalidJSON(t *testing.T) {
 	assertErrorCode(t, w.Body.Bytes(), "VALIDATION_FAILED")
 }
 
+func TestWorkflowHandler_Create_MissingRequiredField(t *testing.T) {
+	h, _ := setupWorkflowHandler(t)
+
+	// http.request requires "url" and "method"; omitting them should fail at save time.
+	body := `{
+		"name": "Missing Config",
+		"trigger": {"kind": "manual"},
+		"nodes": [
+			{"id":"n1","type_id":"http.request","position":{"x":0,"y":0},"config":{}}
+		],
+		"edges": []
+	}`
+	r := httptest.NewRequest("POST", "/workflows", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.create(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+	assertErrorCode(t, w.Body.Bytes(), "VALIDATION_FAILED")
+}
+
 func TestWorkflowHandler_Create_CycleDetected(t *testing.T) {
 	h, _ := setupWorkflowHandler(t)
 
@@ -139,8 +162,8 @@ func TestWorkflowHandler_Create_CycleDetected(t *testing.T) {
 		"name": "Cyclic",
 		"trigger": {"kind": "manual"},
 		"nodes": [
-			{"id":"n1","type_id":"http.request","position":{"x":0,"y":0}},
-			{"id":"n2","type_id":"http.request","position":{"x":0,"y":0}}
+			{"id":"n1","type_id":"http.request","position":{"x":0,"y":0},"config":{"url":"https://example.com","method":"GET"}},
+			{"id":"n2","type_id":"http.request","position":{"x":0,"y":0},"config":{"url":"https://example.com","method":"GET"}}
 		],
 		"edges": [
 			{"id":"e1","source_id":"n1","target_id":"n2"},
@@ -312,8 +335,8 @@ func TestWorkflowHandler_Update_CycleDetected(t *testing.T) {
 		"name":"Cyclic",
 		"trigger":{"kind":"manual"},
 		"nodes":[
-			{"id":"n1","type_id":"http.request","position":{"x":0,"y":0}},
-			{"id":"n2","type_id":"http.request","position":{"x":0,"y":0}}
+			{"id":"n1","type_id":"http.request","position":{"x":0,"y":0},"config":{"url":"https://example.com","method":"GET"}},
+			{"id":"n2","type_id":"http.request","position":{"x":0,"y":0},"config":{"url":"https://example.com","method":"GET"}}
 		],
 		"edges":[
 			{"id":"e1","source_id":"n1","target_id":"n2"},

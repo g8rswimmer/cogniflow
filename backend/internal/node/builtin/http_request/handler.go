@@ -166,7 +166,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 // renderTemplate applies Go text/template to s with data as the template context.
 // No-op if s contains no template directives.
 func renderTemplate(s string, data map[string]any) (string, error) {
-	t, err := template.New("").Option("missingkey=zero").Parse(s)
+	t, err := template.New("").Option("missingkey=error").Parse(s)
 	if err != nil {
 		return s, err
 	}

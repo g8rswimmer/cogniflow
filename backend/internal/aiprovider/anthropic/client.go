@@ -73,6 +73,9 @@ func (c *Client) Complete(ctx context.Context, req aiprovider.LLMRequest) (aipro
 	if req.SystemMsg != "" {
 		payload["system"] = req.SystemMsg
 	}
+	if req.Temperature != nil {
+		payload["temperature"] = *req.Temperature
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {

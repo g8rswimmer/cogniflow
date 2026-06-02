@@ -193,9 +193,9 @@ func (c *Client) doRequest(ctx context.Context, method, url, apiKey string, body
 		return nil, fmt.Errorf("openai: http: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("openai: http %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("openai: http %d: %s", resp.StatusCode, string(errBody))
 	}
 	return resp, nil
 }

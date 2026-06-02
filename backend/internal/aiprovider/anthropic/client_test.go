@@ -68,6 +68,57 @@ func TestComplete_APIError(t *testing.T) {
 	}
 }
 
+func TestComplete_TemperatureForwarded(t *testing.T) {
+	var gotPayload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotPayload) //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]any{   //nolint:errcheck
+			"content": []map[string]any{{"type": "text", "text": "ok"}},
+			"usage":   map[string]any{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	zero := 0.0
+	c := newTestClient(t, srv)
+	_, err := c.Complete(context.Background(), aiprovider.LLMRequest{
+		APIKey:      "k",
+		Prompt:      "hi",
+		Temperature: &zero,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if temp, ok := gotPayload["temperature"]; !ok || temp != 0.0 {
+		t.Errorf("want temperature=0.0 forwarded to API, got %v (present=%v)", temp, ok)
+	}
+}
+
+func TestComplete_TemperatureNilOmitted(t *testing.T) {
+	var gotPayload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotPayload) //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]any{   //nolint:errcheck
+			"content": []map[string]any{{"type": "text", "text": "ok"}},
+			"usage":   map[string]any{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.Complete(context.Background(), aiprovider.LLMRequest{
+		APIKey:      "k",
+		Prompt:      "hi",
+		Temperature: nil,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, present := gotPayload["temperature"]; present {
+		t.Error("nil Temperature must not send temperature field to Anthropic API")
+	}
+}
+
 func TestComplete_SystemMessage(t *testing.T) {
 	var gotPayload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
