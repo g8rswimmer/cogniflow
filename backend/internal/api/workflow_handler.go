@@ -403,7 +403,7 @@ func toWorkflowResponse(wf store.Workflow) workflowResponse {
 		UpdatedAt: wf.UpdatedAt,
 	}
 	if wf.Trigger.Kind == "webhook" {
-		resp.Trigger.WebhookURL = "/webhooks/" + wf.ID
+		resp.Trigger.WebhookURL = "/v1/webhooks/" + wf.ID
 	}
 	return resp
 }
