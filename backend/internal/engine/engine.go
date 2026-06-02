@@ -73,11 +73,22 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 
 	events, cleanup := e.bus.Subscribe(run.ID)
 
+	slog.Info("run started",
+		"run_id", run.ID,
+		"workflow_id", wf.ID,
+		"workflow_name", wf.Name,
+		"triggered_by", req.TriggeredBy,
+		"node_count", len(dag.Nodes),
+		"timeout_s", int(timeout.Seconds()),
+	)
+
 	go func() {
 		defer cancel()
 		defer cleanup()
 
+		start := time.Now()
 		finalOutput, runErr := runDAG(runCtx, run.ID, dag, req.InitialData, e.registry, e.bus)
+		durationMs := time.Since(start).Milliseconds()
 
 		var statusUpdate store.RunStatus
 		var outputMap map[string]any
@@ -85,10 +96,24 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 		if runErr != nil {
 			statusUpdate = store.RunStatusFailed
 			outputMap = map[string]any{"error": runErr.Error()}
+			slog.Error("run failed",
+				"run_id", run.ID,
+				"workflow_id", wf.ID,
+				"workflow_name", wf.Name,
+				"duration_ms", durationMs,
+				"error", runErr,
+			)
 			e.bus.Publish(NodeEvent{RunID: run.ID, Type: EventRunFailed, Error: runErr.Error(), Timestamp: time.Now().UTC()})
 		} else {
 			statusUpdate = store.RunStatusSucceeded
 			outputMap = flattenOutput(finalOutput)
+			slog.Info("run succeeded",
+				"run_id", run.ID,
+				"workflow_id", wf.ID,
+				"workflow_name", wf.Name,
+				"duration_ms", durationMs,
+				"sink_nodes", len(finalOutput),
+			)
 			e.bus.Publish(NodeEvent{RunID: run.ID, Type: EventRunSucceeded, Timestamp: time.Now().UTC()})
 		}
 

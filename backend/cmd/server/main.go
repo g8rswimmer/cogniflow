@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/api"
@@ -23,6 +24,22 @@ import (
 )
 
 func main() {
+	// Configure structured JSON logging with a mutable level so it can be
+	// changed at runtime via PUT /admin/log-level without a restart.
+	var logLevel slog.LevelVar
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		logLevel.Set(slog.LevelDebug)
+	case "warn":
+		logLevel.Set(slog.LevelWarn)
+	case "error":
+		logLevel.Set(slog.LevelError)
+	default:
+		logLevel.Set(slog.LevelInfo)
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: &logLevel})))
+	slog.Info("log level set", "level", logLevel.Level().String())
+
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
 		slog.Error("DB_DSN environment variable is required")
@@ -83,7 +100,7 @@ func main() {
 		port = "8080"
 	}
 
-	router := api.NewRouter(db, vault, registry, wfEngine, bus, triggerMgr)
+	router := api.NewRouter(db, vault, registry, wfEngine, bus, triggerMgr, &logLevel)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)
