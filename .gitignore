@@ -14,3 +14,4 @@ frontend/dist/
 .idea/
 .vscode/
 *.swp
+backend/demos/llm_features_demo.sh
