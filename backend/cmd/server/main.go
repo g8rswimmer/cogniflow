@@ -10,10 +10,14 @@ import (
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/api"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/anthropic"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/openai"
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/embedding"
 	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/llm"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -49,8 +53,14 @@ func main() {
 	defer db.Close()
 	slog.Info("database connected and migrations applied")
 
+	openaiClient := openai.New()
+	anthropicClient := anthropic.New()
+
 	registry := node.NewRegistry()
 	registry.Register(httprequest.New())
+	registry.Register(llm.NewOpenAI(openaiClient))
+	registry.Register(llm.NewAnthropic(anthropicClient))
+	registry.Register(embedding.New(openaiClient))
 
 	rawStore := mysqlstore.NewWorkflowStore(db)
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)

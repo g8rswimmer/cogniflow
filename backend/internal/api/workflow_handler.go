@@ -12,6 +12,7 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/outputparser"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -62,7 +63,17 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.validateRequiredFields(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	if err := h.validateTemplates(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateOutputParsers(wf.Nodes); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -138,7 +149,17 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.validateRequiredFields(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	if err := h.validateTemplates(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateOutputParsers(wf.Nodes); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -218,6 +239,40 @@ func (h *workflowHandler) validate(wf *store.Workflow) error {
 	return nil
 }
 
+// validateRequiredFields checks that every field listed in a node's InputSchema
+// "required" array is present and non-empty in the node's config. This catches
+// missing required fields at save time rather than deferring the error to the
+// first execution.
+func (h *workflowHandler) validateRequiredFields(wf *store.Workflow) error {
+	for _, n := range wf.Nodes {
+		handler, err := h.registry.Lookup(n.TypeID)
+		if err != nil {
+			continue // unknown type caught by validate()
+		}
+		for _, field := range parseRequiredFields(handler.Meta().InputSchema) {
+			v, ok := n.Config[field]
+			if !ok || v == nil {
+				return fmt.Errorf("node %q: required field %q is missing", n.ID, field)
+			}
+			if s, ok := v.(string); ok && s == "" {
+				return fmt.Errorf("node %q: required field %q must not be empty", n.ID, field)
+			}
+		}
+	}
+	return nil
+}
+
+// parseRequiredFields extracts the "required" array from a JSON Schema.
+func parseRequiredFields(schema json.RawMessage) []string {
+	var s struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil
+	}
+	return s.Required
+}
+
 // validateTemplates parses any x-template:true config field value that contains
 // "{{" to catch syntax errors before the workflow is saved. This mirrors the
 // CEL validation pattern used by the Conditional node.
@@ -287,6 +342,18 @@ func parseTemplateFields(schema json.RawMessage) []templateField {
 		}
 	}
 	return fields
+}
+
+// validateOutputParsers checks that every output_parser defined on each node
+// has a valid kind and pattern, returning VALIDATION_FAILED at save time so
+// broken extractors are caught before execution.
+func validateOutputParsers(nodes []store.WorkflowNode) error {
+	for _, n := range nodes {
+		if err := outputparser.ValidateAll(n.OutputParsers); err != nil {
+			return fmt.Errorf("node %q: %w", n.ID, err)
+		}
+	}
+	return nil
 }
 
 // ---- response types ------------------------------------------------------

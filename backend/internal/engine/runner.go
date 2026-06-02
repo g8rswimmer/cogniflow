@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/outputparser"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
@@ -141,8 +142,12 @@ func executeNode(
 		return
 	}
 
-	bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeSucceeded, Output: out.Data, Timestamp: time.Now().UTC()})
-	resultCh <- nodeResult{nodeID: nodeID, output: out.Data}
+	// Apply output parsers defined on the node to extract named fields from
+	// the raw output (e.g. regex or JSON path over an LLM completion).
+	outData := outputparser.Apply(out.Data, n.OutputParsers)
+
+	bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeSucceeded, Output: outData, Timestamp: time.Now().UTC()})
+	resultCh <- nodeResult{nodeID: nodeID, output: outData}
 }
 
 // executeWithRetry calls handler.Execute, retrying up to MaxRetries times with linear backoff.

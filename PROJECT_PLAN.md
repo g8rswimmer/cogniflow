@@ -1,7 +1,7 @@
 # cogniflow — Project Plan
 
-> **Status:** Draft v0.1
-> **Last Updated:** 2026-05-29
+> **Status:** Draft v0.2
+> **Last Updated:** 2026-06-01
 > **References:** REQUIREMENTS.md · ARCHITECTURE.md
 
 Each milestone leaves the system in a **runnable, verifiable state**. Later milestones build on earlier ones. No milestone is purely internal — every one can be exercised by starting the system and observing real behaviour.
@@ -262,17 +262,21 @@ M1, M2, M3
 
 ## M6: AI Nodes
 
-**Goal:** LLM Call and Embedding nodes are fully operational in live workflows. AI provider clients are behind an interface so OpenAI and Anthropic are interchangeable by config.
+**Goal:** LLM Call and Embedding nodes are fully operational in live workflows. AI provider clients are behind an interface so OpenAI and Anthropic are interchangeable by config. Nodes support post-execution output parsers so structured data can be extracted from LLM completions and made available to downstream nodes.
 
 ### Deliverables
 
-- `backend/internal/aiprovider/provider.go` — `LLMClient` and `EmbeddingClient` interfaces
-- `backend/internal/aiprovider/openai/client.go` — OpenAI chat completions + embeddings
-- `backend/internal/aiprovider/anthropic/client.go` — Anthropic Messages API
-- `backend/internal/node/builtin/llm/handler.go` — LLM Call node: expands `prompt` and `system_msg` via `renderTemplate()` before calling `LLMClient`; returns `completion`, `prompt_tokens`, `completion_tokens`
-- `backend/internal/node/builtin/embedding/handler.go` — Embedding node: `input` field is `"x-template": true`; calls `EmbeddingClient`, returns `embedding` (float32 slice)
-- Both nodes registered with full `input_schema` / `output_schema`; `prompt`, `system_msg`, and `input` fields carry `"x-template": true`
-- CEL expression validation wired to workflow save (needed to unblock M8 Conditional node, but the validation helper can be added here)
+- `backend/internal/aiprovider/provider.go` — `LLMClient` and `EmbeddingClient` interfaces; `LLMRequest.Temperature` is `*float64` (nil = omit, pointer = send exact value including 0 for greedy sampling)
+- `backend/internal/aiprovider/openai/client.go` — OpenAI chat completions + embeddings; temperature omitted from request when nil
+- `backend/internal/aiprovider/anthropic/client.go` — Anthropic Messages API; returns error when response contains no text content block
+- `backend/internal/node/builtin/llm/handler.go` — single `Handler` backing `llm.openai` and `llm.anthropic`; expands `prompt` and `system_msg` via `renderTemplate()` before calling `LLMClient`; returns `completion`, `prompt_tokens`, `completion_tokens`
+- `backend/internal/node/builtin/embedding/handler.go` — `embedding.openai` node; `input` field is `"x-template": true`; calls `EmbeddingClient`; returns `embedding` (float32 slice as `[]any`)
+- All three nodes registered in `main.go` with full `input_schema` / `output_schema`; `prompt`, `system_msg`, and `input` fields carry `"x-template": true`
+- `backend/internal/node/outputparser/parser.go` — `Apply()` (merges extracted fields into output), `Validate()` / `ValidateAll()` (save-time checks); supports `json_path` (gjson dot-path, preserves native JSON types — bool/float64/string) and `regex` (with `capture_group`, always returns string)
+- `store.OutputParser` struct and `store.WorkflowNode.OutputParsers` field — serialised as `output_parsers JSON` column (migration `0004_add_output_parsers`)
+- Engine `runner.go` — calls `outputparser.Apply(out.Data, n.OutputParsers)` after `executeWithRetry()` succeeds; augmented map stored in `ExecutionContext` and published on `EventBus`
+- `validateOutputParsers()` in `workflow_handler.go` — called on `POST/PUT /workflows`; returns `VALIDATION_FAILED` for invalid kind, empty json_path pattern, bad regex, or negative capture_group
+- CEL expression validation deferred to M8 (not added in M6)
 
 ### Testable Criteria
 
@@ -300,22 +304,35 @@ curl http://localhost:8080/runs/$RUN | jq '.final_output.n1.completion'
 # → "Hello! How can I assist you today?"
 
 # Prompt template: n1 (HTTP Request) feeds n2 (LLM Call)
-# n2 prompt = "Summarise this HTTP response: {{.n1.body}}"
-# n1 hits httpbin.org/json and returns a JSON body
-RUN3=$(curl -sX POST http://localhost:8080/workflows/$TEMPLATE_WF_ID/runs -d '{}' | jq -r '.run_id')
-sleep 8
-curl http://localhost:8080/runs/$RUN3 | jq '.final_output.n2.completion'
-# → a natural-language summary of the httpbin JSON response
-# (confirms {{.n1.body}} was resolved before the model call)
+# n2 prompt = "Using user ID {{._initial.user_id}} check for account compromise"
+RUN2=$(curl -sX POST http://localhost:8080/workflows/$WF_ID2/runs \
+  -d '{"initial_data":{"user_id":"42"}}' | jq -r '.run_id')
+sleep 5
+curl http://localhost:8080/runs/$RUN2 | jq '.final_output.n1.completion'
+# → a response mentioning user 42 (confirms {{._initial.user_id}} resolved)
 
-# Prompt without template: literal string is sent unchanged
-# n1 prompt = "Say hello." — no {{ }} syntax
-curl http://localhost:8080/runs/$RUN | jq '.final_output.n1.completion'
-# → works normally; template picker shows but was not used
+# Output parser: LLM returns JSON; parser extracts a field for downstream use
+# n1 config: output_parsers: {"account_status": {"kind":"json_path","source":"completion","pattern":"status"}}
+# n1 completion = '{"status":"compromised","risk":0.9}'
+curl http://localhost:8080/runs/$RUN3 | jq '.final_output.n1.account_status'
+# → "compromised"
+
+# Output parser: regex extraction with capture group
+# parser: {"user_id": {"kind":"regex","source":"completion","pattern":"user_id: (\\d+)","capture_group":1}}
+# n1 completion = "Account review complete. user_id: 99 flagged."
+curl http://localhost:8080/runs/$RUN4 | jq '.final_output.n1.user_id'
+# → "99"
+
+# Invalid output parser rejected at save time
+curl -sX POST http://localhost:8080/workflows \
+  -d '{"nodes":[{"output_parsers":{"x":{"kind":"regex","source":"completion","pattern":"[broken","capture_group":0}}}],...}'
+  | jq '.error.code'
+# → "VALIDATION_FAILED"
 
 # Embedding node returns a vector
-# (workflow: manual → Embedding node)
-curl http://localhost:8080/runs/$RUN2 | jq '.final_output.n1.embedding | length'
+RUN5=$(curl -sX POST http://localhost:8080/workflows/$EMBED_WF_ID/runs -d '{}' | jq -r '.run_id')
+sleep 5
+curl http://localhost:8080/runs/$RUN5 | jq '.final_output.n1.embedding | length'
 # → 1536
 ```
 
@@ -455,7 +472,8 @@ M1, M2, M3
 - `src/pages/WorkflowEditorPage.tsx` — React Flow canvas; drag-and-drop from palette; edge drawing
 - `src/components/palette/NodePalette.tsx` + `PaletteNodeCard.tsx` — grouped, searchable
 - `src/components/sidebar/ConfigSidebar.tsx` + `SchemaForm.tsx` — `@rjsf/core` form from `input_schema`; `x-sensitive` fields rendered as password inputs
-- `src/components/sidebar/TemplateVariablePicker.tsx` — rendered below any field with `"x-template": true`; walks upstream edges via `useWorkflowStore` to find predecessor node IDs; for each predecessor, looks up its `output_schema` from `useNodeTypeStore`; renders a clickable tree of `{{.nodeID.field}}` snippets; clicking inserts the snippet at the cursor in the focused input
+- `src/components/sidebar/TemplateVariablePicker.tsx` — rendered below any field with `"x-template": true`; walks upstream edges via `useWorkflowStore` to find predecessor node IDs; for each predecessor, looks up its `output_schema` from `useNodeTypeStore` **plus any output_parsers defined on that node**; renders a clickable tree of `{{.nodeID.field}}` snippets; clicking inserts the snippet at the cursor in the focused input
+- `src/components/sidebar/OutputParserPanel.tsx` — rendered below the main schema form on every node; "Add Extractor" button opens a form with fields: Name (output key), Source (dropdown from node's output_schema), Type (json_path / regex), Pattern, Capture Group (regex only); saved as `output_parsers` in the workflow JSON
 - `src/components/shared/Navbar.tsx` — workflow name (editable), Save button, trigger settings icon
 - `TriggerPanel` — modal for selecting manual / webhook / cron trigger; shows computed webhook URL; validates cron expression
 - Save wires to `POST /workflows` (new) or `PUT /workflows/:id` (existing)

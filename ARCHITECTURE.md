@@ -1,7 +1,7 @@
 # cogniflow — Architecture Document
 
-> **Status:** Draft v0.2
-> **Last Updated:** 2026-05-29
+> **Status:** Draft v0.3
+> **Last Updated:** 2026-06-01
 
 ## Table of Contents
 
@@ -16,9 +16,10 @@
 9. [REST API Contract](#9-rest-api-contract)
 10. [CEL Expression Evaluation](#10-cel-expression-evaluation)
 11. [Template Variable Syntax](#11-template-variable-syntax)
-12. [Security](#12-security)
-13. [Docker Compose Services](#13-docker-compose-services)
-14. [Implementation Sequencing](#14-implementation-sequencing)
+12. [Output Parser System](#12-output-parser-system)
+13. [Security](#13-security)
+14. [Docker Compose Services](#14-docker-compose-services)
+15. [Implementation Sequencing](#15-implementation-sequencing)
 
 ---
 
@@ -1448,7 +1449,92 @@ This gives users a discoverable, click-to-insert experience without memorising u
 
 ---
 
-## 12. Security
+## 12. Output Parser System
+
+### Overview
+
+After a node's `Execute()` completes successfully, the engine applies zero or more **output parsers** defined on that node. Each parser extracts a named value from the raw output and merges it into the node's effective output map. Downstream nodes can then reference extracted fields via the standard template syntax — `{{.nodeID.extracted_field}}` — exactly as they would reference any native output field.
+
+This is particularly useful for LLM nodes whose completions contain structured data: rather than requiring a downstream Data Transform node, the author can extract `user_id` or `account_status` directly from the completion text and route on those values immediately.
+
+### Data Model
+
+`OutputParser` is defined in `backend/internal/store/store.go` and stored as a JSON blob in the `output_parsers` column on `workflow_nodes` (added by migration `0004_add_output_parsers`).
+
+```go
+// store/store.go
+
+type OutputParser struct {
+    Kind         string `json:"kind"`           // "json_path" | "regex"
+    Source       string `json:"source"`         // field in raw output to read (e.g. "completion")
+    Pattern      string `json:"pattern"`        // gjson dot-path or regex pattern
+    CaptureGroup int    `json:"capture_group"`  // regex only: 0 = full match, 1+ = group index
+}
+
+// WorkflowNode.OutputParsers is a map from extracted field name → parser rule.
+// e.g. {"user_id": OutputParser{Kind:"json_path", Source:"completion", Pattern:"user.id"}}
+```
+
+### Extraction Strategies
+
+| Kind | Pattern syntax | Example |
+|------|---------------|---------|
+| `json_path` | gjson dot-path (`field`, `a.b`, `arr.0.x`) | `result.score` extracts `{"result":{"score":0.98}}` → `0.98` (float64) |
+| `regex` | Go `regexp` | `(?:user_id: )(\d+)` with `capture_group: 1` extracts the digits after `"user_id: "` |
+
+For `json_path`, extracted values preserve their native JSON type — booleans remain `bool`, numbers remain `float64`, and strings remain `string`. JSON null is treated as no-match and the field is omitted. This means downstream CEL expressions can use typed comparisons like `ctx["n1"]["compromised"] == true` rather than `== "true"`. For `regex`, extracted values are always strings (inherent to regexp group capture). The source field (e.g. `completion`) is read from the node's raw output; if it is absent or not a string, the extractor is silently skipped.
+
+### Execution-Time Flow
+
+```
+executeNode()
+  └── executeWithRetry()  →  raw NodeOutput.Data
+  └── outputparser.Apply(out.Data, n.OutputParsers)
+        ├── for each parser: extract value from source field
+        ├── successful extractions merged into a new output map
+        └── failed extractions silently omitted (no match, bad pattern)
+  └── augmented outData stored in ExecutionContext + published on EventBus
+```
+
+The extraction is transparent to the node handler; handlers never see or configure parsers.
+
+### Save-Time Validation
+
+`validateOutputParsers()` in `workflow_handler.go` is called on every `POST /workflows` and `PUT /workflows/:id`. It delegates to `outputparser.ValidateAll()`:
+
+- `json_path`: pattern must be non-empty
+- `regex`: pattern must compile; `capture_group` must be ≥ 0
+
+Validation failures return `VALIDATION_FAILED` — same as template and CEL validation.
+
+### Implementation
+
+```
+backend/internal/node/outputparser/parser.go   — Apply(), Validate(), ValidateAll()
+backend/internal/store/store.go                — OutputParser struct, WorkflowNode.OutputParsers
+backend/internal/store/mysql/
+  migrations/0004_add_output_parsers.up.sql    — ALTER TABLE workflow_nodes ADD COLUMN output_parsers JSON
+backend/internal/engine/runner.go              — Apply() called after executeWithRetry()
+backend/internal/api/workflow_handler.go       — validateOutputParsers() at save time
+```
+
+Dependencies: `github.com/tidwall/gjson` for JSON path queries.
+
+### Frontend Configuration (M10)
+
+The `ConfigSidebar` renders an **Output Parsers** section below the main schema form for every node. Users can:
+
+1. Click **Add Extractor** to open a mini-form with fields:
+   - **Name** — the new output field name (e.g. `user_id`)
+   - **Source** — dropdown populated from the node's `output_schema` fields
+   - **Type** — `json_path` or `regex`
+   - **Pattern** — gjson path or regex string
+   - **Capture Group** — (regex only) integer ≥ 0; default 0 = full match
+2. Save the workflow; extracted field names appear in the `TemplateVariablePicker` for downstream nodes alongside native output fields.
+
+---
+
+## 13. Security
 
 ### AES-256-GCM Encryption of Sensitive Config Values
 
@@ -1482,7 +1568,7 @@ The `ConfigVault` wraps the Store: it decrypts `encrypted_value` blobs on `GetWo
 
 ---
 
-## 13. Docker Compose Services
+## 14. Docker Compose Services
 
 ```yaml
 version: "3.9"
@@ -1625,7 +1711,7 @@ The backend binary applies any pending `golang-migrate` migrations at startup be
 
 ---
 
-## 14. Implementation Sequencing
+## 15. Implementation Sequencing
 
 Recommended build order respecting inter-package dependencies:
 

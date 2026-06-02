@@ -1,7 +1,7 @@
 # cogniflow — Requirements Document
 
-> **Status:** Draft v0.3 — subject to iteration  
-> **Last Updated:** 2026-05-29
+> **Status:** Draft v0.4 — subject to iteration  
+> **Last Updated:** 2026-06-01
 
 ---
 
@@ -118,12 +118,14 @@ All nodes (built-in and extended) must conform to the following interface:
 | ND-06 | Nodes can emit structured errors with a human-readable message |
 | ND-07 | Node config fields marked `"x-template": true` in their `input_schema` optionally accept Go template syntax (`{{.nodeID.field}}`) to reference upstream node outputs at runtime; `{{._initial.key}}` references the run's initial data. Template syntax is **opt-in** — a plain literal value is always accepted; template evaluation is only triggered when the value contains `{{`. |
 | ND-08 | Template expressions in config fields are validated at workflow save time (parse error → `VALIDATION_FAILED`) so broken templates are caught before execution. A field with no `{{` is stored and used as a literal string with no validation overhead. |
+| ND-09 | Nodes support **output parsers** — optional post-execution extraction rules applied by the engine after `Execute()` succeeds. Each parser extracts a named field from the raw output using `json_path` (gjson dot-path) or `regex` (with capture group selection). `json_path` extractions preserve the native JSON type of the matched value (bool, number, or string), enabling downstream CEL conditionals to use typed comparisons (e.g. `ctx["n1"]["compromised"] == true`). Regex extractions always produce strings. Extracted fields are merged into the node's output and are immediately available to downstream nodes via template syntax (e.g. `{{.n1.user_id}}`). Parsers are validated at workflow save time; invalid patterns return `VALIDATION_FAILED`. |
+| ND-10 | The UI exposes an **Output Parsers** configuration section on every node's config sidebar. Users define a name, source field, extraction type (json_path / regex), pattern, and optional capture group. Extracted field names appear in the `TemplateVariablePicker` for downstream nodes alongside the node's declared `output_schema` fields. |
 
 #### 5.2.2 Built-In AI Nodes
 
 | ID | Node Type | Description |
 |----|-----------|-------------|
-| AI-01 | **LLM Call** | Send a prompt (with optional system message) to an LLM provider (OpenAI, Anthropic, etc.). Returns the completion text and token usage. Provider and model are configurable. The `prompt` and `system_msg` fields support template variable syntax so upstream node outputs (e.g. a previous HTTP response body or user-supplied initial data) can be injected into the prompt before the model is called. |
+| AI-01 | **LLM Call** | Send a prompt (with optional system message) to an LLM provider (OpenAI, Anthropic, etc.). Returns the completion text and token usage. Provider and model are configurable. The `prompt` and `system_msg` fields support template variable syntax so upstream node outputs (e.g. a previous HTTP response body or user-supplied initial data) can be injected into the prompt before the model is called. Output parsers (ND-09) can be used to extract structured fields from the completion text for downstream use. |
 | AI-02 | **Embedding** | Generate a vector embedding for one or more text inputs using a configurable provider and model. Returns the embedding vector(s). |
 | AI-03 | **RAG Retrieve** | Given a query, generate an embedding and retrieve the top-K most relevant chunks using MySQL 9.0+ native vector search (`VEC_DISTANCE_COSINE` / `VEC_DISTANCE_L2`). Returns matching chunks with scores. |
 | AI-04 | **RAG Ingest** | Chunk and embed a document or set of documents and upsert the resulting vectors into a MySQL `VECTOR` column. No separate vector store infrastructure is required. |
