@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
@@ -12,7 +13,7 @@ import (
 )
 
 // NewRouter wires all HTTP routes and returns the configured mux.
-func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus, tm *trigger.Manager) *http.ServeMux {
+func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus, tm *trigger.Manager, level *slog.LevelVar) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /health", newHealthHandler(db))
@@ -36,6 +37,10 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatc
 	mux.HandleFunc("GET /runs/{run_id}/events", wsh.streamEvents)
 
 	mux.HandleFunc("POST /webhooks/{workflow_id}", tm.WebhookHandler())
+
+	llh := &logLevelHandler{level: level}
+	mux.HandleFunc("GET /admin/log-level", llh.get)
+	mux.HandleFunc("PUT /admin/log-level", llh.set)
 
 	return mux
 }
