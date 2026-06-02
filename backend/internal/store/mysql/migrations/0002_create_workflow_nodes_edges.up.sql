@@ -8,8 +8,6 @@ CREATE TABLE workflow_nodes (
     retry_max        TINYINT UNSIGNED NOT NULL DEFAULT 0,
     retry_backoff_ms INT UNSIGNED     NOT NULL DEFAULT 1000,
     PRIMARY KEY (id),
-    CONSTRAINT fk_wn_workflow FOREIGN KEY (workflow_id)
-        REFERENCES workflows (id) ON DELETE CASCADE,
     INDEX idx_wn_workflow_id (workflow_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -20,8 +18,6 @@ CREATE TABLE workflow_edges (
     target_id    VARCHAR(36)  NOT NULL,
     branch_label VARCHAR(20),
     PRIMARY KEY (id),
-    CONSTRAINT fk_we_workflow FOREIGN KEY (workflow_id)
-        REFERENCES workflows (id) ON DELETE CASCADE,
     INDEX idx_we_workflow_id (workflow_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -34,6 +30,5 @@ CREATE TABLE node_configs (
     is_sensitive    TINYINT(1)      NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uq_nc_node_key (node_id, config_key),
-    CONSTRAINT fk_nc_node FOREIGN KEY (node_id)
-        REFERENCES workflow_nodes (id) ON DELETE CASCADE
+    INDEX idx_nc_node_id (node_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

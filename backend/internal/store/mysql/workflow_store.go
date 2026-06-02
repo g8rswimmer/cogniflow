@@ -198,7 +198,6 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 		return store.Workflow{}, store.ErrNotFound
 	}
 
-	// Replace nodes and edges; CASCADE DELETE handles node_configs.
 	if err := replaceNodesAndEdges(ctx, tx, w.ID, w.Nodes, w.Edges); err != nil {
 		return store.Workflow{}, err
 	}
@@ -223,12 +222,39 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 }
 
 func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM workflows WHERE id=?`, id)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("workflow store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Explicitly delete all child rows in dependency order.
+	// node_configs must go before workflow_nodes since they reference node IDs.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM node_configs WHERE node_id IN (SELECT id FROM workflow_nodes WHERE workflow_id = ?)`, id,
+	); err != nil {
+		return fmt.Errorf("workflow store: delete node configs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id = ?`, id); err != nil {
+		return fmt.Errorf("workflow store: delete workflow nodes: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_edges WHERE workflow_id = ?`, id); err != nil {
+		return fmt.Errorf("workflow store: delete workflow edges: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE workflow_id = ?`, id); err != nil {
+		return fmt.Errorf("workflow store: delete runs: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM workflows WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("workflow store: delete workflow: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return store.ErrNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("workflow store: commit: %w", err)
 	}
 	return nil
 }
@@ -379,6 +405,12 @@ type configWriteRow struct {
 }
 
 func replaceNodesAndEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode, edges []store.WorkflowEdge) error {
+	// Delete node_configs before workflow_nodes; without FK cascade this is explicit.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM node_configs WHERE node_id IN (SELECT id FROM workflow_nodes WHERE workflow_id = ?)`, workflowID,
+	); err != nil {
+		return fmt.Errorf("workflow store: delete node configs: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id=?`, workflowID); err != nil {
 		return fmt.Errorf("workflow store: delete nodes: %w", err)
 	}

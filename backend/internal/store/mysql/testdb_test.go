@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS workflows (
 
 CREATE TABLE IF NOT EXISTS workflow_nodes (
     id               TEXT    NOT NULL PRIMARY KEY,
-    workflow_id      TEXT    NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    workflow_id      TEXT    NOT NULL,
     type_id          TEXT    NOT NULL,
     label            TEXT    NOT NULL DEFAULT '',
     position_x       REAL    NOT NULL DEFAULT 0,
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
 
 CREATE TABLE IF NOT EXISTS workflow_edges (
     id           TEXT NOT NULL PRIMARY KEY,
-    workflow_id  TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    workflow_id  TEXT NOT NULL,
     source_id    TEXT NOT NULL,
     target_id    TEXT NOT NULL,
     branch_label TEXT
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS workflow_edges (
 
 CREATE TABLE IF NOT EXISTS node_configs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id         TEXT    NOT NULL REFERENCES workflow_nodes(id) ON DELETE CASCADE,
+    node_id         TEXT    NOT NULL,
     config_key      TEXT    NOT NULL,
     plain_value     TEXT,
     encrypted_value BLOB,
@@ -92,9 +92,6 @@ func openTestDB(t *testing.T) *sqlx.DB {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		t.Fatalf("enable foreign keys: %v", err)
-	}
 	if _, err := db.Exec(testSchema); err != nil {
 		t.Fatalf("apply test schema: %v", err)
 	}

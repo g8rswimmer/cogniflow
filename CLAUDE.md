@@ -162,6 +162,15 @@ type Registry interface { ... }          // interface defined by producer ✗
 func NewRegistry() Registry { ... }     // constructor hides concrete type ✗
 ```
 
+### Database conventions
+
+**No foreign keys.** Database tables must not declare `FOREIGN KEY` constraints or `REFERENCES` clauses. Referential integrity is enforced at the application layer: Go store methods explicitly delete child rows in the correct order before deleting a parent row. This applies to all migrations and to the SQLite test schema in `testdb_test.go`.
+
+Consequences to keep in mind when writing store code:
+- `DeleteWorkflow` must explicitly delete `node_configs`, `workflow_nodes`, `workflow_edges`, and `runs` before deleting the `workflows` row.
+- `replaceNodesAndEdges` must explicitly delete `node_configs` before deleting `workflow_nodes`.
+- `UpsertChunks` must explicitly delete existing `rag_chunks` for the document before inserting new ones.
+
 ### JSON conventions
 
 All JSON struct tags and API request/response bodies use **snake_case** (`type_id`, `display_name`, `input_schema`, etc.). Never use camelCase in JSON tags.

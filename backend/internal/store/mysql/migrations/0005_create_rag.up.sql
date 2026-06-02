@@ -13,6 +13,5 @@ CREATE TABLE rag_chunks (
     embedding    VECTOR(1536) NOT NULL,
     PRIMARY KEY (id),
     INDEX idx_rag_chunks_doc (document_id),
-    VECTOR INDEX idx_rag_chunks_emb (embedding),
-    FOREIGN KEY (document_id) REFERENCES rag_documents(id) ON DELETE CASCADE
+    VECTOR INDEX idx_rag_chunks_emb (embedding)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
