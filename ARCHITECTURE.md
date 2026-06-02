@@ -1479,10 +1479,10 @@ type OutputParser struct {
 
 | Kind | Pattern syntax | Example |
 |------|---------------|---------|
-| `json_path` | gjson dot-path (`field`, `a.b`, `arr.0.x`) | `result.score` extracts `{"result":{"score":0.98}}` → `"0.98"` |
+| `json_path` | gjson dot-path (`field`, `a.b`, `arr.0.x`) | `result.score` extracts `{"result":{"score":0.98}}` → `0.98` (float64) |
 | `regex` | Go `regexp` | `(?:user_id: )(\d+)` with `capture_group: 1` extracts the digits after `"user_id: "` |
 
-All extracted values are strings. The source field (e.g. `completion`) is read from the node's raw output; if it is absent or not a string, the extractor is silently skipped.
+For `json_path`, extracted values preserve their native JSON type — booleans remain `bool`, numbers remain `float64`, and strings remain `string`. JSON null is treated as no-match and the field is omitted. This means downstream CEL expressions can use typed comparisons like `ctx["n1"]["compromised"] == true` rather than `== "true"`. For `regex`, extracted values are always strings (inherent to regexp group capture). The source field (e.g. `completion`) is read from the node's raw output; if it is absent or not a string, the extractor is silently skipped.
 
 ### Execution-Time Flow
 

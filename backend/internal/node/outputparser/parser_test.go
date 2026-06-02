@@ -41,8 +41,91 @@ func TestApply_JSONPath_Nested(t *testing.T) {
 	out := Apply(data, map[string]store.OutputParser{
 		"score": {Kind: "json_path", Source: "completion", Pattern: "result.score"},
 	})
-	if out["score"] != "0.98" {
-		t.Errorf("want score=0.98, got %v", out["score"])
+	// json_path preserves the native JSON number type.
+	if out["score"] != float64(0.98) {
+		t.Errorf("want score=float64(0.98), got %v (%T)", out["score"], out["score"])
+	}
+}
+
+func TestApply_JSONPath_BoolPreserved(t *testing.T) {
+	data := map[string]any{
+		"completion": `{"compromised":true,"risk":0.9}`,
+	}
+	out := Apply(data, map[string]store.OutputParser{
+		"user_acc_compromise": {Kind: "json_path", Source: "completion", Pattern: "compromised"},
+		"risk_score":          {Kind: "json_path", Source: "completion", Pattern: "risk"},
+	})
+	// Boolean true must be a bool, not the string "true", so downstream CEL can use == true.
+	if out["user_acc_compromise"] != true {
+		t.Errorf("want bool true, got %v (%T)", out["user_acc_compromise"], out["user_acc_compromise"])
+	}
+	if out["risk_score"] != float64(0.9) {
+		t.Errorf("want float64(0.9), got %v (%T)", out["risk_score"], out["risk_score"])
+	}
+}
+
+func TestApply_JSONPath_ArrayReturnedAsJSONString(t *testing.T) {
+	data := map[string]any{
+		"completion": `{"tags":["a","b","c"]}`,
+	}
+	out := Apply(data, map[string]store.OutputParser{
+		"tags": {Kind: "json_path", Source: "completion", Pattern: "tags"},
+	})
+	// Arrays must come back as JSON text, not a Go []interface{}, so that
+	// downstream text/template renders ["a","b","c"] not [a b c].
+	if out["tags"] != `["a","b","c"]` {
+		t.Errorf("want JSON array string, got %v (%T)", out["tags"], out["tags"])
+	}
+}
+
+func TestApply_JSONPath_ObjectReturnedAsJSONString(t *testing.T) {
+	data := map[string]any{
+		"completion": `{"meta":{"env":"prod"}}`,
+	}
+	out := Apply(data, map[string]store.OutputParser{
+		"meta": {Kind: "json_path", Source: "completion", Pattern: "meta"},
+	})
+	// Objects must come back as JSON text, not a Go map, so templates stay valid.
+	if out["meta"] != `{"env":"prod"}` {
+		t.Errorf("want JSON object string, got %v (%T)", out["meta"], out["meta"])
+	}
+}
+
+func TestApply_NonStringSource_IntEncoded(t *testing.T) {
+	// Source field is an int (e.g. status_code from an HTTP Request node).
+	// It must be JSON-encoded before extraction so the parser can operate on it.
+	data := map[string]any{"status_code": 200}
+	out := Apply(data, map[string]store.OutputParser{
+		"code": {Kind: "regex", Source: "status_code", Pattern: `(\d+)`, CaptureGroup: 1},
+	})
+	if out["code"] != "200" {
+		t.Errorf("want code=200, got %v", out["code"])
+	}
+}
+
+func TestApply_NonStringSource_MapEncoded(t *testing.T) {
+	// Source field is a map (e.g. headers from an HTTP Request node).
+	// JSON-encoding it allows json_path to drill into the structure.
+	data := map[string]any{
+		"headers": map[string]any{"Content-Type": "application/json"},
+	}
+	out := Apply(data, map[string]store.OutputParser{
+		"ct": {Kind: "json_path", Source: "headers", Pattern: "Content-Type"},
+	})
+	if out["ct"] != "application/json" {
+		t.Errorf("want ct=application/json, got %v", out["ct"])
+	}
+}
+
+func TestApply_JSONPath_NullSkipped(t *testing.T) {
+	data := map[string]any{
+		"completion": `{"status":null}`,
+	}
+	out := Apply(data, map[string]store.OutputParser{
+		"status": {Kind: "json_path", Source: "completion", Pattern: "status"},
+	})
+	if _, ok := out["status"]; ok {
+		t.Error("JSON null should be treated as no-match and the field omitted")
 	}
 }
 
