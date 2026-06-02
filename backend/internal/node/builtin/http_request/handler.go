@@ -13,6 +13,25 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node"
 )
 
+// defaultTimeout is the client-level deadline applied when no per-request
+// timeout_seconds is configured on the node. It acts as a safety net against
+// hung connections; the node's own context timeout (from timeout_seconds config)
+// will typically fire first for configured workflows.
+const defaultTimeout = 30 * time.Second
+
+// Option configures the HTTP client used by the http.request Handler.
+type Option func(*http.Client)
+
+// WithTimeout overrides the default client timeout.
+func WithTimeout(d time.Duration) Option {
+	return func(hc *http.Client) { hc.Timeout = d }
+}
+
+// WithTransport replaces the HTTP transport. Primarily used in tests.
+func WithTransport(rt http.RoundTripper) Option {
+	return func(hc *http.Client) { hc.Transport = rt }
+}
+
 var inputSchema = json.RawMessage(`{
   "type": "object",
   "required": ["url", "method"],
@@ -39,9 +58,14 @@ type Handler struct {
 	client *http.Client
 }
 
-// New returns a new HTTPRequest node handler.
-func New() *Handler {
-	return &Handler{client: &http.Client{}}
+// New returns a new HTTPRequest handler with a default 30 s client timeout.
+// Pass Option values to override timeout or transport.
+func New(opts ...Option) *Handler {
+	hc := &http.Client{Timeout: defaultTimeout}
+	for _, o := range opts {
+		o(hc)
+	}
+	return &Handler{client: hc}
 }
 
 func (h *Handler) Meta() node.NodeMeta {

@@ -21,15 +21,31 @@ type RetryPolicy struct {
 	BackoffMs  int `json:"backoff_ms"`
 }
 
+// OutputParser defines how to extract a named value from a node's raw output after execution.
+// Extracted fields are merged into the node's output and become available to downstream nodes
+// via template syntax (e.g. {{.n1.extracted_field}}).
+type OutputParser struct {
+	// Kind is the extraction method: "json_path" or "regex".
+	Kind string `json:"kind"`
+	// Source is the field in the node's raw output to extract from (e.g. "completion").
+	Source string `json:"source"`
+	// Pattern is the gjson path (for json_path) or regular expression (for regex).
+	Pattern string `json:"pattern"`
+	// CaptureGroup is the regex capture group index to return (0 = full match, 1 = first group, etc).
+	// Ignored when Kind is "json_path".
+	CaptureGroup int `json:"capture_group,omitempty"`
+}
+
 // WorkflowNode is one node instance in a workflow graph.
 type WorkflowNode struct {
-	ID            string          `json:"id"`
-	TypeID        string          `json:"type_id"`
-	Label         string          `json:"label,omitempty"`
-	Position      NodePosition    `json:"position"`
-	Config        map[string]any  `json:"config,omitempty"`
-	SensitiveKeys map[string]bool `json:"-"` // keys encrypted at rest; set by config vault
-	RetryPolicy   *RetryPolicy    `json:"retry_policy,omitempty"`
+	ID            string                    `json:"id"`
+	TypeID        string                    `json:"type_id"`
+	Label         string                    `json:"label,omitempty"`
+	Position      NodePosition              `json:"position"`
+	Config        map[string]any            `json:"config,omitempty"`
+	SensitiveKeys map[string]bool           `json:"-"` // keys encrypted at rest; set by config vault
+	RetryPolicy   *RetryPolicy              `json:"retry_policy,omitempty"`
+	OutputParsers map[string]OutputParser   `json:"output_parsers,omitempty"`
 }
 
 // WorkflowEdge is a directed edge between two nodes.

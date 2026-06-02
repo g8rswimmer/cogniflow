@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -359,6 +360,7 @@ type nodeWriteRow struct {
 	PositionY      float64 `db:"position_y"`
 	RetryMax       int     `db:"retry_max"`
 	RetryBackoffMs int     `db:"retry_backoff_ms"`
+	OutputParsers  *string `db:"output_parsers"` // JSON blob; NULL when no parsers defined
 }
 
 // edgeWriteRow is the write-side row struct for INSERT into workflow_edges.
@@ -400,9 +402,20 @@ func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []st
 			retryMax = n.RetryPolicy.MaxRetries
 			retryMs = n.RetryPolicy.BackoffMs
 		}
+
+		var parsersJSON *string
+		if len(n.OutputParsers) > 0 {
+			b, err := json.Marshal(n.OutputParsers)
+			if err != nil {
+				return fmt.Errorf("workflow store: marshal output_parsers for node %q: %w", n.ID, err)
+			}
+			s := string(b)
+			parsersJSON = &s
+		}
+
 		_, err := tx.NamedExecContext(ctx,
-			`INSERT INTO workflow_nodes (id, workflow_id, type_id, label, position_x, position_y, retry_max, retry_backoff_ms)
-			 VALUES (:id, :workflow_id, :type_id, :label, :position_x, :position_y, :retry_max, :retry_backoff_ms)`,
+			`INSERT INTO workflow_nodes (id, workflow_id, type_id, label, position_x, position_y, retry_max, retry_backoff_ms, output_parsers)
+			 VALUES (:id, :workflow_id, :type_id, :label, :position_x, :position_y, :retry_max, :retry_backoff_ms, :output_parsers)`,
 			nodeWriteRow{
 				ID:             n.ID,
 				WorkflowID:     workflowID,
@@ -412,6 +425,7 @@ func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []st
 				PositionY:      n.Position.Y,
 				RetryMax:       retryMax,
 				RetryBackoffMs: retryMs,
+				OutputParsers:  parsersJSON,
 			},
 		)
 		if err != nil {
@@ -483,9 +497,11 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 		PositionY      float64 `db:"position_y"`
 		RetryMax       int     `db:"retry_max"`
 		RetryBackoffMs int     `db:"retry_backoff_ms"`
+		OutputParsers  *string `db:"output_parsers"`
 	}
 	if err := s.db.SelectContext(ctx, &rows,
-		`SELECT id, type_id, COALESCE(label,'') AS label, position_x, position_y, retry_max, retry_backoff_ms
+		`SELECT id, type_id, COALESCE(label,'') AS label, position_x, position_y,
+		        retry_max, retry_backoff_ms, output_parsers
 		 FROM workflow_nodes WHERE workflow_id=? ORDER BY id`, workflowID); err != nil {
 		return nil, fmt.Errorf("workflow store: load nodes: %w", err)
 	}
@@ -517,6 +533,15 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 			n.RetryPolicy = &store.RetryPolicy{
 				MaxRetries: r.RetryMax,
 				BackoffMs:  r.RetryBackoffMs,
+			}
+		}
+		if r.OutputParsers != nil && *r.OutputParsers != "" {
+			var parsers map[string]store.OutputParser
+			if err := json.Unmarshal([]byte(*r.OutputParsers), &parsers); err != nil {
+				slog.Warn("workflow store: ignoring malformed output_parsers for node",
+					"node_id", r.ID, "error", err)
+			} else {
+				n.OutputParsers = parsers
 			}
 		}
 		nodes = append(nodes, n)

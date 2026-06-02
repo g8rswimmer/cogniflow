@@ -12,6 +12,7 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/outputparser"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -63,6 +64,11 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.validateTemplates(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateOutputParsers(wf.Nodes); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -139,6 +145,11 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.validateTemplates(&wf); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateOutputParsers(wf.Nodes); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -287,6 +298,18 @@ func parseTemplateFields(schema json.RawMessage) []templateField {
 		}
 	}
 	return fields
+}
+
+// validateOutputParsers checks that every output_parser defined on each node
+// has a valid kind and pattern, returning VALIDATION_FAILED at save time so
+// broken extractors are caught before execution.
+func validateOutputParsers(nodes []store.WorkflowNode) error {
+	for _, n := range nodes {
+		if err := outputparser.ValidateAll(n.OutputParsers); err != nil {
+			return fmt.Errorf("node %q: %w", n.ID, err)
+		}
+	}
+	return nil
 }
 
 // ---- response types ------------------------------------------------------

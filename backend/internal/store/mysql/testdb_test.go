@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
     position_x       REAL    NOT NULL DEFAULT 0,
     position_y       REAL    NOT NULL DEFAULT 0,
     retry_max        INTEGER NOT NULL DEFAULT 0,
-    retry_backoff_ms INTEGER NOT NULL DEFAULT 1000
+    retry_backoff_ms INTEGER NOT NULL DEFAULT 1000,
+    output_parsers   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workflow_edges (
