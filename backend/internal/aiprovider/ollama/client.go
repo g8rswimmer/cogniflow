@@ -91,7 +91,8 @@ func (c *Client) Embed(ctx context.Context, req aiprovider.EmbeddingRequest) (ai
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		errBody, _ := io.ReadAll(resp.Body)
+		const errBodyLimit = 1 << 20 // 1 MiB cap; Ollama error bodies are small
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyLimit))
 		return aiprovider.EmbeddingResponse{}, fmt.Errorf("ollama: http %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 

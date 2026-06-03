@@ -134,23 +134,21 @@ func TestRAGIngestHandler_Execute_TemplateText(t *testing.T) {
 	}
 }
 
-func TestRAGIngestHandler_Execute_AutoDocumentID(t *testing.T) {
-	client := &mockEmbedClient{resp: aiprovider.EmbeddingResponse{Embedding: []float32{0.1}}}
-	st := &mockChunkStore{}
-	h := New(client, st)
+func TestRAGIngestHandler_Execute_MissingDocumentID_ReturnsError(t *testing.T) {
+	h := New(&mockEmbedClient{resp: aiprovider.EmbeddingResponse{Embedding: []float32{0.1}}}, &mockChunkStore{})
 
-	out, err := h.Execute(context.Background(), node.NodeInput{
+	_, err := h.Execute(context.Background(), node.NodeInput{
 		Config: map[string]any{
 			"text": "some text",
-			// no document_id → should generate one
+			// no document_id — every run would write to a fresh key with no cleanup path
 		},
 		UpstreamData: map[string]any{},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error when document_id is missing")
 	}
-	if out.Data["document_id"] == "" {
-		t.Error("expected auto-generated document_id, got empty string")
+	if !strings.Contains(err.Error(), "document_id is required") {
+		t.Errorf("expected 'document_id is required' in error, got: %v", err)
 	}
 }
 
@@ -189,7 +187,7 @@ func TestRAGIngestHandler_Execute_LongDocumentID_ReturnsError(t *testing.T) {
 		UpstreamData: map[string]any{},
 	})
 	if err == nil {
-		t.Fatalf("expected error for document_id longer than %d chars", maxDocIDLen)
+		t.Fatalf("expected error for document_id longer than %d bytes", maxDocIDLen)
 	}
 	if !strings.Contains(err.Error(), "maximum length") {
 		t.Errorf("expected 'maximum length' in error, got: %v", err)

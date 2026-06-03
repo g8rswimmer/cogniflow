@@ -110,7 +110,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		return node.NodeOutput{}, fmt.Errorf("%s: render system_msg: %w", h.typeID, err)
 	}
 
-	maxTokens, _ := toInt(input.Config["max_tokens"])
+	maxTokens := nodeutil.ToInt(input.Config["max_tokens"], 0)
 
 	// Use a pointer so that explicitly-set zero (greedy sampling) is sent to
 	// the provider, while an unconfigured field produces nil (omit from request).
@@ -136,17 +136,6 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		"prompt_tokens":     resp.PromptTokens,
 		"completion_tokens": resp.CompletionTokens,
 	}}, nil
-}
-
-func toInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case float64:
-		return int(n), true
-	default:
-		return 0, false
-	}
 }
 
 func toFloat(v any) (float64, bool) {

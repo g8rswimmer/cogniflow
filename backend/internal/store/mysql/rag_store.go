@@ -70,19 +70,28 @@ func (s *WorkflowStore) UpsertChunks(ctx context.Context, chunks []store.RAGChun
 	return nil
 }
 
+// maxScanRows caps unfiltered (cross-document) searches. Without a document
+// filter the query would load the entire rag_chunks table; this bound prevents
+// OOM on large corpora. Callers should always supply docFilter for production use.
+const maxScanRows = 10_000
+
 // SearchChunks retrieves the top-K most similar chunks to the given embedding
 // using cosine distance computed in Go. Results are ordered ascending (lower = more similar).
 // When docFilter is non-empty only chunks for that document_id are searched.
+// When docFilter is empty the scan is capped at maxScanRows to bound memory use.
 func (s *WorkflowStore) SearchChunks(ctx context.Context, embedding []float32, topK int, docFilter string) ([]store.RAGChunkResult, error) {
 	if topK <= 0 {
 		topK = 5
 	}
 
-	q := `SELECT id, chunk_text, embedding FROM rag_chunks`
+	var q string
 	var args []any
 	if docFilter != "" {
-		q += " WHERE document_id = ?"
+		q = `SELECT id, chunk_text, embedding FROM rag_chunks WHERE document_id = ?`
 		args = append(args, docFilter)
+	} else {
+		q = `SELECT id, chunk_text, embedding FROM rag_chunks LIMIT ?`
+		args = append(args, maxScanRows)
 	}
 
 	type dbRow struct {

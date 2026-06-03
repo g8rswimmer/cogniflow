@@ -95,7 +95,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 
 	// Apply timeout override from config.
 	if ts, ok := input.Config["timeout_seconds"]; ok {
-		if secs, ok := toInt(ts); ok && secs > 0 {
+		if secs := nodeutil.ToInt(ts, 0); secs > 0 {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, time.Duration(secs)*time.Second)
 			defer cancel()
@@ -163,14 +163,3 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	}}, nil
 }
 
-// toInt converts numeric config values (JSON unmarshals numbers as float64).
-func toInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case float64:
-		return int(n), true
-	default:
-		return 0, false
-	}
-}

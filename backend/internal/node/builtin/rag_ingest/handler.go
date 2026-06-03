@@ -5,10 +5,8 @@ package rag_ingest
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
@@ -28,7 +26,7 @@ const (
 
 var inputSchema = json.RawMessage(`{
   "type": "object",
-  "required": ["text"],
+  "required": ["text", "document_id"],
   "properties": {
     "api_key":       { "type": "string",  "title": "API Key",       "x-sensitive": true },
     "model":         { "type": "string",  "title": "Model",         "default": "text-embedding-3-small" },
@@ -137,16 +135,15 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	}}, nil
 }
 
-// resolveDocumentID returns the document ID for this run:
-//   - If document_id is not configured, a random UUID is generated.
-//   - If document_id is configured, the template is expanded; an empty result
-//     after expansion is an explicit error to prevent silently orphaning chunks.
-//   - IDs longer than maxDocIDLen are rejected to prevent VARCHAR(255) overflow
-//     when the chunk PK is constructed as documentID+":"+chunkIndex.
+// resolveDocumentID resolves the document_id from config, expanding template
+// references if present. document_id is required: omitting it would cause every
+// run to write to a different (unknown) key with no way to clean up old chunks.
+// IDs longer than maxDocIDLen bytes are rejected to prevent VARCHAR(255) overflow
+// when the chunk PK is constructed as documentID+":"+chunkIndex.
 func resolveDocumentID(input node.NodeInput) (string, error) {
 	raw, _ := input.Config["document_id"].(string)
 	if raw == "" {
-		return newID(), nil
+		return "", fmt.Errorf("rag.ingest: document_id is required")
 	}
 	docID, err := nodeutil.RenderTemplate(raw, input.UpstreamData)
 	if err != nil {
@@ -156,7 +153,7 @@ func resolveDocumentID(input node.NodeInput) (string, error) {
 		return "", fmt.Errorf("rag.ingest: document_id rendered to an empty string; check template references")
 	}
 	if len(docID) > maxDocIDLen {
-		return "", fmt.Errorf("rag.ingest: document_id exceeds maximum length of %d characters (got %d)", maxDocIDLen, len(docID))
+		return "", fmt.Errorf("rag.ingest: document_id exceeds maximum length of %d bytes (got %d)", maxDocIDLen, len(docID))
 	}
 	return docID, nil
 }
@@ -197,12 +194,3 @@ func chunkText(text string, chunkSize, overlap int) []string {
 	return chunks
 }
 
-func newID() string {
-	var b [16]byte
-	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-		panic(fmt.Sprintf("rag_ingest: read random: %v", err))
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
-}

@@ -232,6 +232,10 @@ func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
 
 	// Explicitly delete all child rows in dependency order.
 	// node_configs must go before workflow_nodes since they reference node IDs.
+	// TODO: also delete rag_documents/rag_chunks for this workflow. Currently,
+	// RAG data is not workflow-scoped at the schema level (document_id may be a
+	// template that can only be resolved at run time). A future migration should
+	// add workflow_id to rag_documents to enable deterministic cleanup here.
 	if err := deleteNodeConfigs(ctx, tx, id); err != nil {
 		return err
 	}

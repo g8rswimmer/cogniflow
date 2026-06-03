@@ -3,15 +3,18 @@ package nodeutil
 
 import (
 	"bytes"
+	"strings"
 	"text/template"
 )
 
 // RenderTemplate expands s as a Go text/template with data as the context.
 // Missing keys produce an error so misconfigured upstream references fail fast
 // rather than silently expanding to "<no value>".
-// If s contains no "{{" sequences the template is still parsed and executed but
-// returns s unchanged with no allocation on the hot path.
+// Strings without "{{" are returned as-is with no allocation.
 func RenderTemplate(s string, data map[string]any) (string, error) {
+	if !strings.Contains(s, "{{") {
+		return s, nil
+	}
 	t, err := template.New("").Option("missingkey=error").Parse(s)
 	if err != nil {
 		return s, err
