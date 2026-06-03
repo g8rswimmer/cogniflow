@@ -27,6 +27,7 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/merge"
 	ragingest "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_ingest"
 	ragretrieve "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_retrieve"
+	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -84,6 +85,7 @@ func main() {
 	rawStore := mysqlstore.NewWorkflowStore(db)
 
 	registry := node.NewRegistry()
+	defer registry.Shutdown()
 	registry.Register(httprequest.New())
 	registry.Register(llm.NewOpenAI(openaiClient))
 	registry.Register(llm.NewAnthropic(anthropicClient))
@@ -93,6 +95,14 @@ func main() {
 	registry.Register(dbquery.New())
 	registry.Register(dbwrite.New())
 	registry.Register(merge.New())
+
+	// Register out-of-process gRPC plugins before built-in AI nodes so that
+	// PLUGIN_ADDRESSES nodes appear in the palette alongside built-ins.
+	if pluginAddrs := os.Getenv("PLUGIN_ADDRESSES"); pluginAddrs != "" {
+		pluginCtx, pluginCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer pluginCancel()
+		nodeplugin.Register(pluginCtx, pluginAddrs, registry)
+	}
 
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
 

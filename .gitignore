@@ -5,6 +5,7 @@
 backend/bin/
 *.test
 coverage.out
+examples/plugins/echo/echo
 
 # Frontend
 frontend/node_modules/

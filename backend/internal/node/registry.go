@@ -3,6 +3,7 @@ package node
 import (
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"sync"
 )
@@ -44,6 +45,19 @@ func (r *NodeRegistry) Lookup(typeID string) (NodeHandler, error) {
 		return nil, fmt.Errorf("node type %q: %w", typeID, ErrNodeNotFound)
 	}
 	return h, nil
+}
+
+// Shutdown closes any registered handler that implements io.Closer (e.g. gRPC
+// plugin connections). Built-in handlers that do not implement io.Closer are
+// silently skipped. Call once during server shutdown.
+func (r *NodeRegistry) Shutdown() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, h := range r.handlers {
+		if c, ok := h.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
 }
 
 // ListAll returns metadata for every registered node type, sorted by TypeID.
