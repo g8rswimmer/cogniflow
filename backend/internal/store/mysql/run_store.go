@@ -18,7 +18,27 @@ func (s *WorkflowStore) CreateRun(ctx context.Context, r store.Run) (store.Run, 
 		r.ID = newUUID()
 	}
 
-	_, err := s.db.NamedExecContext(ctx,
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return store.Run{}, fmt.Errorf("run store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Verify the workflow still exists inside this transaction. Without a FK
+	// constraint on runs.workflow_id, this is the application-layer guard that
+	// closes the TOCTOU window between engine.Run's GetWorkflow call and the
+	// INSERT below.
+	var exists int
+	if err := tx.GetContext(ctx, &exists,
+		`SELECT COUNT(*) FROM workflows WHERE id = ?`, r.WorkflowID,
+	); err != nil {
+		return store.Run{}, fmt.Errorf("run store: check workflow: %w", err)
+	}
+	if exists == 0 {
+		return store.Run{}, fmt.Errorf("run store: workflow %q: %w", r.WorkflowID, store.ErrNotFound)
+	}
+
+	if _, err := tx.NamedExecContext(ctx,
 		`INSERT INTO runs (id, workflow_id, triggered_by, status, started_at)
 		 VALUES (:id, :workflow_id, :triggered_by, :status, :started_at)`,
 		runWriteRow{
@@ -28,9 +48,12 @@ func (s *WorkflowStore) CreateRun(ctx context.Context, r store.Run) (store.Run, 
 			Status:      string(r.Status),
 			StartedAt:   r.StartedAt,
 		},
-	)
-	if err != nil {
+	); err != nil {
 		return store.Run{}, fmt.Errorf("run store: create run: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return store.Run{}, fmt.Errorf("run store: commit: %w", err)
 	}
 	return r, nil
 }

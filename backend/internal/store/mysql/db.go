@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	drvmysql "github.com/go-sql-driver/mysql"
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/mysql"
+	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jmoiron/sqlx"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
 //go:embed migrations/*.sql
@@ -18,6 +17,17 @@ var migrationsFS embed.FS
 
 // Open opens a MySQL connection and runs pending schema migrations.
 func Open(dsn string) (*sqlx.DB, error) {
+	// Ensure clientFoundRows=true so that UPDATE statements report matched rows
+	// rather than only rows whose values changed. Without this, updating a row
+	// with identical values returns RowsAffected=0, which the store incorrectly
+	// treats as ErrNotFound on an idempotent PUT.
+	cfg, err := drvmysql.ParseDSN(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open db: parse DSN: %w", err)
+	}
+	cfg.ClientFoundRows = true
+	dsn = cfg.FormatDSN()
+
 	db, err := sqlx.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -39,7 +49,7 @@ func runMigrations(db *sqlx.DB) error {
 		return err
 	}
 
-	driver, err := mysql.WithInstance(db.DB, &mysql.Config{})
+	driver, err := migratemysql.WithInstance(db.DB, &migratemysql.Config{})
 	if err != nil {
 		return err
 	}

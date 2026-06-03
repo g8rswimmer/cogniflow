@@ -198,50 +198,71 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 		return store.Workflow{}, store.ErrNotFound
 	}
 
-	// Replace nodes and edges; CASCADE DELETE handles node_configs.
 	if err := replaceNodesAndEdges(ctx, tx, w.ID, w.Nodes, w.Edges); err != nil {
 		return store.Workflow{}, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return store.Workflow{}, fmt.Errorf("workflow store: commit: %w", err)
-	}
-
-	// Fetch only timestamps to avoid a full round-trip; MySQL controls updated_at via ON UPDATE.
+	// Read MySQL-managed timestamps inside the transaction so the value is
+	// guaranteed visible and no concurrent DeleteWorkflow can delete the row
+	// between our Commit and a post-commit SELECT.
 	var ts struct {
 		CreatedAt time.Time `db:"created_at"`
 		UpdatedAt time.Time `db:"updated_at"`
 	}
-	if err := s.db.GetContext(ctx, &ts,
+	if err := tx.GetContext(ctx, &ts,
 		`SELECT created_at, updated_at FROM workflows WHERE id=?`, w.ID); err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow store: fetch timestamps: %w", err)
 	}
 	w.CreatedAt = ts.CreatedAt
 	w.UpdatedAt = ts.UpdatedAt
 
+	if err := tx.Commit(); err != nil {
+		return store.Workflow{}, fmt.Errorf("workflow store: commit: %w", err)
+	}
+
 	return w, nil
 }
 
 func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM workflows WHERE id=?`, id)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("workflow store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Explicitly delete all child rows in dependency order.
+	// node_configs must go before workflow_nodes since they reference node IDs.
+	// TODO: also delete rag_documents/rag_chunks for this workflow. Currently,
+	// RAG data is not workflow-scoped at the schema level (document_id may be a
+	// template that can only be resolved at run time). A future migration should
+	// add workflow_id to rag_documents to enable deterministic cleanup here.
+	if err := deleteNodeConfigs(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id = ?`, id); err != nil {
+		return fmt.Errorf("workflow store: delete workflow nodes: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_edges WHERE workflow_id = ?`, id); err != nil {
+		return fmt.Errorf("workflow store: delete workflow edges: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE workflow_id = ?`, id); err != nil {
+		return fmt.Errorf("workflow store: delete runs: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM workflows WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("workflow store: delete workflow: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return store.ErrNotFound
 	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("workflow store: commit: %w", err)
+	}
 	return nil
 }
 
-
-// ---- RAG (stub — implemented in M7) -------------------------------------
-
-func (s *WorkflowStore) UpsertChunks(_ context.Context, _ []store.RAGChunk) error {
-	return fmt.Errorf("rag: not implemented until M7")
-}
-func (s *WorkflowStore) SearchChunks(_ context.Context, _ []float32, _ int, _ string) ([]store.RAGChunkResult, error) {
-	return nil, fmt.Errorf("rag: not implemented until M7")
-}
 
 // ---- Triggers ------------------------------------------------------------
 
@@ -380,6 +401,7 @@ type edgeWriteRow struct {
 // configWriteRow is the write-side row struct for INSERT into node_configs.
 // PlainValue and EncValue are mutually exclusive: one is nil depending on IsSensitive.
 type configWriteRow struct {
+	WorkflowID  string  `db:"workflow_id"`
 	NodeID      string  `db:"node_id"`
 	Key         string  `db:"config_key"`
 	PlainValue  *string `db:"plain_value"`
@@ -388,6 +410,10 @@ type configWriteRow struct {
 }
 
 func replaceNodesAndEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []store.WorkflowNode, edges []store.WorkflowEdge) error {
+	// Delete node_configs before workflow_nodes; without FK cascade this must be explicit.
+	if err := deleteNodeConfigs(ctx, tx, workflowID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_id=?`, workflowID); err != nil {
 		return fmt.Errorf("workflow store: delete nodes: %w", err)
 	}
@@ -436,16 +462,16 @@ func insertNodes(ctx context.Context, tx *sqlx.Tx, workflowID string, nodes []st
 		if err != nil {
 			return fmt.Errorf("workflow store: insert node %q: %w", n.ID, err)
 		}
-		if err := insertConfigs(ctx, tx, n); err != nil {
+		if err := insertConfigs(ctx, tx, workflowID, n); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func insertConfigs(ctx context.Context, tx *sqlx.Tx, n store.WorkflowNode) error {
+func insertConfigs(ctx context.Context, tx *sqlx.Tx, workflowID string, n store.WorkflowNode) error {
 	for key, val := range n.Config {
-		row := configWriteRow{NodeID: n.ID, Key: key}
+		row := configWriteRow{WorkflowID: workflowID, NodeID: n.ID, Key: key}
 		if n.SensitiveKeys[key] {
 			ciphertext, ok := val.([]byte)
 			if !ok {
@@ -462,8 +488,8 @@ func insertConfigs(ctx context.Context, tx *sqlx.Tx, n store.WorkflowNode) error
 			row.PlainValue = &s
 		}
 		_, err := tx.NamedExecContext(ctx,
-			`INSERT INTO node_configs (node_id, config_key, plain_value, encrypted_value, is_sensitive)
-			 VALUES (:node_id, :config_key, :plain_value, :encrypted_value, :is_sensitive)`,
+			`INSERT INTO node_configs (workflow_id, node_id, config_key, plain_value, encrypted_value, is_sensitive)
+			 VALUES (:workflow_id, :node_id, :config_key, :plain_value, :encrypted_value, :is_sensitive)`,
 			row,
 		)
 		if err != nil {
@@ -519,7 +545,7 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 	for i, r := range rows {
 		nodeIDs[i] = r.ID
 	}
-	configs, sensitiveKeys, err := s.loadConfigs(ctx, nodeIDs)
+	configs, sensitiveKeys, err := s.loadConfigs(ctx, workflowID, nodeIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -558,12 +584,12 @@ func (s *WorkflowStore) loadNodes(ctx context.Context, workflowID string) ([]sto
 	return nodes, nil
 }
 
-// loadConfigs fetches all node_configs rows for the given node IDs in a single
-// query, eliminating the N+1 pattern in loadNodes.
-func (s *WorkflowStore) loadConfigs(ctx context.Context, nodeIDs []string) (map[string]map[string]any, map[string]map[string]bool, error) {
+// loadConfigs fetches all node_configs rows for the given workflow and node IDs
+// in a single query, eliminating the N+1 pattern in loadNodes.
+func (s *WorkflowStore) loadConfigs(ctx context.Context, workflowID string, nodeIDs []string) (map[string]map[string]any, map[string]map[string]bool, error) {
 	query, args, err := sqlx.In(
 		`SELECT node_id, config_key, plain_value, encrypted_value, is_sensitive
-		 FROM node_configs WHERE node_id IN (?)`, nodeIDs,
+		 FROM node_configs WHERE workflow_id = ? AND node_id IN (?)`, workflowID, nodeIDs,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("workflow store: build config query: %w", err)
@@ -637,6 +663,18 @@ func triggerExtra(t store.Trigger) map[string]any {
 		m["cron_expr"] = t.CronExpr
 	}
 	return m
+}
+
+// deleteNodeConfigs removes all node_configs rows for the given workflow.
+// Must be called inside a transaction before workflow_nodes are deleted.
+func deleteNodeConfigs(ctx context.Context, tx *sqlx.Tx, workflowID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM node_configs WHERE workflow_id = ?`,
+		workflowID,
+	); err != nil {
+		return fmt.Errorf("workflow store: delete node configs: %w", err)
+	}
+	return nil
 }
 
 func newUUID() string {

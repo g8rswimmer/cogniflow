@@ -14,6 +14,7 @@ import (
 func TestRunStore_Create_GeneratesID(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	got, err := s.CreateRun(ctx, store.Run{
@@ -39,6 +40,7 @@ func TestRunStore_Create_GeneratesID(t *testing.T) {
 func TestRunStore_Create_PreservesProvidedID(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	got, err := s.CreateRun(ctx, store.Run{
@@ -56,11 +58,27 @@ func TestRunStore_Create_PreservesProvidedID(t *testing.T) {
 	}
 }
 
+func TestRunStore_Create_WorkflowNotFound_ReturnsError(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.CreateRun(context.Background(), store.Run{
+		WorkflowID:  "no-such-workflow",
+		TriggeredBy: "manual",
+		Status:      store.RunStatusRunning,
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent workflow")
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
 // ---- GetRun -----------------------------------------------------------------
 
 func TestRunStore_Get_Found(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	created, err := s.CreateRun(ctx, store.Run{
@@ -106,6 +124,7 @@ func TestRunStore_Get_NotFound(t *testing.T) {
 func TestRunStore_UpdateStatus_Succeeded(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	created, err := s.CreateRun(ctx, store.Run{
@@ -148,6 +167,7 @@ func TestRunStore_UpdateStatus_Succeeded(t *testing.T) {
 func TestRunStore_UpdateStatus_Failed(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	created, err := s.CreateRun(ctx, store.Run{
@@ -186,6 +206,7 @@ func TestRunStore_UpdateStatus_Failed(t *testing.T) {
 func TestRunStore_UpdateStatus_NilOutput(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	created, err := s.CreateRun(ctx, store.Run{
@@ -228,10 +249,11 @@ func TestRunStore_ListRuns_Empty(t *testing.T) {
 func TestRunStore_ListRuns_ByWorkflow(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-a")
+	insertTestWorkflow(t, s, "wf-b")
 
 	now := time.Now().UTC()
-	for i, wf := range []string{"wf-a", "wf-a", "wf-b"} {
-		_ = i
+	for _, wf := range []string{"wf-a", "wf-a", "wf-b"} {
 		if _, err := s.CreateRun(ctx, store.Run{
 			WorkflowID:  wf,
 			TriggeredBy: "manual",
@@ -259,6 +281,7 @@ func TestRunStore_ListRuns_ByWorkflow(t *testing.T) {
 func TestRunStore_ListRuns_ByStatus(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	statuses := []store.RunStatus{
@@ -292,6 +315,7 @@ func TestRunStore_ListRuns_ByStatus(t *testing.T) {
 func TestRunStore_ListRuns_Limit(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	now := time.Now().UTC()
 	for i := 0; i < 5; i++ {
@@ -317,6 +341,7 @@ func TestRunStore_ListRuns_Limit(t *testing.T) {
 func TestRunStore_ListRuns_SinceUntilFilter(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	base := time.Now().UTC().Truncate(time.Second)
 	old := base.Add(-2 * time.Hour)
@@ -353,6 +378,7 @@ func TestRunStore_ListRuns_SinceUntilFilter(t *testing.T) {
 func TestRunStore_ListRuns_OrderedByStartedAtDesc(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
 
 	base := time.Now().UTC().Truncate(time.Second)
 	times := []time.Time{

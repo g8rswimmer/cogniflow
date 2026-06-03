@@ -3,14 +3,13 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"text/template"
 
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/nodeutil"
 )
 
 var inputSchema = json.RawMessage(`{
@@ -65,7 +64,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		return node.NodeOutput{}, fmt.Errorf("embedding.openai: input is required")
 	}
 
-	rendered, err := renderTemplate(rawInput, input.UpstreamData)
+	rendered, err := nodeutil.RenderTemplate(rawInput, input.UpstreamData)
 	if err != nil {
 		return node.NodeOutput{}, fmt.Errorf("embedding.openai: render input: %w", err)
 	}
@@ -93,14 +92,3 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 	}}, nil
 }
 
-func renderTemplate(s string, data map[string]any) (string, error) {
-	t, err := template.New("").Option("missingkey=error").Parse(s)
-	if err != nil {
-		return s, err
-	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return s, err
-	}
-	return buf.String(), nil
-}

@@ -1,11 +1,12 @@
 package mysql
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/jmoiron/sqlx"
 )
 
 // testSchema is a SQLite-compatible equivalent of the MySQL migrations.
@@ -25,33 +26,36 @@ CREATE TABLE IF NOT EXISTS workflows (
 );
 
 CREATE TABLE IF NOT EXISTS workflow_nodes (
-    id               TEXT    NOT NULL PRIMARY KEY,
-    workflow_id      TEXT    NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    id               TEXT    NOT NULL,
+    workflow_id      TEXT    NOT NULL,
     type_id          TEXT    NOT NULL,
     label            TEXT    NOT NULL DEFAULT '',
     position_x       REAL    NOT NULL DEFAULT 0,
     position_y       REAL    NOT NULL DEFAULT 0,
     retry_max        INTEGER NOT NULL DEFAULT 0,
     retry_backoff_ms INTEGER NOT NULL DEFAULT 1000,
-    output_parsers   TEXT
+    output_parsers   TEXT,
+    PRIMARY KEY (workflow_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS workflow_edges (
-    id           TEXT NOT NULL PRIMARY KEY,
-    workflow_id  TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    id           TEXT NOT NULL,
+    workflow_id  TEXT NOT NULL,
     source_id    TEXT NOT NULL,
     target_id    TEXT NOT NULL,
-    branch_label TEXT
+    branch_label TEXT,
+    PRIMARY KEY (workflow_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS node_configs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id         TEXT    NOT NULL REFERENCES workflow_nodes(id) ON DELETE CASCADE,
+    workflow_id     TEXT    NOT NULL DEFAULT '',
+    node_id         TEXT    NOT NULL,
     config_key      TEXT    NOT NULL,
     plain_value     TEXT,
     encrypted_value BLOB,
     is_sensitive    INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (node_id, config_key)
+    UNIQUE (workflow_id, node_id, config_key)
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -63,6 +67,20 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at  DATETIME,
     final_output TEXT,
     error_detail TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rag_documents (
+    id         TEXT     NOT NULL PRIMARY KEY,
+    source     TEXT     NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rag_chunks (
+    id          TEXT    NOT NULL PRIMARY KEY,
+    document_id TEXT    NOT NULL DEFAULT '',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    chunk_text  TEXT    NOT NULL DEFAULT '',
+    embedding   BLOB    NOT NULL DEFAULT ''
 );
 `
 
@@ -78,9 +96,6 @@ func openTestDB(t *testing.T) *sqlx.DB {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		t.Fatalf("enable foreign keys: %v", err)
-	}
 	if _, err := db.Exec(testSchema); err != nil {
 		t.Fatalf("apply test schema: %v", err)
 	}
@@ -91,6 +106,21 @@ func openTestDB(t *testing.T) *sqlx.DB {
 func newTestStore(t *testing.T) *WorkflowStore {
 	t.Helper()
 	return NewWorkflowStore(openTestDB(t))
+}
+
+// insertTestWorkflow inserts a minimal workflow row so that CreateRun's
+// workflow-existence check passes in tests that are focused on run behaviour
+// rather than workflow creation.
+func insertTestWorkflow(t *testing.T, s *WorkflowStore, id string) {
+	t.Helper()
+	_, err := s.db.ExecContext(context.Background(),
+		`INSERT INTO workflows (id, name, trigger_kind, timeout_seconds, created_at, updated_at)
+		 VALUES (?, ?, 'manual', 300, datetime('now'), datetime('now'))`,
+		id, id,
+	)
+	if err != nil {
+		t.Fatalf("insertTestWorkflow %q: %v", id, err)
+	}
 }
 
 // withinSecond fails the test if want and got differ by more than one second.

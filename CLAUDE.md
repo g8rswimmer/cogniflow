@@ -122,7 +122,7 @@ All three converge on `engine.Run(ctx, RunRequest{...})`.
 
 ### Data persistence
 
-MySQL 9.0+ is the sole datastore — workflow definitions, run history, AND RAG vector embeddings (`VECTOR(1536)` column, `VEC_DISTANCE_COSINE` / `VEC_DISTANCE_L2` for similarity search). No separate vector store.
+MySQL 9.0+ is the sole datastore — workflow definitions, run history, AND RAG vector embeddings (`VECTOR(768)` column after migration 0006, `VEC_DISTANCE_COSINE` / `VEC_DISTANCE_L2` for similarity search). No separate vector store.
 
 Migrations live in `backend/internal/store/mysql/migrations/` and are embedded via `//go:embed` and run automatically on startup via `golang-migrate`. Add new migrations as `NNNN_<description>.up.sql` / `.down.sql`.
 
@@ -134,6 +134,7 @@ Migrations live in `backend/internal/store/mysql/migrations/` and are embedded v
 | `PORT` | no | HTTP listen port (default `8080`) |
 | `COGNIFLOW_ENCRYPTION_KEY` | yes | 32-byte AES-256 key for sensitive config values |
 | `PLUGIN_ADDRESSES` | no | Comma-separated `host:port` list of gRPC plugin processes |
+| `OLLAMA_BASE_URL` | no | If set, RAG nodes use Ollama for embeddings (e.g. `http://localhost:11434`); otherwise OpenAI is used |
 
 Copy `.env.example` → `.env` before running locally.
 
@@ -161,6 +162,16 @@ Example — incorrect:
 type Registry interface { ... }          // interface defined by producer ✗
 func NewRegistry() Registry { ... }     // constructor hides concrete type ✗
 ```
+
+### Database conventions
+
+**No foreign keys.** Database tables must not declare `FOREIGN KEY` constraints or `REFERENCES` clauses. Referential integrity is enforced at the application layer: Go store methods explicitly delete child rows in the correct order before deleting a parent row. This applies to all migrations and to the SQLite test schema in `testdb_test.go`.
+
+Consequences to keep in mind when writing store code:
+- `DeleteWorkflow` must explicitly delete `node_configs`, `workflow_nodes`, `workflow_edges`, and `runs` before deleting the `workflows` row.
+- `replaceNodesAndEdges` must explicitly delete `node_configs` before deleting `workflow_nodes`.
+- `UpsertChunks` must explicitly delete existing `rag_chunks` for the document before inserting new ones.
+- Node and edge IDs are workflow-scoped (composite PK on `workflow_id, id`). `node_configs` carries `workflow_id` so configs can be deleted with a simple `WHERE workflow_id = ?` rather than a subquery join through `workflow_nodes`.
 
 ### JSON conventions
 
