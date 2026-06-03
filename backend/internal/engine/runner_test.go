@@ -293,6 +293,48 @@ func TestRunDAG_NodePanic_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestRunDAG_GrandparentOutputVisible verifies that a node can reference the
+// output of a non-immediate ancestor (transitive predecessor) via UpstreamData.
+// With the Ancestors map, n3 should see both n1's and n2's outputs even though
+// n1 → n2 → n3 and n1 is two hops away.
+func TestRunDAG_GrandparentOutputVisible(t *testing.T) {
+	var capturedUpstream map[string]any
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("root"), output: map[string]any{"root_key": "root_val"}},
+		&fixedHandler{meta: newMeta("mid"), output: map[string]any{"mid_key": "mid_val"}},
+		&funcHandler{
+			meta: newMeta("leaf"),
+			execFn: func(_ context.Context, input node.NodeInput) (node.NodeOutput, error) {
+				capturedUpstream = input.UpstreamData
+				return node.NodeOutput{Data: map[string]any{}}, nil
+			},
+		},
+	)
+
+	dag, _ := Build(
+		[]store.WorkflowNode{makeNode("n1", "root"), makeNode("n2", "mid"), makeNode("n3", "leaf")},
+		[]store.WorkflowEdge{makeEdge("e1", "n1", "n2"), makeEdge("e2", "n2", "n3")},
+	)
+
+	bus := NewEventBus()
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedUpstream["n1"] == nil {
+		t.Error("n3 should see n1 (grandparent) in UpstreamData, got nil")
+	}
+	if capturedUpstream["n2"] == nil {
+		t.Error("n3 should see n2 (direct predecessor) in UpstreamData, got nil")
+	}
+	n1out, _ := capturedUpstream["n1"].(map[string]any)
+	if n1out["root_key"] != "root_val" {
+		t.Errorf("n1.root_key: want root_val, got %v", n1out["root_key"])
+	}
+}
+
 // ---- conditional routing tests ----------------------------------------------
 
 // TestRunDAG_ConditionalTrue verifies that the "true" branch fires and the

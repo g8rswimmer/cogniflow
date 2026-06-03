@@ -8,6 +8,8 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
+
+
 // ErrCycleDetected is returned when the workflow graph contains a cycle.
 var ErrCycleDetected = errors.New("cycle detected")
 
@@ -25,6 +27,13 @@ type DAG struct {
 	// conditional routing. Use this instead of Successors when dispatching
 	// successor nodes so that branch-labelled edges are handled correctly.
 	OutEdges map[string][]store.WorkflowEdge
+
+	// Ancestors maps node ID → all transitively reachable ancestor node IDs
+	// (every node that has an edge path leading to this node).
+	// Used by executeNode to populate NodeInput.UpstreamData with the full
+	// ancestor chain so template expressions and CEL conditions can reference
+	// any upstream output regardless of hop distance.
+	Ancestors map[string][]string
 }
 
 // Build constructs a DAG from raw node and edge lists.
@@ -35,6 +44,7 @@ func Build(nodes []store.WorkflowNode, edges []store.WorkflowEdge) (*DAG, error)
 		Successors:   make(map[string][]string, len(nodes)),
 		Predecessors: make(map[string][]string, len(nodes)),
 		OutEdges:     make(map[string][]store.WorkflowEdge, len(nodes)),
+		Ancestors:    make(map[string][]string, len(nodes)),
 	}
 
 	for _, n := range nodes {
@@ -62,7 +72,34 @@ func Build(nodes []store.WorkflowNode, edges []store.WorkflowEdge) (*DAG, error)
 	}
 	d.TopologicalOrder = order
 
+	for id := range d.Nodes {
+		d.Ancestors[id] = collectAncestors(id, d.Predecessors)
+	}
+
 	return d, nil
+}
+
+// collectAncestors returns all transitively reachable ancestor node IDs for
+// the given node by walking up the Predecessors map. The returned slice is
+// sorted for deterministic ordering.
+func collectAncestors(nodeID string, predecessors map[string][]string) []string {
+	visited := make(map[string]bool)
+	var walk func(id string)
+	walk = func(id string) {
+		for _, pred := range predecessors[id] {
+			if !visited[pred] {
+				visited[pred] = true
+				walk(pred)
+			}
+		}
+	}
+	walk(nodeID)
+	result := make([]string, 0, len(visited))
+	for id := range visited {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // CycleDetect returns ErrCycleDetected if the graph described by nodes and edges

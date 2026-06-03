@@ -197,7 +197,7 @@ func executeNode(
 
 	input := node.NodeInput{
 		Config:       n.Config,
-		UpstreamData: execCtx.mergeUpstream(dag.Predecessors[nodeID]),
+		UpstreamData: execCtx.mergeUpstream(dag.Ancestors[nodeID]),
 	}
 
 	nodeStart := time.Now()

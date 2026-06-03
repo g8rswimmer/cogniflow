@@ -81,6 +81,74 @@ func TestBuild_DisconnectedNodes(t *testing.T) {
 	}
 }
 
+// TestBuild_Ancestors_Linear verifies a → b → c: c's ancestors = {a, b}.
+func TestBuild_Ancestors_Linear(t *testing.T) {
+	nodes := []store.WorkflowNode{wn("a"), wn("b"), wn("c")}
+	edges := []store.WorkflowEdge{edge("e1", "a", "b"), edge("e2", "b", "c")}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dag.Ancestors["a"]) != 0 {
+		t.Errorf("a (root) should have 0 ancestors, got %v", dag.Ancestors["a"])
+	}
+	if len(dag.Ancestors["b"]) != 1 || dag.Ancestors["b"][0] != "a" {
+		t.Errorf("b should have ancestor [a], got %v", dag.Ancestors["b"])
+	}
+	if len(dag.Ancestors["c"]) != 2 {
+		t.Errorf("c should have 2 ancestors (a, b), got %v", dag.Ancestors["c"])
+	}
+	ancestorSet := map[string]bool{}
+	for _, id := range dag.Ancestors["c"] {
+		ancestorSet[id] = true
+	}
+	if !ancestorSet["a"] || !ancestorSet["b"] {
+		t.Errorf("c's ancestor set should contain a and b, got %v", dag.Ancestors["c"])
+	}
+}
+
+// TestBuild_Ancestors_Diamond verifies fan-out/fan-in: root → b, root → c, b → sink, c → sink.
+// sink's ancestors should be root, b, and c.
+func TestBuild_Ancestors_Diamond(t *testing.T) {
+	nodes := []store.WorkflowNode{wn("root"), wn("b"), wn("c"), wn("sink")}
+	edges := []store.WorkflowEdge{
+		edge("e1", "root", "b"), edge("e2", "root", "c"),
+		edge("e3", "b", "sink"), edge("e4", "c", "sink"),
+	}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dag.Ancestors["sink"]) != 3 {
+		t.Errorf("sink should have 3 ancestors (root, b, c), got %v", dag.Ancestors["sink"])
+	}
+}
+
+// TestBuild_Ancestors_Parallel verifies that parallel sibling nodes are NOT
+// in each other's ancestor sets. For root → b and root → c (no edge b↔c),
+// b should not be an ancestor of c and vice versa.
+func TestBuild_Ancestors_Parallel(t *testing.T) {
+	nodes := []store.WorkflowNode{wn("root"), wn("b"), wn("c")}
+	edges := []store.WorkflowEdge{edge("e1", "root", "b"), edge("e2", "root", "c")}
+
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, anc := range dag.Ancestors["b"] {
+		if anc == "c" {
+			t.Error("c should NOT be an ancestor of b (they are siblings)")
+		}
+	}
+	for _, anc := range dag.Ancestors["c"] {
+		if anc == "b" {
+			t.Error("b should NOT be an ancestor of c (they are siblings)")
+		}
+	}
+}
+
 // TestBuild_SimpleCycle detects a -> b -> a.
 func TestBuild_SimpleCycle(t *testing.T) {
 	nodes := []store.WorkflowNode{wn("a"), wn("b")}
