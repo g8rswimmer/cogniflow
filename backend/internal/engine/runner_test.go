@@ -80,6 +80,10 @@ func makeEdge(id, src, tgt string) store.WorkflowEdge {
 	return store.WorkflowEdge{ID: id, SourceID: src, TargetID: tgt}
 }
 
+func makeBranchEdge(id, src, tgt, label string) store.WorkflowEdge {
+	return store.WorkflowEdge{ID: id, SourceID: src, TargetID: tgt, BranchLabel: &label}
+}
+
 // ---- tests ---------------------------------------------------------------
 
 func TestRunDAG_SingleNode(t *testing.T) {
@@ -286,5 +290,312 @@ func TestRunDAG_NodePanic_ReturnsError(t *testing.T) {
 	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
 	if err == nil {
 		t.Fatal("expected error from panicking node")
+	}
+}
+
+// TestRunDAG_GrandparentOutputVisible verifies that a node can reference the
+// output of a non-immediate ancestor (transitive predecessor) via UpstreamData.
+// With the Ancestors map, n3 should see both n1's and n2's outputs even though
+// n1 → n2 → n3 and n1 is two hops away.
+func TestRunDAG_GrandparentOutputVisible(t *testing.T) {
+	var capturedUpstream map[string]any
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("root"), output: map[string]any{"root_key": "root_val"}},
+		&fixedHandler{meta: newMeta("mid"), output: map[string]any{"mid_key": "mid_val"}},
+		&funcHandler{
+			meta: newMeta("leaf"),
+			execFn: func(_ context.Context, input node.NodeInput) (node.NodeOutput, error) {
+				capturedUpstream = input.UpstreamData
+				return node.NodeOutput{Data: map[string]any{}}, nil
+			},
+		},
+	)
+
+	dag, _ := Build(
+		[]store.WorkflowNode{makeNode("n1", "root"), makeNode("n2", "mid"), makeNode("n3", "leaf")},
+		[]store.WorkflowEdge{makeEdge("e1", "n1", "n2"), makeEdge("e2", "n2", "n3")},
+	)
+
+	bus := NewEventBus()
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedUpstream["n1"] == nil {
+		t.Error("n3 should see n1 (grandparent) in UpstreamData, got nil")
+	}
+	if capturedUpstream["n2"] == nil {
+		t.Error("n3 should see n2 (direct predecessor) in UpstreamData, got nil")
+	}
+	n1out, _ := capturedUpstream["n1"].(map[string]any)
+	if n1out["root_key"] != "root_val" {
+		t.Errorf("n1.root_key: want root_val, got %v", n1out["root_key"])
+	}
+}
+
+// ---- conditional routing tests ----------------------------------------------
+
+// TestRunDAG_ConditionalTrue verifies that the "true" branch fires and the
+// "false" branch is suppressed when the conditional node returns result=true.
+func TestRunDAG_ConditionalTrue(t *testing.T) {
+	trueBranch := &countingHandler{meta: newMeta("trueBranch")}
+	falseBranch := &countingHandler{meta: newMeta("falseBranch")}
+
+	// conditional node always returns result=true
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("cond"), output: map[string]any{"result": true}},
+		trueBranch,
+		falseBranch,
+	)
+
+	nodes := []store.WorkflowNode{
+		makeNode("n1", "cond"),
+		makeNode("n2", "trueBranch"),
+		makeNode("n3", "falseBranch"),
+	}
+	edges := []store.WorkflowEdge{
+		makeBranchEdge("e1", "n1", "n2", "true"),
+		makeBranchEdge("e2", "n1", "n3", "false"),
+	}
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	bus := NewEventBus()
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if trueBranch.calls.Load() != 1 {
+		t.Errorf("true branch: want 1 call, got %d", trueBranch.calls.Load())
+	}
+	if falseBranch.calls.Load() != 0 {
+		t.Errorf("false branch: want 0 calls, got %d", falseBranch.calls.Load())
+	}
+	if _, ok := out["n2"]; !ok {
+		t.Error("n2 (true branch) should appear in output")
+	}
+	if _, ok := out["n3"]; ok {
+		t.Error("n3 (false branch, skipped) should not appear in output")
+	}
+}
+
+// TestRunDAG_ConditionalFalse verifies the "false" branch fires when result=false.
+func TestRunDAG_ConditionalFalse(t *testing.T) {
+	trueBranch := &countingHandler{meta: newMeta("trueBranch")}
+	falseBranch := &countingHandler{meta: newMeta("falseBranch")}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("cond"), output: map[string]any{"result": false}},
+		trueBranch,
+		falseBranch,
+	)
+
+	nodes := []store.WorkflowNode{
+		makeNode("n1", "cond"),
+		makeNode("n2", "trueBranch"),
+		makeNode("n3", "falseBranch"),
+	}
+	edges := []store.WorkflowEdge{
+		makeBranchEdge("e1", "n1", "n2", "true"),
+		makeBranchEdge("e2", "n1", "n3", "false"),
+	}
+	dag, _ := Build(nodes, edges)
+
+	bus := NewEventBus()
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if trueBranch.calls.Load() != 0 {
+		t.Errorf("true branch: want 0 calls, got %d", trueBranch.calls.Load())
+	}
+	if falseBranch.calls.Load() != 1 {
+		t.Errorf("false branch: want 1 call, got %d", falseBranch.calls.Load())
+	}
+}
+
+// TestRunDAG_ConditionalMerge verifies that a merge node after a conditional
+// fork executes exactly once, with data from the live branch only.
+func TestRunDAG_ConditionalMerge(t *testing.T) {
+	mergeHandler := &countingHandler{meta: newMeta("merge")}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("cond"), output: map[string]any{"result": true}},
+		&fixedHandler{meta: newMeta("trueBranch"), output: map[string]any{"from": "true"}},
+		&fixedHandler{meta: newMeta("falseBranch"), output: map[string]any{"from": "false"}},
+		mergeHandler,
+	)
+
+	// n1 (cond) → n2 (true) and n3 (false); both → n4 (merge)
+	nodes := []store.WorkflowNode{
+		makeNode("n1", "cond"),
+		makeNode("n2", "trueBranch"),
+		makeNode("n3", "falseBranch"),
+		makeNode("n4", "merge"),
+	}
+	edges := []store.WorkflowEdge{
+		makeBranchEdge("e1", "n1", "n2", "true"),
+		makeBranchEdge("e2", "n1", "n3", "false"),
+		makeEdge("e3", "n2", "n4"),
+		makeEdge("e4", "n3", "n4"),
+	}
+	dag, _ := Build(nodes, edges)
+
+	bus := NewEventBus()
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// merge fires exactly once
+	if mergeHandler.calls.Load() != 1 {
+		t.Errorf("merge: want 1 call, got %d", mergeHandler.calls.Load())
+	}
+	// n4 is the only sink
+	if _, ok := out["n4"]; !ok {
+		t.Error("n4 should be in the final output")
+	}
+}
+
+// TestRunDAG_ConditionalMerge_MultiSource verifies that a merge node with
+// predecessors from INDEPENDENT parents (not both children of the same
+// conditional) is still dispatched when one predecessor is on a suppressed
+// branch and the other is live.
+//
+// Topology:
+//   n1 (regular root) ─────────────────────→ n3 (merge)
+//   n2 (conditional, result=false) ─[true]─→ n3 (merge)  ← suppressed
+func TestRunDAG_ConditionalMerge_MultiSource(t *testing.T) {
+	mergeHandler := &countingHandler{meta: newMeta("merge")}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("regular"), output: map[string]any{"live": true}},
+		&fixedHandler{meta: newMeta("cond"), output: map[string]any{"result": false}},
+		mergeHandler,
+	)
+
+	nodes := []store.WorkflowNode{
+		makeNode("n1", "regular"),                   // root: live predecessor of n3
+		makeNode("n2", "cond"),                      // root: conditional, result=false
+		makeNode("n3", "merge"),                     // merge: pending=2
+	}
+	edges := []store.WorkflowEdge{
+		makeEdge("e1", "n1", "n3"),                  // unconditional: always fires
+		makeBranchEdge("e2", "n2", "n3", "true"),   // labelled "true" but result=false → suppressed
+	}
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	bus := NewEventBus()
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mergeHandler.calls.Load() != 1 {
+		t.Errorf("merge: want 1 call, got %d — node was wrongly skipped", mergeHandler.calls.Load())
+	}
+	if _, ok := out["n3"]; !ok {
+		t.Error("n3 (merge) should appear in final output")
+	}
+}
+
+// TestRunDAG_AllSinksSkipped verifies that runDAG returns an error when the only
+// sink node is on the suppressed branch of a conditional.
+func TestRunDAG_AllSinksSkipped(t *testing.T) {
+	sink := &countingHandler{meta: newMeta("sink")}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("cond"), output: map[string]any{"result": false}},
+		sink,
+	)
+
+	// n1(cond, result=false) →[true]→ n2(sink) — the true edge is suppressed.
+	nodes := []store.WorkflowNode{makeNode("n1", "cond"), makeNode("n2", "sink")}
+	edges := []store.WorkflowEdge{makeBranchEdge("e1", "n1", "n2", "true")}
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	bus := NewEventBus()
+	_, err = runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err == nil {
+		t.Fatal("expected error when all sink branches are suppressed, got nil")
+	}
+	if sink.calls.Load() != 0 {
+		t.Errorf("sink should not have executed, got %d calls", sink.calls.Load())
+	}
+}
+
+// TestBranchAllows covers the branchAllows helper directly.
+func TestBranchAllows(t *testing.T) {
+	trueLabel := "true"
+	falseLabel := "false"
+
+	tests := []struct {
+		name    string
+		edge    store.WorkflowEdge
+		output  map[string]any
+		allowed bool
+	}{
+		{
+			name:    "no label always allows",
+			edge:    store.WorkflowEdge{},
+			output:  map[string]any{},
+			allowed: true,
+		},
+		{
+			name:    "true label matches true result",
+			edge:    store.WorkflowEdge{BranchLabel: &trueLabel},
+			output:  map[string]any{"result": true},
+			allowed: true,
+		},
+		{
+			name:    "true label blocked by false result",
+			edge:    store.WorkflowEdge{BranchLabel: &trueLabel},
+			output:  map[string]any{"result": false},
+			allowed: false,
+		},
+		{
+			name:    "false label matches false result",
+			edge:    store.WorkflowEdge{BranchLabel: &falseLabel},
+			output:  map[string]any{"result": false},
+			allowed: true,
+		},
+		{
+			name:    "false label blocked by true result",
+			edge:    store.WorkflowEdge{BranchLabel: &falseLabel},
+			output:  map[string]any{"result": true},
+			allowed: false,
+		},
+		{
+			name:    "labelled edge blocked when result missing",
+			edge:    store.WorkflowEdge{BranchLabel: &trueLabel},
+			output:  map[string]any{},
+			allowed: false,
+		},
+		{
+			name:    "labelled edge blocked when result is non-bool",
+			edge:    store.WorkflowEdge{BranchLabel: &trueLabel},
+			output:  map[string]any{"result": "yes"},
+			allowed: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := branchAllows(tc.edge, tc.output)
+			if got != tc.allowed {
+				t.Errorf("want %v, got %v", tc.allowed, got)
+			}
+		})
 	}
 }

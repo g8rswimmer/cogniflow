@@ -473,6 +473,16 @@ type DAG struct {
 
     // TopologicalOrder is a deterministic execution order derived at build time.
     TopologicalOrder []string
+
+    // OutEdges maps node ID → outgoing edges, preserving branch_label for
+    // conditional routing.
+    OutEdges map[string][]WorkflowEdge
+
+    // Ancestors maps node ID → all transitively reachable ancestor node IDs.
+    // Used by executeNode to populate NodeInput.UpstreamData with the full
+    // ancestor chain rather than only immediate predecessors, so a node can
+    // reference any upstream output regardless of hop distance.
+    Ancestors map[string][]string
 }
 
 // Build constructs the DAG from raw node and edge lists.
@@ -555,10 +565,16 @@ type ExecutionContext struct {
 }
 
 func (ec *ExecutionContext) Set(nodeID string, data map[string]any)
-func (ec *ExecutionContext) MergeUpstream(predecessorIDs []string) map[string]any
+func (ec *ExecutionContext) MergeUpstream(ancestorIDs []string) map[string]any
 ```
 
-`MergeUpstream` takes a read lock, iterates over predecessor IDs, and performs a shallow merge of their `Data` maps. Downstream nodes reference specific upstream values by the key the upstream node wrote — documented in each node's `output_schema`.
+`MergeUpstream` takes a read lock and iterates over the supplied ancestor IDs — the **transitive closure** of the current node's predecessors, not just immediate predecessors. Each ancestor's output map is included in the returned `UpstreamData` keyed by the ancestor's node ID. Only ancestors that have already produced output (i.e., are in `ExecutionContext.outputs`) are included; skipped or not-yet-executed ancestors are silently omitted.
+
+This means a node any number of hops downstream can reference any upstream ancestor:
+- `{{.n1.status_code}}` — works even when `n1 → n2 (conditional) → n3`; `n3` sees `n1`, `n2`, and `_initial`
+- `ctx["n1"]["status_code"]` in a CEL conditional — same ancestry applies
+
+**Ancestor computation:** the `DAG` struct stores `Ancestors map[string][]string` — the transitive predecessor set per node — computed in `Build()` via DFS from each node up through `Predecessors`. Parallel branches are excluded: nodes that executed concurrently on a sibling branch are not in each other's ancestor set, preserving deterministic data isolation.
 
 Data is **never mutated after being written** to `ExecutionContext`. Each `executeNode` goroutine receives an immutable snapshot via `MergeUpstream`.
 
@@ -1374,14 +1390,18 @@ The template data map shape at runtime:
 
 ```go
 // template data = NodeInput.UpstreamData
+// Contains ALL transitive ancestors, not just immediate predecessors.
+// Example for node n3 in the chain n1 → n2 → n3:
 map[string]any{
-    "_initial": map[string]any{"customer_id": 42},  // run initial data
-    "n1":       map[string]any{"status_code": 200, "body": "..."},
-    "n2":       map[string]any{"completion": "Hello!"},
+    "_initial": map[string]any{"customer_id": 42},  // run initial data (always present)
+    "n1":       map[string]any{"status_code": 200, "body": "..."},  // grandparent ancestor
+    "n2":       map[string]any{"completion": "Hello!"},              // direct predecessor
 }
 ```
 
-Templates are evaluated per field using Go's `text/template` with `Option("missingkey=zero")` so missing keys produce an empty string rather than an error.
+Templates are evaluated per field using Go's `text/template` with `Option("missingkey=error")` so a reference to a non-existent node or field fails fast rather than silently producing an empty string.
+
+**Scope rule:** A node can reference any ancestor — any node reachable by following edges backward from the current node in the DAG. Parallel sibling nodes (nodes on a concurrent branch that share no edge path with the current node) are not ancestors and cannot be referenced. This makes data flow deterministic: the set of accessible upstream keys is fixed by the workflow graph topology, not by execution timing.
 
 ### Optionality
 

@@ -390,6 +390,7 @@ M1, M2, M3, M6 (for the embedding provider)
 - `backend/internal/node/builtin/db_write/handler.go` — parameterised `INSERT` / `UPDATE` / `DELETE`; returns `rows_affected`
 - `backend/internal/node/builtin/merge/handler.go` — identity node; engine already handles fan-in synchronisation; `Execute()` is a no-op passthrough
 - Engine `runner.go` updated: Conditional node's `branch_label` (`"true"` / `"false"`) used to filter which successor edges are pushed to `readyQueue`
+- Engine `dag.go` updated: `DAG.Ancestors` field holds the transitive predecessor set per node; `executeNode` uses `Ancestors` instead of `Predecessors` when building `NodeInput.UpstreamData`, so any upstream node reachable via the edge path is accessible to template expressions and CEL conditions regardless of hop distance
 
 ### Testable Criteria
 

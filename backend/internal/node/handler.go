@@ -9,9 +9,15 @@ import (
 // plus this node's own persisted (decrypted) configuration values.
 type NodeInput struct {
 	// UpstreamData is keyed by node ID; each value is that node's output map.
+	// It includes all transitive ancestors so nodes can reference any upstream
+	// output regardless of hop distance.
 	UpstreamData map[string]any
 	// Config holds this node's configuration values (already decrypted).
 	Config map[string]any
+	// DirectPredecessorIDs lists the node IDs that are DIRECT (non-transitive)
+	// predecessors of this node. Populated by the engine; used by nodes like
+	// merge that need to distinguish immediate parents from all ancestors.
+	DirectPredecessorIDs []string
 }
 
 // NodeOutput is the data this node produces, forwarded to downstream nodes.

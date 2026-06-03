@@ -20,9 +20,12 @@ func (ec *ExecutionContext) set(nodeID string, data map[string]any) {
 	ec.outputs[nodeID] = data
 }
 
-// mergeUpstream returns a map of nodeID → output for all given predecessor IDs.
+// mergeUpstream returns a map of nodeID → output for all given ancestor IDs.
+// Callers pass dag.Ancestors[nodeID] (the transitive predecessor set) so that
+// nodes can reference any upstream output regardless of hop distance.
 // The "_initial" key (run initial data) is always included if present.
-// This map becomes NodeInput.UpstreamData for the next node.
+// Ancestors that have not yet produced output are silently omitted.
+// This map becomes NodeInput.UpstreamData for the node.
 func (ec *ExecutionContext) mergeUpstream(predecessorIDs []string) map[string]any {
 	ec.mu.RLock()
 	defer ec.mu.RUnlock()

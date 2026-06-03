@@ -3,6 +3,7 @@ package nodeutil
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"text/template"
 )
@@ -37,4 +38,34 @@ func ToInt(v any, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+// ResolveParams renders each element of a "params" config value ([]any of
+// template strings) against upstream data and returns the rendered values as
+// []any. Returns nil when params is absent. Returns an error if params is not
+// a []any or if any element fails template rendering.
+func ResolveParams(params any, upstream map[string]any) ([]any, error) {
+	if params == nil {
+		return nil, nil
+	}
+	slice, ok := params.([]any)
+	if !ok {
+		return nil, fmt.Errorf("params must be an array")
+	}
+	args := make([]any, len(slice))
+	for i, v := range slice {
+		s, ok := v.(string)
+		if !ok {
+			// Non-string values (e.g. float64 from JSON) are passed through unchanged
+			// so the database driver receives the correct native type.
+			args[i] = v
+			continue
+		}
+		rendered, err := RenderTemplate(s, upstream)
+		if err != nil {
+			return nil, fmt.Errorf("render param[%d]: %w", i, err)
+		}
+		args[i] = rendered
+	}
+	return args, nil
 }

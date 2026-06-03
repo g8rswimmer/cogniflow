@@ -170,7 +170,7 @@ All nodes (built-in and extended) must conform to the following interface:
 |----|-------------|
 | EE-01 | The engine executes a workflow as a strict DAG (directed acyclic graph) — cycles are not permitted. The system validates acyclicity when a workflow is saved and rejects any graph containing a cycle. |
 | EE-02 | Nodes with no unresolved upstream dependencies execute concurrently (parallel branch support) |
-| EE-03 | Data flows between nodes: each node receives the merged output context of its immediate upstream nodes; this context is also available for template expansion in config fields (see ND-07) |
+| EE-03 | Data flows between nodes: each node receives the merged output context of **all transitively connected upstream nodes** — any node reachable via the DAG edge path from the current node's position, not just its immediate predecessors. This means a node three hops downstream can reference the output of the root node directly (e.g. `{{.n1.status_code}}`). The context is also available for template expansion in config fields (see ND-07) and for CEL conditional expressions (see DT-02). |
 | EE-04 | Each execution is assigned a unique run ID |
 | EE-05 | The engine records per-node execution status: pending, running, succeeded, failed |
 | EE-06 | On node failure, the engine stops execution of dependent downstream nodes and marks the run as failed |
