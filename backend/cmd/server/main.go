@@ -17,9 +17,14 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/conditional"
+	datatransform "github.com/g8rswimmer/cogniflow/internal/node/builtin/data_transform"
+	dbquery "github.com/g8rswimmer/cogniflow/internal/node/builtin/db_query"
+	dbwrite "github.com/g8rswimmer/cogniflow/internal/node/builtin/db_write"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/embedding"
 	httprequest "github.com/g8rswimmer/cogniflow/internal/node/builtin/http_request"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/llm"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/merge"
 	ragingest "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_ingest"
 	ragretrieve "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_retrieve"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
@@ -83,6 +88,11 @@ func main() {
 	registry.Register(llm.NewOpenAI(openaiClient))
 	registry.Register(llm.NewAnthropic(anthropicClient))
 	registry.Register(embedding.New(openaiClient))
+	registry.Register(conditional.New())
+	registry.Register(datatransform.New())
+	registry.Register(dbquery.New())
+	registry.Register(dbwrite.New())
+	registry.Register(merge.New())
 
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
 

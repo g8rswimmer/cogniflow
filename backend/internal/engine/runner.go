@@ -45,6 +45,16 @@ func runDAG(
 		pending[id] = len(dag.Predecessors[id])
 	}
 
+	// skipped tracks nodes whose pending count reached zero entirely through
+	// suppressed (branch-labelled) edges. Skipped nodes never execute.
+	skipped := make(map[string]bool)
+
+	// hasLive[id] is true once at least one live (non-suppressed) predecessor
+	// has decremented pending[id]. It prevents propagateSkip from marking a
+	// node skipped when pending reaches 0 via the last suppressed edge but a
+	// live predecessor had already contributed to that count.
+	hasLive := make(map[string]bool)
+
 	// resultCh is sized to total nodes — goroutines never block on send.
 	resultCh := make(chan nodeResult, len(dag.Nodes))
 
@@ -57,13 +67,42 @@ func runDAG(
 
 	slog.Debug("dag starting", "run_id", runID, "node_count", len(dag.Nodes))
 
+	// dispatch fires nodeID as a goroutine and increments the dispatched counter.
+	dispatch := func(nodeID string) {
+		dispatched++
+		slog.Debug("node dispatched", "run_id", runID, "node_id", nodeID, "type_id", dag.Nodes[nodeID].TypeID)
+		bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodePending, Timestamp: time.Now().UTC()})
+		go executeNode(innerCtx, nodeID, dag, execCtx, registry, bus, runID, resultCh)
+	}
+
+	// propagateSkip decrements pending for nodeID without dispatching it.
+	// When pending reaches zero through suppressed edges only (hasLive is false),
+	// the node is marked skipped and propagation continues to its successors.
+	// When pending reaches zero but a live predecessor already fired (hasLive is
+	// true), the node is dispatched so it can receive that live predecessor's output.
+	// The supervisor loop is the sole caller, so all map accesses are single-threaded.
+	var propagateSkip func(nodeID string)
+	propagateSkip = func(nodeID string) {
+		pending[nodeID]--
+		if pending[nodeID] > 0 || skipped[nodeID] {
+			return // still waiting on other predecessors, or already handled
+		}
+		if hasLive[nodeID] {
+			// At least one live predecessor completed before all suppressed ones;
+			// this node should run with whatever live data it received.
+			dispatch(nodeID)
+			return
+		}
+		skipped[nodeID] = true
+		for _, edge := range dag.OutEdges[nodeID] {
+			propagateSkip(edge.TargetID)
+		}
+	}
+
 	// Dispatch all root nodes.
 	for id, count := range pending {
 		if count == 0 {
-			dispatched++
-			slog.Debug("node dispatched", "run_id", runID, "node_id", id, "type_id", dag.Nodes[id].TypeID)
-			bus.Publish(NodeEvent{RunID: runID, NodeID: id, Type: EventNodePending, Timestamp: time.Now().UTC()})
-			go executeNode(innerCtx, id, dag, execCtx, registry, bus, runID, resultCh)
+			dispatch(id)
 		}
 	}
 
@@ -86,13 +125,17 @@ func runDAG(
 			continue // failure already recorded; skip scheduling successors
 		}
 
-		for _, succ := range dag.Successors[result.nodeID] {
+		for _, outEdge := range dag.OutEdges[result.nodeID] {
+			if !branchAllows(outEdge, result.output) {
+				// Suppressed edge: account for this predecessor without dispatching.
+				propagateSkip(outEdge.TargetID)
+				continue
+			}
+			succ := outEdge.TargetID
+			hasLive[succ] = true // record that a live predecessor contributed
 			pending[succ]--
 			if pending[succ] == 0 {
-				dispatched++
-				slog.Debug("node dispatched", "run_id", runID, "node_id", succ, "type_id", dag.Nodes[succ].TypeID)
-				bus.Publish(NodeEvent{RunID: runID, NodeID: succ, Type: EventNodePending, Timestamp: time.Now().UTC()})
-				go executeNode(innerCtx, succ, dag, execCtx, registry, bus, runID, resultCh)
+				dispatch(succ)
 			}
 		}
 	}
@@ -101,6 +144,20 @@ func runDAG(
 		return nil, firstErr
 	}
 	return execCtx.sinkOutputs(dag), nil
+}
+
+// branchAllows reports whether the given edge should fire given the completed
+// node's output. Edges without a branch_label always fire. Edges labelled
+// "true" or "false" fire only when the output "result" bool matches.
+func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
+	if edge.BranchLabel == nil {
+		return true
+	}
+	res, ok := output["result"].(bool)
+	if !ok {
+		return false
+	}
+	return (*edge.BranchLabel == "true") == res
 }
 
 // executeNode runs a single node inside a goroutine, respecting retry policy.

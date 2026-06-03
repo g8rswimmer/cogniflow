@@ -12,6 +12,7 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/conditional"
 	"github.com/g8rswimmer/cogniflow/internal/node/outputparser"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
@@ -74,6 +75,11 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateOutputParsers(wf.Nodes); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateCELExpressions(wf.Nodes); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -160,6 +166,11 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateOutputParsers(wf.Nodes); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateCELExpressions(wf.Nodes); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -342,6 +353,25 @@ func parseTemplateFields(schema json.RawMessage) []templateField {
 		}
 	}
 	return fields
+}
+
+// validateCELExpressions compiles the CEL expression on every conditional.branch
+// node and verifies it returns bool. Returns an error if any expression has a
+// syntax error or a non-boolean return type.
+func validateCELExpressions(nodes []store.WorkflowNode) error {
+	for _, n := range nodes {
+		if n.TypeID != "conditional.branch" {
+			continue
+		}
+		expr, _ := n.Config["expression"].(string)
+		if expr == "" {
+			continue // missing required field is caught by validateRequiredFields
+		}
+		if err := conditional.ValidateExpression(expr); err != nil {
+			return fmt.Errorf("node %q: %w", n.ID, err)
+		}
+	}
+	return nil
 }
 
 // validateOutputParsers checks that every output_parser defined on each node

@@ -21,6 +21,10 @@ type DAG struct {
 	Predecessors map[string][]string
 	// TopologicalOrder is a deterministic execution ordering.
 	TopologicalOrder []string
+	// OutEdges maps node ID → outgoing edges, preserving branch labels for
+	// conditional routing. Use this instead of Successors when dispatching
+	// successor nodes so that branch-labelled edges are handled correctly.
+	OutEdges map[string][]store.WorkflowEdge
 }
 
 // Build constructs a DAG from raw node and edge lists.
@@ -30,12 +34,14 @@ func Build(nodes []store.WorkflowNode, edges []store.WorkflowEdge) (*DAG, error)
 		Nodes:        make(map[string]store.WorkflowNode, len(nodes)),
 		Successors:   make(map[string][]string, len(nodes)),
 		Predecessors: make(map[string][]string, len(nodes)),
+		OutEdges:     make(map[string][]store.WorkflowEdge, len(nodes)),
 	}
 
 	for _, n := range nodes {
 		d.Nodes[n.ID] = n
 		d.Successors[n.ID] = nil
 		d.Predecessors[n.ID] = nil
+		d.OutEdges[n.ID] = nil
 	}
 
 	for _, e := range edges {
@@ -47,6 +53,7 @@ func Build(nodes []store.WorkflowNode, edges []store.WorkflowEdge) (*DAG, error)
 		}
 		d.Successors[e.SourceID] = append(d.Successors[e.SourceID], e.TargetID)
 		d.Predecessors[e.TargetID] = append(d.Predecessors[e.TargetID], e.SourceID)
+		d.OutEdges[e.SourceID] = append(d.OutEdges[e.SourceID], e)
 	}
 
 	order, err := topoSort(d)

@@ -61,3 +61,59 @@ func TestToInt_StringFallback(t *testing.T) {
 		t.Errorf("want fallback 3, got %d", got)
 	}
 }
+
+func TestResolveParams_Nil(t *testing.T) {
+	args, err := ResolveParams(nil, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args != nil {
+		t.Errorf("want nil, got %v", args)
+	}
+}
+
+func TestResolveParams_EmptySlice(t *testing.T) {
+	args, err := ResolveParams([]any{}, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args) != 0 {
+		t.Errorf("want 0 args, got %d", len(args))
+	}
+}
+
+func TestResolveParams_LiteralStrings(t *testing.T) {
+	args, err := ResolveParams([]any{"foo", "bar"}, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args) != 2 || args[0] != "foo" || args[1] != "bar" {
+		t.Errorf("unexpected args: %v", args)
+	}
+}
+
+func TestResolveParams_TemplateStrings(t *testing.T) {
+	args, err := ResolveParams([]any{"{{._initial.id}}"}, map[string]any{
+		"_initial": map[string]any{"id": "42"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args[0] != "42" {
+		t.Errorf("want 42, got %v", args[0])
+	}
+}
+
+func TestResolveParams_NotArray_ReturnsError(t *testing.T) {
+	_, err := ResolveParams("not-an-array", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for non-array params")
+	}
+}
+
+func TestResolveParams_TemplateMissingKey_ReturnsError(t *testing.T) {
+	_, err := ResolveParams([]any{"{{.missing}}"}, map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for missing template key")
+	}
+}
