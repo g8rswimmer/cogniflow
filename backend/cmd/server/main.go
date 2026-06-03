@@ -12,6 +12,7 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/api"
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider/anthropic"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/ollama"
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider/openai"
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
@@ -85,8 +86,15 @@ func main() {
 
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
 
-	registry.Register(ragingest.New(openaiClient, vault))
-	registry.Register(ragretrieve.New(openaiClient, vault))
+	if ollamaURL := os.Getenv("OLLAMA_BASE_URL"); ollamaURL != "" {
+		slog.Info("using Ollama for RAG embeddings", "base_url", ollamaURL)
+		ollamaClient := ollama.New(ollamaURL)
+		registry.Register(ragingest.New(ollamaClient, vault))
+		registry.Register(ragretrieve.New(ollamaClient, vault))
+	} else {
+		registry.Register(ragingest.New(openaiClient, vault))
+		registry.Register(ragretrieve.New(openaiClient, vault))
+	}
 
 	bus := engine.NewEventBus()
 	wfEngine := engine.NewWorkflowEngine(vault, registry, bus)

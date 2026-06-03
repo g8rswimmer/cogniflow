@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS workflows (
 );
 
 CREATE TABLE IF NOT EXISTS workflow_nodes (
-    id               TEXT    NOT NULL PRIMARY KEY,
+    id               TEXT    NOT NULL,
     workflow_id      TEXT    NOT NULL,
     type_id          TEXT    NOT NULL,
     label            TEXT    NOT NULL DEFAULT '',
@@ -34,25 +34,28 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
     position_y       REAL    NOT NULL DEFAULT 0,
     retry_max        INTEGER NOT NULL DEFAULT 0,
     retry_backoff_ms INTEGER NOT NULL DEFAULT 1000,
-    output_parsers   TEXT
+    output_parsers   TEXT,
+    PRIMARY KEY (workflow_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS workflow_edges (
-    id           TEXT NOT NULL PRIMARY KEY,
+    id           TEXT NOT NULL,
     workflow_id  TEXT NOT NULL,
     source_id    TEXT NOT NULL,
     target_id    TEXT NOT NULL,
-    branch_label TEXT
+    branch_label TEXT,
+    PRIMARY KEY (workflow_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS node_configs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id     TEXT    NOT NULL DEFAULT '',
     node_id         TEXT    NOT NULL,
     config_key      TEXT    NOT NULL,
     plain_value     TEXT,
     encrypted_value BLOB,
     is_sensitive    INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (node_id, config_key)
+    UNIQUE (workflow_id, node_id, config_key)
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -77,7 +80,7 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
     document_id TEXT    NOT NULL DEFAULT '',
     chunk_index INTEGER NOT NULL DEFAULT 0,
     chunk_text  TEXT    NOT NULL DEFAULT '',
-    embedding   TEXT    NOT NULL DEFAULT '[]'
+    embedding   BLOB    NOT NULL DEFAULT ''
 );
 `
 

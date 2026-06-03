@@ -2,8 +2,10 @@ package mysql
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -53,14 +55,10 @@ func (s *WorkflowStore) UpsertChunks(ctx context.Context, chunks []store.RAGChun
 	}
 
 	for _, c := range chunks {
-		vecJSON, err := json.Marshal(c.Embedding)
-		if err != nil {
-			return fmt.Errorf("rag store: marshal embedding for chunk %q: %w", c.ID, err)
-		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO rag_chunks (id, document_id, chunk_index, chunk_text, embedding)
-			 VALUES (?, ?, ?, ?, STRING_TO_VECTOR(?))`,
-			c.ID, c.DocumentID, c.ChunkIndex, c.ChunkText, string(vecJSON),
+			 VALUES (?, ?, ?, ?, ?)`,
+			c.ID, c.DocumentID, c.ChunkIndex, c.ChunkText, embeddingToBytes(c.Embedding),
 		); err != nil {
 			return fmt.Errorf("rag store: insert chunk %q: %w", c.ID, err)
 		}
@@ -73,53 +71,95 @@ func (s *WorkflowStore) UpsertChunks(ctx context.Context, chunks []store.RAGChun
 }
 
 // SearchChunks retrieves the top-K most similar chunks to the given embedding
-// using VEC_DISTANCE_COSINE. Results are ordered by score ascending (lower = more similar).
+// using cosine distance computed in Go. Results are ordered ascending (lower = more similar).
 // When docFilter is non-empty only chunks for that document_id are searched.
-//
-// Note: MySQL 9.0's VECTOR INDEX (ANN) requires a pure ORDER BY distance LIMIT query
-// with no additional WHERE predicates to engage the index. When docFilter is set the
-// optimizer falls back to a full-table scan computing cosine distance for every matching
-// row. This is acceptable for small corpora but degrades at large scale (100K+ chunks).
 func (s *WorkflowStore) SearchChunks(ctx context.Context, embedding []float32, topK int, docFilter string) ([]store.RAGChunkResult, error) {
 	if topK <= 0 {
 		topK = 5
 	}
 
-	vecJSON, err := json.Marshal(embedding)
-	if err != nil {
-		return nil, fmt.Errorf("rag store: marshal query embedding: %w", err)
-	}
-
-	q := `SELECT id, chunk_text,
-		         VEC_DISTANCE_COSINE(embedding, STRING_TO_VECTOR(?)) AS score
-		  FROM rag_chunks`
-	args := []any{string(vecJSON)}
-
+	q := `SELECT id, chunk_text, embedding FROM rag_chunks`
+	var args []any
 	if docFilter != "" {
 		q += " WHERE document_id = ?"
 		args = append(args, docFilter)
 	}
-	q += " ORDER BY score ASC LIMIT ?"
-	args = append(args, topK)
 
-	type dbResult struct {
-		ID        string  `db:"id"`
-		ChunkText string  `db:"chunk_text"`
-		Score     float32 `db:"score"`
+	type dbRow struct {
+		ID        string `db:"id"`
+		ChunkText string `db:"chunk_text"`
+		Embedding []byte `db:"embedding"`
 	}
-
-	var rows []dbResult
+	var rows []dbRow
 	if err := s.db.SelectContext(ctx, &rows, q, args...); err != nil {
 		return nil, fmt.Errorf("rag store: search chunks: %w", err)
 	}
 
-	results := make([]store.RAGChunkResult, len(rows))
-	for i, r := range rows {
+	type candidate struct {
+		id        string
+		chunkText string
+		score     float32
+	}
+	candidates := make([]candidate, 0, len(rows))
+	for _, r := range rows {
+		emb := bytesToEmbedding(r.Embedding)
+		if len(emb) != len(embedding) {
+			continue // skip dimension mismatch
+		}
+		candidates = append(candidates, candidate{
+			id:        r.ID,
+			chunkText: r.ChunkText,
+			score:     cosineDist(embedding, emb),
+		})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score < candidates[j].score
+	})
+
+	if topK > len(candidates) {
+		topK = len(candidates)
+	}
+	results := make([]store.RAGChunkResult, topK)
+	for i := range results {
 		results[i] = store.RAGChunkResult{
-			ID:        r.ID,
-			ChunkText: r.ChunkText,
-			Score:     r.Score,
+			ID:        candidates[i].id,
+			ChunkText: candidates[i].chunkText,
+			Score:     candidates[i].score,
 		}
 	}
 	return results, nil
+}
+
+// embeddingToBytes encodes a []float32 as little-endian raw bytes for MEDIUMBLOB storage.
+func embeddingToBytes(v []float32) []byte {
+	b := make([]byte, 4*len(v))
+	for i, f := range v {
+		binary.LittleEndian.PutUint32(b[4*i:], math.Float32bits(f))
+	}
+	return b
+}
+
+// bytesToEmbedding decodes little-endian raw bytes back to a []float32.
+func bytesToEmbedding(b []byte) []float32 {
+	v := make([]float32, len(b)/4)
+	for i := range v {
+		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[4*i:]))
+	}
+	return v
+}
+
+// cosineDist returns the cosine distance (1 - cosine similarity) between two vectors.
+// Returns 1.0 for zero-length vectors.
+func cosineDist(a, b []float32) float32 {
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+	if normA == 0 || normB == 0 {
+		return 1.0
+	}
+	return float32(1.0 - dot/(math.Sqrt(normA)*math.Sqrt(normB)))
 }
