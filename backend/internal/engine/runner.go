@@ -143,7 +143,19 @@ func runDAG(
 	if firstErr != nil {
 		return nil, firstErr
 	}
-	return execCtx.sinkOutputs(dag), nil
+	finalOutput := execCtx.sinkOutputs(dag)
+	// If conditional routing suppressed every path to every sink, the run
+	// appears to succeed but produces no output, which is indistinguishable
+	// from a legitimately empty-output workflow. Surface this as an error so
+	// callers and the run store can distinguish the two cases.
+	if len(finalOutput) == 0 && len(skipped) > 0 {
+		for id := range skipped {
+			if len(dag.Successors[id]) == 0 {
+				return nil, fmt.Errorf("all sink branches were suppressed by conditional routing")
+			}
+		}
+	}
+	return finalOutput, nil
 }
 
 // branchAllows reports whether the given edge should fire given the completed
@@ -196,8 +208,9 @@ func executeNode(
 	}
 
 	input := node.NodeInput{
-		Config:       n.Config,
-		UpstreamData: execCtx.mergeUpstream(dag.Ancestors[nodeID]),
+		Config:               n.Config,
+		UpstreamData:         execCtx.mergeUpstream(dag.Ancestors[nodeID]),
+		DirectPredecessorIDs: dag.Predecessors[nodeID],
 	}
 
 	nodeStart := time.Now()

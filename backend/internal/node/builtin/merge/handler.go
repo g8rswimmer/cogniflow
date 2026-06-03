@@ -4,6 +4,7 @@ package merge
 import (
 	"context"
 	"encoding/json"
+	"sort"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 )
@@ -15,7 +16,7 @@ var inputSchema = json.RawMessage(`{
 
 var outputSchema = json.RawMessage(`{
   "type": "object",
-  "description": "Flat map of all upstream node output fields merged together. Later branches overwrite earlier ones on key conflict."
+  "description": "Flat map of direct-predecessor node output fields merged together. On key conflict, the alphabetically-later node ID wins."
 }`)
 
 // Handler implements the merge node type.
@@ -37,18 +38,33 @@ func (h *Handler) Meta() node.NodeMeta {
 	}
 }
 
-// Execute merges all upstream node outputs into a single flat map.
-// The "_initial" key is excluded since it is already accessible to all nodes.
+// Execute merges direct-predecessor node outputs into a single flat map.
+// When DirectPredecessorIDs is populated by the engine, only those nodes
+// are included — preventing transitive ancestors from silently contributing
+// keys. Falls back to all UpstreamData entries (excluding "_initial") when
+// DirectPredecessorIDs is absent (e.g. in unit tests).
+// Keys are merged in sorted node-ID order so collision resolution is deterministic.
 func (h *Handler) Execute(_ context.Context, input node.NodeInput) (node.NodeOutput, error) {
+	ids := input.DirectPredecessorIDs
+	if len(ids) == 0 {
+		for k := range input.UpstreamData {
+			if k != "_initial" {
+				ids = append(ids, k)
+			}
+		}
+	}
+	sorted := make([]string, len(ids))
+	copy(sorted, ids)
+	sort.Strings(sorted)
+
 	out := make(map[string]any)
-	for k, v := range input.UpstreamData {
-		if k == "_initial" {
+	for _, id := range sorted {
+		m, ok := input.UpstreamData[id].(map[string]any)
+		if !ok {
 			continue
 		}
-		if m, ok := v.(map[string]any); ok {
-			for mk, mv := range m {
-				out[mk] = mv
-			}
+		for mk, mv := range m {
+			out[mk] = mv
 		}
 	}
 	return node.NodeOutput{Data: out}, nil

@@ -158,17 +158,18 @@ func TestExecute_WithParams(t *testing.T) {
 	}
 }
 
-func TestExecute_TemplateQuery(t *testing.T) {
+// TestExecute_ParamQuery verifies that a dynamic value is safely passed via the
+// params array (parameterised binding) rather than inlined into the query string.
+func TestExecute_ParamQuery(t *testing.T) {
 	path := setupSQLiteDB(t, "CREATE TABLE events (name TEXT)")
 	out, err := New().Execute(context.Background(), node.NodeInput{
 		Config: map[string]any{
 			"driver": "sqlite",
 			"dsn":    path,
-			"query":  "INSERT INTO events VALUES ('{{._initial.event_name}}')",
+			"query":  "INSERT INTO events VALUES (?)",
+			"params": []any{"signup"},
 		},
-		UpstreamData: map[string]any{
-			"_initial": map[string]any{"event_name": "signup"},
-		},
+		UpstreamData: map[string]any{},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

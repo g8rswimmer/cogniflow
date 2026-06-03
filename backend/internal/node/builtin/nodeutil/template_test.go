@@ -117,3 +117,20 @@ func TestResolveParams_TemplateMissingKey_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for missing template key")
 	}
 }
+
+func TestResolveParams_NumericPassThrough(t *testing.T) {
+	// float64 is what JSON decoding produces for numeric literals.
+	args, err := ResolveParams([]any{float64(42), true, "hello"}, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args[0] != float64(42) {
+		t.Errorf("want float64(42), got %v (%T)", args[0], args[0])
+	}
+	if args[1] != true {
+		t.Errorf("want true, got %v", args[1])
+	}
+	if args[2] != "hello" {
+		t.Errorf("want hello, got %v", args[2])
+	}
+}

@@ -54,7 +54,13 @@ func ResolveParams(params any, upstream map[string]any) ([]any, error) {
 	}
 	args := make([]any, len(slice))
 	for i, v := range slice {
-		s, _ := v.(string)
+		s, ok := v.(string)
+		if !ok {
+			// Non-string values (e.g. float64 from JSON) are passed through unchanged
+			// so the database driver receives the correct native type.
+			args[i] = v
+			continue
+		}
 		rendered, err := RenderTemplate(s, upstream)
 		if err != nil {
 			return nil, fmt.Errorf("render param[%d]: %w", i, err)

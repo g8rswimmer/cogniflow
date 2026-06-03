@@ -507,6 +507,34 @@ func TestRunDAG_ConditionalMerge_MultiSource(t *testing.T) {
 	}
 }
 
+// TestRunDAG_AllSinksSkipped verifies that runDAG returns an error when the only
+// sink node is on the suppressed branch of a conditional.
+func TestRunDAG_AllSinksSkipped(t *testing.T) {
+	sink := &countingHandler{meta: newMeta("sink")}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("cond"), output: map[string]any{"result": false}},
+		sink,
+	)
+
+	// n1(cond, result=false) →[true]→ n2(sink) — the true edge is suppressed.
+	nodes := []store.WorkflowNode{makeNode("n1", "cond"), makeNode("n2", "sink")}
+	edges := []store.WorkflowEdge{makeBranchEdge("e1", "n1", "n2", "true")}
+	dag, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	bus := NewEventBus()
+	_, err = runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	if err == nil {
+		t.Fatal("expected error when all sink branches are suppressed, got nil")
+	}
+	if sink.calls.Load() != 0 {
+		t.Errorf("sink should not have executed, got %d calls", sink.calls.Load())
+	}
+}
+
 // TestBranchAllows covers the branchAllows helper directly.
 func TestBranchAllows(t *testing.T) {
 	trueLabel := "true"

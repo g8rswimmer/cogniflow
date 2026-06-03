@@ -84,6 +84,11 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateEdgeBranchLabels(wf.Edges); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	if wf.Trigger.Kind == "cron" {
 		if err := trigger.ValidateCronExpr(wf.Trigger.CronExpr); err != nil {
 			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
@@ -171,6 +176,11 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateCELExpressions(wf.Nodes); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	if err := validateEdgeBranchLabels(wf.Edges); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
 	}
@@ -353,6 +363,22 @@ func parseTemplateFields(schema json.RawMessage) []templateField {
 		}
 	}
 	return fields
+}
+
+// validateEdgeBranchLabels rejects any edge whose branch_label is set to a value
+// other than "true" or "false". branchAllows in the engine does a string-equality
+// check against exactly those two values; any other label would produce inverted
+// or undefined routing at runtime with no error.
+func validateEdgeBranchLabels(edges []store.WorkflowEdge) error {
+	for _, e := range edges {
+		if e.BranchLabel == nil {
+			continue
+		}
+		if *e.BranchLabel != "true" && *e.BranchLabel != "false" {
+			return fmt.Errorf("edge %q: branch_label must be \"true\" or \"false\", got %q", e.ID, *e.BranchLabel)
+		}
+	}
+	return nil
 }
 
 // validateCELExpressions compiles the CEL expression on every conditional.branch
