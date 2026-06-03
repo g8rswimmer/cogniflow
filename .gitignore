@@ -15,4 +15,4 @@ frontend/dist/
 .idea/
 .vscode/
 *.swp
-backend/demos/local/
+backend/demos
