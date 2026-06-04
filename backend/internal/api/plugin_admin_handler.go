@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,11 @@ import (
 )
 
 type pluginAdminHandler struct {
-	store    store.Store
-	registry *node.NodeRegistry
+	store      store.Store
+	registry   *node.NodeRegistry
+	// registerFn is injected so tests can stub out the gRPC dial without a
+	// real server. Production code sets this to nodeplugin.RegisterOne.
+	registerFn func(ctx context.Context, addr string, registry *node.NodeRegistry) (store.PluginRegistration, error)
 }
 
 // list handles GET /v1/admin/plugins.
@@ -22,6 +26,9 @@ func (h *pluginAdminHandler) list(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
+	}
+	if regs == nil {
+		regs = []store.PluginRegistration{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"plugins": regs})
 }
@@ -42,7 +49,7 @@ func (h *pluginAdminHandler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reg, err := nodeplugin.RegisterOne(r.Context(), body.Address, h.registry)
+	reg, err := h.registerFn(r.Context(), body.Address, h.registry)
 	if err != nil {
 		if errors.Is(err, node.ErrDuplicateTypeID) {
 			writeError(w, http.StatusConflict, "PLUGIN_ALREADY_REGISTERED", err.Error())
@@ -104,6 +111,9 @@ func (h *pluginAdminHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.SavePluginRegistration(r.Context(), reg); err != nil {
+		// UpdateOne atomically swapped the registry entry; roll it back so
+		// in-memory state and DB stay in sync.
+		_ = h.registry.Unregister(reg.TypeID)
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR",
 			fmt.Sprintf("persisting registration: %s", err.Error()))
 		return
@@ -116,16 +126,26 @@ func (h *pluginAdminHandler) update(w http.ResponseWriter, r *http.Request) {
 func (h *pluginAdminHandler) deregister(w http.ResponseWriter, r *http.Request) {
 	typeID := r.PathValue("type_id")
 
-	if err := h.registry.Unregister(typeID); err != nil {
-		if errors.Is(err, node.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "plugin not registered: "+typeID)
+	// Guard: only allow deletion of admin-registered plugins (not built-ins).
+	// If the typeID has no persisted record it was never registered via the
+	// admin API, so we refuse rather than silently removing a built-in node.
+	if _, err := h.store.GetPluginRegistration(r.Context(), typeID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "no persisted plugin with type_id: "+typeID)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 
-	// Remove from DB; ignore not-found in case it was an ephemeral (env-var) plugin.
+	// Unregister from the in-memory registry. Ignore ErrNodeNotFound: the
+	// plugin may have been persisted but never loaded (e.g. unreachable at the
+	// last startup), so it has no live registry entry to remove.
+	if err := h.registry.Unregister(typeID); err != nil && !errors.Is(err, node.ErrNodeNotFound) {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
 	if err := h.store.DeletePluginRegistration(r.Context(), typeID); err != nil &&
 		!errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())

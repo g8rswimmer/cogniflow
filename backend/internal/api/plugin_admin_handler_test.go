@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
@@ -24,7 +26,11 @@ func newPluginAdminHandler(t *testing.T) (*pluginAdminHandler, *mockStore, *node
 	t.Helper()
 	st := newMockStore()
 	registry := node.NewRegistry()
-	return &pluginAdminHandler{store: st, registry: registry}, st, registry
+	return &pluginAdminHandler{
+		store:      st,
+		registry:   registry,
+		registerFn: nodeplugin.RegisterOne,
+	}, st, registry
 }
 
 // ── GET /v1/admin/plugins ─────────────────────────────────────────────────
@@ -42,7 +48,7 @@ func TestPluginAdmin_List_Empty(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	plugins := body["plugins"].([]any)
+	plugins, _ := body["plugins"].([]any) // comma-ok: null marshals to nil, not []any
 	if len(plugins) != 0 {
 		t.Errorf("want 0 plugins, got %d", len(plugins))
 	}
@@ -68,7 +74,7 @@ func TestPluginAdmin_List_ReturnsStored(t *testing.T) {
 	}
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	plugins := body["plugins"].([]any)
+	plugins, _ := body["plugins"].([]any)
 	if len(plugins) != 1 {
 		t.Errorf("want 1 plugin, got %d", len(plugins))
 	}
@@ -129,15 +135,24 @@ func TestPluginAdmin_Register_UnreachableAddress(t *testing.T) {
 }
 
 func TestPluginAdmin_Register_DuplicateTypeID(t *testing.T) {
-	_, _, registry := newPluginAdminHandler(t)
-	// Pre-populate the registry with the same type_id the plugin would report.
+	h, _, registry := newPluginAdminHandler(t)
 	registry.Register(&stubNodeHandler{typeID: "echo.passthrough"})
 
-	// Verify the duplicate guard works at the registry level. The HTTP path
-	// also exercises this when RegisterOne calls TryRegister internally.
-	if err := registry.TryRegister(&stubNodeHandler{typeID: "echo.passthrough"}); err == nil {
-		t.Fatal("expected TryRegister to fail for duplicate")
+	// Inject a stub registerFn that returns ErrDuplicateTypeID, simulating what
+	// dialAndRegister returns when TryRegister finds the type already loaded.
+	h.registerFn = func(_ context.Context, _ string, _ *node.NodeRegistry) (store.PluginRegistration, error) {
+		return store.PluginRegistration{}, fmt.Errorf("%w %q", node.ErrDuplicateTypeID, "echo.passthrough")
 	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/plugins",
+		strings.NewReader(`{"address":"localhost:50051"}`))
+	w := httptest.NewRecorder()
+	h.register(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d: %s", w.Code, w.Body.String())
+	}
+	assertErrorCode(t, w.Body.Bytes(), "PLUGIN_ALREADY_REGISTERED")
 }
 
 // ── DELETE /v1/admin/plugins/{type_id} ───────────────────────────────────
@@ -183,6 +198,29 @@ func TestPluginAdmin_Deregister_Success(t *testing.T) {
 	// Confirm removed from store.
 	if _, err := st.GetPluginRegistration(context.Background(), "test.plugin"); err == nil {
 		t.Error("expected test.plugin to be removed from store")
+	}
+}
+
+// TestPluginAdmin_Deregister_BuiltInGuard verifies that a built-in node (one
+// that is in the registry but has no persisted admin record) cannot be deleted.
+func TestPluginAdmin_Deregister_BuiltInGuard(t *testing.T) {
+	h, _, registry := newPluginAdminHandler(t)
+	// Register a handler directly (simulates a built-in, never persisted via admin API).
+	registry.Register(&stubNodeHandler{typeID: "builtin.node"})
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/admin/plugins/builtin.node", nil)
+	req.SetPathValue("type_id", "builtin.node")
+	w := httptest.NewRecorder()
+	h.deregister(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d: %s", w.Code, w.Body.String())
+	}
+	assertErrorCode(t, w.Body.Bytes(), "NOT_FOUND")
+
+	// Built-in must still be in the registry.
+	if _, err := registry.Lookup("builtin.node"); err != nil {
+		t.Error("built-in node was incorrectly removed from registry")
 	}
 }
 
@@ -240,4 +278,3 @@ func TestPluginAdmin_Update_UnreachableAddress(t *testing.T) {
 	}
 	assertErrorCode(t, w.Body.Bytes(), "PLUGIN_UNAVAILABLE")
 }
-

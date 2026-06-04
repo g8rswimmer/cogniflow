@@ -80,6 +80,23 @@ func (r *NodeRegistry) Unregister(typeID string) error {
 	return nil
 }
 
+// Replace atomically substitutes the handler for the given TypeID, or registers
+// it if absent. The old handler's Close() is called outside the write lock to
+// avoid holding the lock during a potentially slow gRPC drain. Use this instead
+// of Unregister+TryRegister to avoid leaving a gap in the registry.
+func (r *NodeRegistry) Replace(handler NodeHandler) {
+	typeID := handler.Meta().TypeID
+	r.mu.Lock()
+	old := r.handlers[typeID]
+	r.handlers[typeID] = handler
+	r.mu.Unlock()
+	if old != nil {
+		if c, ok := old.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
+}
+
 // Shutdown closes any registered handler that implements io.Closer (e.g. gRPC
 // plugin connections). Built-in handlers that do not implement io.Closer are
 // silently skipped. Call once during server shutdown.
