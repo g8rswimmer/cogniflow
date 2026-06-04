@@ -14,21 +14,26 @@ type mockStore struct {
 	mu        sync.RWMutex
 	workflows map[string]store.Workflow
 	runs      map[string]store.Run
+	plugins   map[string]store.PluginRegistration
 
 	// Per-method error overrides.
-	createErr    error
-	listErr      error
-	getErr       error
-	updateErr    error
-	deleteErr    error
-	createRunErr error
-	getRunErr    error
+	createErr        error
+	listErr          error
+	getErr           error
+	updateErr        error
+	deleteErr        error
+	createRunErr     error
+	getRunErr        error
+	savePluginErr    error
+	listPluginsErr   error
+	deletePluginErr  error
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
 		workflows: make(map[string]store.Workflow),
 		runs:      make(map[string]store.Run),
+		plugins:   make(map[string]store.PluginRegistration),
 	}
 }
 
@@ -172,4 +177,47 @@ func (m *mockStore) GetTriggerConfig(_ context.Context, _ string) (store.Trigger
 }
 func (m *mockStore) ListTriggerConfigs(_ context.Context) ([]store.WorkflowTrigger, error) {
 	return nil, nil
+}
+
+func (m *mockStore) SavePluginRegistration(_ context.Context, reg store.PluginRegistration) error {
+	if m.savePluginErr != nil {
+		return m.savePluginErr
+	}
+	m.mu.Lock()
+	m.plugins[reg.TypeID] = reg
+	m.mu.Unlock()
+	return nil
+}
+func (m *mockStore) GetPluginRegistration(_ context.Context, typeID string) (store.PluginRegistration, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	reg, ok := m.plugins[typeID]
+	if !ok {
+		return store.PluginRegistration{}, store.ErrNotFound
+	}
+	return reg, nil
+}
+func (m *mockStore) ListPluginRegistrations(_ context.Context) ([]store.PluginRegistration, error) {
+	if m.listPluginsErr != nil {
+		return nil, m.listPluginsErr
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	regs := make([]store.PluginRegistration, 0, len(m.plugins))
+	for _, r := range m.plugins {
+		regs = append(regs, r)
+	}
+	return regs, nil
+}
+func (m *mockStore) DeletePluginRegistration(_ context.Context, typeID string) error {
+	if m.deletePluginErr != nil {
+		return m.deletePluginErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.plugins[typeID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.plugins, typeID)
+	return nil
 }

@@ -83,6 +83,16 @@ func (m *mockEngineStore) GetTriggerConfig(_ context.Context, _ string) (store.T
 func (m *mockEngineStore) ListTriggerConfigs(_ context.Context) ([]store.WorkflowTrigger, error) {
 	return nil, nil
 }
+func (m *mockEngineStore) SavePluginRegistration(_ context.Context, _ store.PluginRegistration) error {
+	return nil
+}
+func (m *mockEngineStore) GetPluginRegistration(_ context.Context, _ string) (store.PluginRegistration, error) {
+	return store.PluginRegistration{}, nil
+}
+func (m *mockEngineStore) ListPluginRegistrations(_ context.Context) ([]store.PluginRegistration, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
 
 // ---- helpers -------------------------------------------------------------
 

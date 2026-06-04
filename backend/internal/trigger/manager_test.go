@@ -26,6 +26,16 @@ func (m *fullMockStore) SaveTriggerConfig(_ context.Context, wfID string, cfg st
 	m.savedConfig = &cfg
 	return nil
 }
+func (m *fullMockStore) SavePluginRegistration(_ context.Context, _ store.PluginRegistration) error {
+	return nil
+}
+func (m *fullMockStore) GetPluginRegistration(_ context.Context, _ string) (store.PluginRegistration, error) {
+	return store.PluginRegistration{}, nil
+}
+func (m *fullMockStore) ListPluginRegistrations(_ context.Context) ([]store.PluginRegistration, error) {
+	return nil, nil
+}
+func (m *fullMockStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
 
 // ---- LoadAll tests ----------------------------------------------------------
 

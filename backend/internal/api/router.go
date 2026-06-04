@@ -43,5 +43,11 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatc
 
 	mux.HandleFunc("POST /v1/webhooks/{workflow_id}", tm.WebhookHandler())
 
+	pah := &pluginAdminHandler{store: st, registry: registry}
+	mux.HandleFunc("GET /v1/admin/plugins", pah.list)
+	mux.HandleFunc("POST /v1/admin/plugins", pah.register)
+	mux.HandleFunc("PUT /v1/admin/plugins/{type_id}", pah.update)
+	mux.HandleFunc("DELETE /v1/admin/plugins/{type_id}", pah.deregister)
+
 	return mux
 }

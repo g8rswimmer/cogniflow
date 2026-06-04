@@ -102,6 +102,11 @@ func run(logLevel *slog.LevelVar) error {
 	registry.Register(dbwrite.New())
 	registry.Register(merge.New())
 
+	// Re-establish connections to plugins registered via the admin API (persisted
+	// in DB). Done before PLUGIN_ADDRESSES so DB-registered plugins take
+	// precedence and env-var duplicates are skipped with a warning.
+	nodeplugin.LoadFromStore(context.Background(), rawStore, registry)
+
 	// Register out-of-process gRPC plugins before built-in AI nodes so that
 	// PLUGIN_ADDRESSES nodes appear in the palette alongside built-ins.
 	if pluginAddrs := os.Getenv("PLUGIN_ADDRESSES"); pluginAddrs != "" {

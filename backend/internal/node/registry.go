@@ -11,6 +11,10 @@ import (
 // ErrNodeNotFound is returned by Lookup when a type ID is not registered.
 var ErrNodeNotFound = errors.New("node: type not found")
 
+// ErrDuplicateTypeID is returned by TryRegister when a handler with the same
+// TypeID is already registered.
+var ErrDuplicateTypeID = errors.New("node registry: duplicate type_id")
+
 // NodeRegistry is the central catalog of all available node types.
 // It is safe for concurrent use.
 type NodeRegistry struct {
@@ -54,9 +58,25 @@ func (r *NodeRegistry) TryRegister(handler NodeHandler) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.handlers[typeID]; exists {
-		return fmt.Errorf("node registry: duplicate type_id %q", typeID)
+		return fmt.Errorf("%w %q", ErrDuplicateTypeID, typeID)
 	}
 	r.handlers[typeID] = handler
+	return nil
+}
+
+// Unregister removes a handler from the registry by TypeID, calling Close()
+// if the handler implements io.Closer. Returns ErrNodeNotFound if absent.
+func (r *NodeRegistry) Unregister(typeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h, ok := r.handlers[typeID]
+	if !ok {
+		return fmt.Errorf("node type %q: %w", typeID, ErrNodeNotFound)
+	}
+	delete(r.handlers, typeID)
+	if c, ok := h.(io.Closer); ok {
+		_ = c.Close()
+	}
 	return nil
 }
 
