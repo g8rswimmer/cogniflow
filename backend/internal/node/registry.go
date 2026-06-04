@@ -47,16 +47,33 @@ func (r *NodeRegistry) Lookup(typeID string) (NodeHandler, error) {
 	return h, nil
 }
 
+// TryRegister adds a handler under its TypeID, returning an error if the TypeID
+// is already registered. Unlike Register, it does not panic on collision.
+func (r *NodeRegistry) TryRegister(handler NodeHandler) error {
+	typeID := handler.Meta().TypeID
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.handlers[typeID]; exists {
+		return fmt.Errorf("node registry: duplicate type_id %q", typeID)
+	}
+	r.handlers[typeID] = handler
+	return nil
+}
+
 // Shutdown closes any registered handler that implements io.Closer (e.g. gRPC
 // plugin connections). Built-in handlers that do not implement io.Closer are
 // silently skipped. Call once during server shutdown.
 func (r *NodeRegistry) Shutdown() {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	closers := make([]io.Closer, 0, len(r.handlers))
 	for _, h := range r.handlers {
 		if c, ok := h.(io.Closer); ok {
-			_ = c.Close()
+			closers = append(closers, c)
 		}
+	}
+	r.mu.RUnlock()
+	for _, c := range closers {
+		_ = c.Close()
 	}
 }
 

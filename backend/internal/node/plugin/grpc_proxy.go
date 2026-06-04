@@ -26,6 +26,9 @@ func (p *grpcProxy) Meta() node.NodeMeta {
 // Close shuts down the underlying gRPC connection. NodeRegistry.Shutdown
 // calls this for any registered handler that implements io.Closer.
 func (p *grpcProxy) Close() error {
+	if p.conn == nil {
+		return nil
+	}
 	return p.conn.Close()
 }
 
@@ -41,7 +44,9 @@ func (p *grpcProxy) Execute(ctx context.Context, input node.NodeInput) (node.Nod
 
 	var timeoutMs int64
 	if deadline, ok := ctx.Deadline(); ok {
-		timeoutMs = time.Until(deadline).Milliseconds()
+		if d := time.Until(deadline); d > 0 {
+			timeoutMs = d.Milliseconds()
+		}
 	}
 
 	resp, err := p.client.Execute(ctx, &pluginv1.ExecuteRequest{
@@ -58,11 +63,11 @@ func (p *grpcProxy) Execute(ctx context.Context, input node.NodeInput) (node.Nod
 		return node.NodeOutput{}, fmt.Errorf("[%s] %s", e.GetCode(), e.GetMessage())
 	}
 
-	rawData := resp.GetData()
-	if len(rawData) == 0 {
+	if resp.GetResult() == nil {
 		return node.NodeOutput{}, fmt.Errorf("plugin %s: response has neither data nor error set", p.meta.TypeID)
 	}
 
+	rawData := resp.GetData()
 	var data map[string]any
 	if err := json.Unmarshal(rawData, &data); err != nil {
 		return node.NodeOutput{}, fmt.Errorf("plugin %s: unmarshal response: %w", p.meta.TypeID, err)

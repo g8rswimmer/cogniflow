@@ -63,8 +63,9 @@ func registerOne(ctx context.Context, addr string, registry *node.NodeRegistry) 
 	defer metaCancel()
 	// Honour cancellation of the caller's context (e.g. server shutdown) while
 	// still guaranteeing each plugin a full dialTimeout window.
-	metaCtx, metaCancel2 := withEarlyCancel(metaCtx, ctx)
-	defer metaCancel2()
+	// context.AfterFunc fires only when ctx is done, avoiding a persistent goroutine.
+	stopEarlyCancel := context.AfterFunc(ctx, metaCancel)
+	defer stopEarlyCancel()
 
 	resp, err := client.Meta(metaCtx, &pluginv1.MetaRequest{})
 	if err != nil {
@@ -76,32 +77,15 @@ func registerOne(ctx context.Context, addr string, registry *node.NodeRegistry) 
 		return fmt.Errorf("invalid meta from %s: %w", addr, err)
 	}
 
-	// Guard against a plugin advertising a TypeID already held by a built-in or
-	// another plugin. NodeRegistry.Register panics on collision; returning an
-	// error here keeps the server alive.
-	if _, lookupErr := registry.Lookup(meta.TypeID); lookupErr == nil {
-		return fmt.Errorf("plugin %s: type_id %q already registered; skipping to avoid collision", addr, meta.TypeID)
-	}
-
+	// TryRegister atomically checks for TypeID collision and registers the proxy,
+	// returning an error instead of panicking if the TypeID is already taken.
 	proxy := &grpcProxy{meta: meta, client: client, conn: conn}
-	registry.Register(proxy)
+	if err := registry.TryRegister(proxy); err != nil {
+		return fmt.Errorf("plugin %s: %w", addr, err)
+	}
 	committed = true
 	slog.Info("plugin registered", "type_id", meta.TypeID, "address", addr)
 	return nil
-}
-
-// withEarlyCancel returns a context that is cancelled whenever either parent
-// is cancelled, using whichever deadline comes first.
-func withEarlyCancel(a, b context.Context) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(a)
-	go func() {
-		select {
-		case <-b.Done():
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, cancel
 }
 
 func protoToMeta(r *pluginv1.MetaResponse) (node.NodeMeta, error) {
