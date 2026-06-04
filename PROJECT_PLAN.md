@@ -21,9 +21,10 @@ Each milestone leaves the system in a **runnable, verifiable state**. Later mile
 | M7 | [RAG Nodes](#m7-rag-nodes) | Documents ingestable; vector similarity search returns relevant chunks |
 | M8 | [Advanced Deterministic Nodes](#m8-advanced-deterministic-nodes) | Conditional branching, data transforms, database read/write, parallel merge |
 | M9 | [gRPC Plugin Protocol](#m9-grpc-plugin-protocol) | External plugin processes register and execute as first-class nodes |
-| M10 | [Frontend — Canvas & CRUD](#m10-frontend--canvas--crud) | Browser UI: create workflows, add/connect nodes, save |
-| M11 | [Frontend — Run & Observe](#m11-frontend--run--observe) | Browser UI: trigger runs, watch live status, browse history |
-| M12 | [Production Build & Hardening](#m12-production-build--hardening) | Single `docker-compose up` from a clean clone; full system E2E |
+| M10 | [Plugin Registry — Admin API & Persistence](#m10-plugin-registry--admin-api--persistence) | Plugins registered and managed via HTTP API; registrations survive server restarts |
+| M11 | [Frontend — Canvas & CRUD](#m11-frontend--canvas--crud) | Browser UI: create workflows, add/connect nodes, save |
+| M12 | [Frontend — Run & Observe](#m12-frontend--run--observe) | Browser UI: trigger runs, watch live status, browse history |
+| M13 | [Production Build & Hardening](#m13-production-build--hardening) | Single `docker-compose up` from a clean clone; full system E2E |
 
 ---
 
@@ -458,7 +459,77 @@ M1, M2, M3
 
 ---
 
-## M10: Frontend — Canvas & CRUD
+## M10: Plugin Registry — Admin API & Persistence
+
+**Goal:** Node plugins become durable, first-class resources. An operator can register, inspect, update, and remove plugins through a REST admin API without restarting the server. Registrations are stored in the database and automatically re-established on the next startup, so a plugin added once is available across deployments.
+
+### Deliverables
+
+- Migration `NNNN_create_plugin_registrations.up.sql` / `.down.sql` — `plugin_registrations` table
+- `backend/internal/store/store.go` — `PluginRegistration` struct; four new Store interface methods (`SavePluginRegistration`, `GetPluginRegistration`, `ListPluginRegistrations`, `DeletePluginRegistration`)
+- `backend/internal/store/mysql/plugin_store.go` — SQL implementation of the four methods
+- `backend/internal/node/registry.go` — `Unregister(typeID string) error` method (closes `io.Closer` if applicable, removes from map; returns `ErrNodeNotFound` if absent)
+- `backend/internal/node/plugin/registrar.go` — `LoadFromStore(ctx, store, registry)` function; called at startup before `PLUGIN_ADDRESSES` processing; loads all `plugin_registrations` rows, dials each, calls `Meta()`, calls `registry.TryRegister`; skips unreachable plugins with a warning
+- `backend/internal/api/plugin_admin_handler.go` — handlers for all four admin endpoints; `POST` dials → `Meta()` → `TryRegister` → `SavePluginRegistration`; `DELETE` → `Unregister` → `DeletePluginRegistration`; `PUT` → unregister old → register new → update DB; `GET` → `ListPluginRegistrations`
+- `backend/internal/api/router.go` — mount `/v1/admin/plugins` routes
+- `backend/cmd/server/main.go` — call `nodeplugin.LoadFromStore(ctx, vault, registry)` at startup (before `PLUGIN_ADDRESSES` processing)
+
+### Testable Criteria
+
+```bash
+# --- Register a plugin at runtime ---
+# (echo plugin already running on :50051)
+curl -s -X POST http://localhost:8080/v1/admin/plugins \
+  -H 'Content-Type: application/json' \
+  -d '{"address": "localhost:50051"}' | jq '{type_id, display_name, address}'
+# → {"type_id":"echo.passthrough","display_name":"Echo","address":"localhost:50051"}
+
+# Plugin immediately appears in node catalogue
+curl http://localhost:8080/v1/node-types | jq '[.node_types[] | select(.category=="plugin")] | length'
+# → 1
+
+# List persisted registrations
+curl http://localhost:8080/v1/admin/plugins | jq '.plugins[].type_id'
+# → "echo.passthrough"
+
+# --- Persistence across restart ---
+# Stop and restart the server (keep the echo plugin running)
+# Plugin is automatically re-registered from DB at startup
+curl http://localhost:8080/v1/node-types | jq '[.node_types[] | select(.type_id=="echo.passthrough")] | length'
+# → 1
+
+# --- Update plugin address ---
+curl -s -X PUT http://localhost:8080/v1/admin/plugins/echo.passthrough \
+  -H 'Content-Type: application/json' \
+  -d '{"address": "localhost:50052"}' | jq '.address'
+# → "localhost:50052"
+
+# --- Unreachable address is rejected ---
+curl -s -X POST http://localhost:8080/v1/admin/plugins \
+  -H 'Content-Type: application/json' \
+  -d '{"address": "localhost:9999"}' | jq '.error.code'
+# → "PLUGIN_UNAVAILABLE"
+
+# --- Duplicate TypeID is rejected ---
+curl -s -X POST http://localhost:8080/v1/admin/plugins \
+  -H 'Content-Type: application/json' \
+  -d '{"address": "localhost:50051"}' | jq '.error.code'
+# → "PLUGIN_ALREADY_REGISTERED"
+
+# --- Deregister ---
+curl -s -X DELETE http://localhost:8080/v1/admin/plugins/echo.passthrough
+# → 204 No Content
+
+curl http://localhost:8080/v1/node-types | jq '[.node_types[] | select(.category=="plugin")] | length'
+# → 0
+```
+
+### Dependencies
+M1, M2, M9
+
+---
+
+## M11: Frontend — Canvas & CRUD
 
 **Goal:** A browser-based UI allows users to create, open, configure, and save workflows. The node palette is populated from the live API. Node configuration forms are dynamically generated from each node's `input_schema`.
 
@@ -517,7 +588,7 @@ M1, M2 (API must be running)
 
 ---
 
-## M11: Frontend — Run & Observe
+## M12: Frontend — Run & Observe
 
 **Goal:** Users can trigger workflow runs from the UI, watch per-node status update in real time, and drill into past runs to see what each node produced.
 

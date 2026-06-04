@@ -152,6 +152,10 @@ All nodes (built-in and extended) must conform to the following interface:
 | EX-05 | Extended node types appear alongside built-in nodes in the UI canvas node palette |
 | EX-06 | Out-of-process node extensions are supported via a gRPC plugin protocol. External processes implement a defined `.proto` service contract and register with the node registry at startup. This allows node extensions written in any language. |
 | EX-07 | The gRPC node plugin contract mirrors the in-process `NodeHandler` interface: `Metadata() → NodeMeta`, `Execute(ctx, input) → (output, error)` |
+| EX-08 | The backend exposes an admin HTTP API (`POST /v1/admin/plugins`, `GET /v1/admin/plugins`, `DELETE /v1/admin/plugins/{type_id}`, `PUT /v1/admin/plugins/{type_id}`) for registering, listing, deregistering, and updating out-of-process node extensions at runtime without restarting the server |
+| EX-09 | Plugin registrations made via the admin API are persisted to the database; on startup the server automatically re-establishes gRPC connections to all persisted plugins before opening the HTTP port |
+| EX-10 | The admin `POST /v1/admin/plugins` endpoint validates the supplied address by dialing it and calling `Meta()` before persisting — unreachable processes or invalid metadata are rejected with a descriptive error; the plugin appears in `GET /v1/node-types` immediately upon successful registration |
+| EX-11 | A plugin can be deregistered via `DELETE /v1/admin/plugins/{type_id}`; the node registry entry and database record are removed immediately; workflows that subsequently invoke that node type receive a clear `node type not found` error |
 
 ### 5.4 Trigger System
 
@@ -259,6 +263,7 @@ All nodes (built-in and extended) must conform to the following interface:
 | Node Types | `GET /node-types` (returns registry of all available node types + schemas) |
 | Runs | `POST /workflows/{id}/runs`, `GET /workflows/{id}/runs`, `GET /runs/{runId}` |
 | Triggers | `POST /webhooks/{workflowId}` (inbound webhook) |
+| Admin — Plugins | `GET /admin/plugins`, `POST /admin/plugins`, `PUT /admin/plugins/{typeId}`, `DELETE /admin/plugins/{typeId}` |
 | Health | `GET /health` |
 | WebSocket | `WS /runs/{runId}/events` (real-time execution events) |
 

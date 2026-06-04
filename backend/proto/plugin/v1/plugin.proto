@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "github.com/g8rswimmer/cogniflow/proto/plugin/v1;pluginv1";
+
+// NodePlugin is the service contract every out-of-process node extension must implement.
+service NodePlugin {
+  // Meta returns the static descriptor for this node type.
+  // Called once at startup during plugin registration.
+  rpc Meta(MetaRequest) returns (MetaResponse);
+
+  // Execute runs the node logic for a single invocation.
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+message MetaRequest {}
+
+message MetaResponse {
+  string type_id       = 1;
+  string display_name  = 2;
+  string category      = 3;
+  string description   = 4;
+  // JSON Schema (UTF-8 encoded) for the config form fields.
+  bytes  input_schema  = 5;
+  // JSON Schema (UTF-8 encoded) for the output data shape.
+  bytes  output_schema = 6;
+}
+
+message ExecuteRequest {
+  // upstream_data is a JSON object (map of node-id → output-map).
+  bytes upstream_data = 1;
+  // config is a JSON object of decrypted config values for this node instance.
+  bytes config        = 2;
+  // timeout_ms is the remaining execution budget in milliseconds.
+  int64 timeout_ms    = 3;
+  // direct_predecessor_ids lists the IDs of the node's DIRECT (non-transitive)
+  // predecessors. upstream_data contains all transitive ancestors; this field
+  // lets merge-style plugin nodes distinguish immediate parents from ancestors.
+  repeated string direct_predecessor_ids = 4;
+}
+
+message ExecuteResponse {
+  oneof result {
+    bytes       data  = 1;  // JSON object — the node's output map on success
+    PluginError error = 2;
+  }
+}
+
+message PluginError {
+  string message = 1;
+  string code    = 2;  // machine-readable error code for UI display
+}

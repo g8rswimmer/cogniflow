@@ -114,6 +114,7 @@ cogniflow/                              # Repository root
 │   │   │   ├── webhook_handler.go      # HTTP handler for POST /webhooks/{workflow_id}
 │   │   │   ├── health_handler.go       # GET /health
 │   │   │   ├── ws_handler.go           # WebSocket upgrade + event fan-out for /runs/{run_id}/events
+│   │   │   ├── plugin_admin_handler.go # HTTP handlers for GET/POST/PUT/DELETE /admin/plugins
 │   │   │   └── middleware.go           # Request ID, structured logging, content-type enforcement
 │   │   ├── engine/
 │   │   │   ├── engine.go               # WorkflowEngine implementation; Run() entry point
@@ -160,7 +161,8 @@ cogniflow/                              # Repository root
 │   │   │   │   ├── db.go               # *sqlx.DB init, ping, migration bootstrap
 │   │   │   │   ├── workflow_store.go   # Workflow CRUD SQL
 │   │   │   │   ├── run_store.go        # Run create/update/query SQL
-│   │   │   │   └── rag_store.go        # rag_documents + rag_chunks upsert + vector search
+│   │   │   │   ├── rag_store.go        # rag_documents + rag_chunks upsert + vector search
+│   │   │   │   └── plugin_store.go     # plugin_registrations CRUD SQL
 │   │   │   └── migrations/
 │   │   │       ├── 0001_create_workflows.up.sql
 │   │   │       ├── 0001_create_workflows.down.sql
@@ -350,11 +352,20 @@ type NodeRegistry interface {
     // Register adds a handler under its TypeID. Panics on duplicate TypeID.
     Register(handler NodeHandler)
 
+    // TryRegister adds a handler under its TypeID, returning an error instead
+    // of panicking on collision. Used by the admin API and plugin registrar.
+    TryRegister(handler NodeHandler) error
+
     // Lookup returns the handler for a given TypeID, or an error if not found.
     Lookup(typeID string) (NodeHandler, error)
 
     // ListAll returns metadata for every registered node type, sorted by TypeID.
     ListAll() []NodeMeta
+
+    // Unregister removes a handler from the registry by TypeID. If the handler
+    // implements io.Closer, Close() is called before removal. Returns an error
+    // if the TypeID is not registered.
+    Unregister(typeID string) error
 }
 ```
 
@@ -437,6 +448,12 @@ type Store interface {
     SaveTriggerConfig(ctx context.Context, workflowID string, cfg TriggerConfig) error
     GetTriggerConfig(ctx context.Context, workflowID string) (TriggerConfig, error)
     ListTriggerConfigs(ctx context.Context) ([]WorkflowTrigger, error)
+
+    // --- Plugin Registrations ---
+    SavePluginRegistration(ctx context.Context, reg PluginRegistration) error
+    GetPluginRegistration(ctx context.Context, typeID string) (PluginRegistration, error)
+    ListPluginRegistrations(ctx context.Context) ([]PluginRegistration, error)
+    DeletePluginRegistration(ctx context.Context, typeID string) error
 }
 
 // RunFilter controls ListRuns queries.
@@ -733,6 +750,85 @@ func (p *grpcProxy) Execute(ctx context.Context, input NodeInput) (NodeOutput, e
 ```
 
 gRPC connections are kept alive for the process lifetime. If a plugin process crashes, subsequent `Execute` calls return a gRPC transport error, which surfaces as a node failure. Plugin reconnection is deferred to v2.
+
+### Admin API — Dynamic Registration & Persistence
+
+Plugins can also be registered and managed at runtime through an admin HTTP API. Registrations made via this API are stored in the `plugin_registrations` table and automatically restored on the next server startup.
+
+#### `PluginRegistration` struct — `backend/internal/store/store.go`
+
+```go
+type PluginRegistration struct {
+    TypeID       string          // matches NodeMeta.TypeID; primary key in DB
+    Address      string          // gRPC host:port
+    DisplayName  string
+    Category     string          // always "plugin"
+    Description  string
+    InputSchema  json.RawMessage
+    OutputSchema json.RawMessage
+    RegisteredAt time.Time
+}
+```
+
+#### Startup Flow (updated)
+
+```
+1. Load all rows from plugin_registrations (DB-persisted plugins)
+   For each:
+     a. grpc.NewClient(address)
+     b. Call Meta() with 5s timeout to verify still reachable + schema unchanged
+     c. registry.TryRegister(grpcProxy{...})
+     If unreachable: log warning, skip (remains in DB for next startup attempt)
+
+2. Process PLUGIN_ADDRESSES env var (ephemeral — not stored in DB)
+   For each address: same dial → Meta() → TryRegister flow
+   If TypeID already registered by step 1: log warning, skip
+
+3. HTTP port opens
+```
+
+#### Admin API Registration Flow (`POST /v1/admin/plugins`)
+
+```
+Request body: {"address": "host:port"}
+
+1. grpc.NewClient(address, insecure)
+2. Call Meta() with 5s timeout
+   → error: return 502 PLUGIN_UNAVAILABLE
+3. registry.TryRegister(grpcProxy{...})
+   → duplicate TypeID error: return 409 PLUGIN_ALREADY_REGISTERED
+4. store.SavePluginRegistration(ctx, PluginRegistration{...})
+5. Return 201 with the full PluginRegistration JSON
+```
+
+#### Admin API Deregistration Flow (`DELETE /v1/admin/plugins/{type_id}`)
+
+```
+1. registry.Unregister(typeID)  → closes gRPC conn, removes from map
+   → not found: return 404
+2. store.DeletePluginRegistration(ctx, typeID)
+3. Return 204 No Content
+```
+
+#### Admin API Update Flow (`PUT /v1/admin/plugins/{type_id}`)
+
+```
+Request body: {"address": "new-host:port"}
+
+1. grpc.NewClient(newAddress)
+2. Call Meta() — TypeID in response must match {type_id} in path
+   → mismatch or unreachable: return 422 / 502
+3. registry.Unregister(typeID)   → closes old conn
+4. registry.TryRegister(newProxy)
+5. store.SavePluginRegistration(ctx, updated registration)
+6. Return 200 with updated PluginRegistration JSON
+```
+
+#### Invariants
+
+- `PLUGIN_ADDRESSES` plugins are **ephemeral**: not stored in the DB, not listed or manageable by the admin API. They disappear after the server restarts unless re-added via the env var or the admin API.
+- DB-persisted plugins and env-var plugins share the same `NodeRegistry`; TypeID uniqueness is enforced by `TryRegister`.
+- `Unregister` does not delete DB rows — it only removes the in-memory registry entry and closes the gRPC connection. The admin `DELETE` endpoint is the only path that removes the DB row.
 
 ---
 
@@ -1087,6 +1183,26 @@ CREATE TABLE rag_chunks (
     INDEX idx_rc_document_id (document_id),
     VECTOR INDEX vidx_rc_embedding (embedding)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ============================================================
+-- plugin_registrations
+-- One row per plugin registered via the admin API.
+-- Plugins registered only via PLUGIN_ADDRESSES (ephemeral) are
+-- not stored here. No foreign keys — referential integrity is
+-- enforced at the application layer (see database conventions).
+-- ============================================================
+CREATE TABLE plugin_registrations (
+    type_id       VARCHAR(100)  NOT NULL,
+    address       VARCHAR(500)  NOT NULL,
+    display_name  VARCHAR(255)  NOT NULL,
+    category      VARCHAR(100)  NOT NULL DEFAULT 'plugin',
+    description   TEXT,
+    input_schema  JSON          NOT NULL,
+    output_schema JSON          NOT NULL,
+    registered_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (type_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 ### Vector Column Usage
@@ -1130,6 +1246,10 @@ The `node_configs` table stores sensitive values in `encrypted_value` (MEDIUMBLO
 | `GET` | `/workflows/:id/runs` | List runs for a workflow |
 | `GET` | `/runs/:run_id` | Get a single run |
 | `POST` | `/webhooks/:workflow_id` | Inbound webhook trigger |
+| `GET` | `/admin/plugins` | List all persisted plugin registrations |
+| `POST` | `/admin/plugins` | Register a plugin by address; dials, calls Meta(), persists, adds to registry |
+| `PUT` | `/admin/plugins/:type_id` | Update a plugin's address; re-dials, swaps registry entry, updates DB |
+| `DELETE` | `/admin/plugins/:type_id` | Unregister a plugin; removes from registry and DB |
 | `WS` | `/runs/:run_id/events` | Stream real-time run events |
 
 ### Request / Response Examples
