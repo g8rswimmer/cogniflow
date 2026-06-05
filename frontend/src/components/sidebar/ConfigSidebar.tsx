@@ -3,6 +3,7 @@ import { useWorkflowStore } from '../../stores/useWorkflowStore'
 import { useNodeTypeStore } from '../../stores/useNodeTypeStore'
 import { SchemaForm, getTemplateFields } from './SchemaForm'
 import { TemplateVariablePicker } from './TemplateVariablePicker'
+import { UpstreamNodeReferences } from './UpstreamNodeReferences'
 import { OutputParserPanel } from './OutputParserPanel'
 
 export function ConfigSidebar() {
@@ -81,7 +82,12 @@ export function ConfigSidebar() {
           </div>
         )}
 
-        {/* Template variable picker */}
+        {/* Upstream node references — always visible when upstream nodes exist.
+            Shows node IDs and CEL-ready field references for every node type,
+            including conditional nodes whose expression field is not x-template. */}
+        <UpstreamNodeReferences nodeId={selectedNodeId} />
+
+        {/* Template variable picker — click-to-insert snippets for x-template fields */}
         {templateFields.length > 0 && (
           <TemplateVariablePicker
             nodeId={selectedNodeId}
