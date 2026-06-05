@@ -1,22 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../hooks/useApi'
-import type { Run, RunStatus } from '../api/types'
-
-const statusColors: Record<RunStatus, string> = {
-  pending: 'bg-gray-600 text-gray-300',
-  running: 'bg-amber-700 text-amber-200',
-  succeeded: 'bg-green-700 text-green-200',
-  failed: 'bg-red-700 text-red-200',
-}
-
-function StatusBadge({ status }: { status: RunStatus }) {
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${statusColors[status] ?? 'bg-gray-600 text-gray-300'}`}>
-      {status}
-    </span>
-  )
-}
+import { StatusBadge } from '../components/shared/StatusBadge'
+import type { Run } from '../api/types'
 
 export function RunHistoryPage() {
   const { id } = useParams<{ id: string }>()

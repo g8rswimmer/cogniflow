@@ -1,19 +1,6 @@
 import { useState } from 'react'
 import type { NodeRunStatus } from '../../stores/useRunStore'
-
-const statusDot: Record<string, string> = {
-  'node.pending': 'bg-gray-500',
-  'node.running': 'bg-amber-400 animate-pulse',
-  'node.succeeded': 'bg-green-400',
-  'node.failed': 'bg-red-400',
-}
-
-const statusLabel: Record<string, string> = {
-  'node.pending': 'pending',
-  'node.running': 'running',
-  'node.succeeded': 'succeeded',
-  'node.failed': 'failed',
-}
+import { nodeStatusDot, nodeStatusLabel } from '../../lib/nodeStatus'
 
 export interface NodeEntry {
   nodeId: string
@@ -45,12 +32,12 @@ export function NodeStatusList({ entries }: Props) {
               className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${hasDetail ? 'hover:bg-gray-750 cursor-pointer' : 'cursor-default'}`}
             >
               <span
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${status ? (statusDot[status.status] ?? 'bg-gray-500') : 'bg-gray-600'}`}
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${status ? (nodeStatusDot[status.status] ?? 'bg-gray-500') : 'bg-gray-600'}`}
               />
               <span className="text-sm text-gray-100 font-medium flex-1 truncate">{label}</span>
               {status && (
                 <span className="text-xs text-gray-400 flex-shrink-0">
-                  {statusLabel[status.status] ?? status.status}
+                  {nodeStatusLabel[status.status] ?? status.status}
                 </span>
               )}
               {hasDetail && (

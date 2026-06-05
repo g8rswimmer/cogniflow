@@ -13,7 +13,8 @@ import type { Node, Edge, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import { api } from '../hooks/useApi'
-import type { Run, RunStatus, Workflow } from '../api/types'
+import type { Run, Workflow } from '../api/types'
+import { StatusBadge } from '../components/shared/StatusBadge'
 import { NodeStatusList } from '../components/run/NodeStatusList'
 import type { NodeEntry } from '../components/run/NodeStatusList'
 import type { NodeRunStatus } from '../stores/useRunStore'
@@ -25,13 +26,12 @@ import type { NodeRunStatus } from '../stores/useRunStore'
 interface DetailNodeData {
   type_id: string
   label: string
-  runStatus?: 'succeeded' | 'failed' | 'unknown'
+  runStatus?: 'succeeded' | 'unknown'
   [key: string]: unknown
 }
 
 const detailNodeBg: Record<string, string> = {
   succeeded: 'bg-green-800 border-green-500',
-  failed: 'bg-red-800 border-red-500',
   unknown: 'bg-gray-700 border-gray-500',
 }
 
@@ -53,25 +53,6 @@ const MemoDetailNode = memo(DetailNode)
 const detailNodeTypes: NodeTypes = { detailNode: MemoDetailNode }
 
 // ---------------------------------------------------------------------------
-// Status badge
-// ---------------------------------------------------------------------------
-
-const statusColors: Record<RunStatus, string> = {
-  pending: 'bg-gray-600 text-gray-300',
-  running: 'bg-amber-700 text-amber-200',
-  succeeded: 'bg-green-700 text-green-200',
-  failed: 'bg-red-700 text-red-200',
-}
-
-function StatusBadge({ status }: { status: RunStatus }) {
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${statusColors[status] ?? 'bg-gray-600 text-gray-300'}`}>
-      {status}
-    </span>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -85,16 +66,33 @@ export function RunDetailPage() {
   useEffect(() => {
     if (!run_id) return
 
+    // Guard against stale setState calls when the component unmounts or
+    // run_id changes mid-fetch (e.g. user navigates between two run detail pages).
+    let alive = true
+
     setLoading(true)
+    setError(null)
+    setRun(null)
+    setWorkflow(null)
+
     api.getRun(run_id)
       .then(async r => {
+        if (!alive) return
         setRun(r)
-        // Fetch the workflow to get node positions and labels for the graph.
         const wf = await api.getWorkflow(r.workflow_id)
+        if (!alive) return
         setWorkflow(wf)
       })
-      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load'))
-      .finally(() => setLoading(false))
+      .catch(err => {
+        if (!alive) return
+        setError(err instanceof Error ? err.message : 'Failed to load')
+      })
+      .finally(() => {
+        if (!alive) return
+        setLoading(false)
+      })
+
+    return () => { alive = false }
   }, [run_id])
 
   if (loading) {
@@ -116,23 +114,23 @@ export function RunDetailPage() {
     )
   }
 
+  // final_output is null for failed runs (the backend stores the error in
+  // error_detail, not final_output). For succeeded runs it contains only
+  // sink-node outputs. We use presence in final_output as evidence that a
+  // node succeeded, but absence is not evidence of failure — the node may
+  // have succeeded without being a sink, or the run may have failed upstream.
   const finalOutput = run.final_output ?? {}
 
-  // Build React Flow nodes with status colouring derived from final_output.
-  const rfNodes: Node<DetailNodeData>[] = workflow.nodes.map(n => {
-    const hasOutput = !!finalOutput[n.id]
-    const runStatus =
-      hasOutput ? 'succeeded'
-        : run.status === 'failed' ? 'failed'
-        : 'unknown'
-
-    return {
-      id: n.id,
-      type: 'detailNode',
-      position: n.position,
-      data: { type_id: n.type_id, label: n.label, runStatus },
-    }
-  })
+  const rfNodes: Node<DetailNodeData>[] = workflow.nodes.map(n => ({
+    id: n.id,
+    type: 'detailNode',
+    position: n.position,
+    data: {
+      type_id: n.type_id,
+      label: n.label,
+      runStatus: finalOutput[n.id] ? 'succeeded' : 'unknown',
+    },
+  }))
 
   const rfEdges: Edge[] = workflow.edges.map(e => ({
     id: e.id,
@@ -142,16 +140,15 @@ export function RunDetailPage() {
     style: { stroke: '#6366f1', strokeWidth: 2 },
   }))
 
-  // Build NodeStatusList entries from final_output.
+  // Build NodeStatusList entries. Only mark nodes as succeeded when there is
+  // concrete evidence (output in final_output). Leave everything else without
+  // a status so NodeStatusList renders them as neutral gray — we cannot
+  // distinguish "failed" from "never ran" from the REST response alone.
   const entries: NodeEntry[] = workflow.nodes.map(n => {
     const output = finalOutput[n.id]
-    let status: NodeRunStatus | undefined
-
-    if (output) {
-      status = { status: 'node.succeeded', output }
-    } else if (run.status === 'failed') {
-      status = { status: 'node.failed', error: 'Node did not produce output' }
-    }
+    const status: NodeRunStatus | undefined = output
+      ? { status: 'succeeded', output }
+      : undefined
 
     return { nodeId: n.id, label: n.label, status }
   })
@@ -170,7 +167,7 @@ export function RunDetailPage() {
         >
           ← Run History
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <StatusBadge status={run.status} />
           <span className="text-sm text-gray-400 font-mono truncate max-w-xs">{run.run_id}</span>
           <span className="text-xs text-gray-500">
@@ -207,6 +204,11 @@ export function RunDetailPage() {
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
           Node Results
         </h2>
+        {run.status === 'failed' && Object.keys(finalOutput).length === 0 && (
+          <p className="text-xs text-orange-400 mb-3 italic">
+            Run failed before producing output — check error details in the backend logs.
+          </p>
+        )}
         <NodeStatusList entries={entries} />
       </div>
     </div>

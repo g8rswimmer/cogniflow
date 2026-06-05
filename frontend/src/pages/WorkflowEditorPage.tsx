@@ -144,6 +144,8 @@ export function WorkflowEditorPage() {
   useEffect(() => { loadNodeTypes() }, [loadNodeTypes])
 
   // Load or reset workflow on route change; clear any stale run state.
+  // Zustand actions (clearRun, reset, loadWorkflow) are stable references —
+  // including them in deps is safe and keeps the lint rule satisfied.
   useEffect(() => {
     clearRun()
     if (isNew) {
@@ -154,8 +156,7 @@ export function WorkflowEditorPage() {
         .then(wf => loadWorkflow(wf))
         .catch(err => setLoadError(err instanceof Error ? err.message : 'Failed to load'))
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isNew])
+  }, [id, isNew, clearRun, reset, loadWorkflow])
 
   const buildPayload = () => ({
     name,
@@ -180,6 +181,7 @@ export function WorkflowEditorPage() {
   const handleSave = async () => {
     setSaving(true)
     setSaveError(null)
+    setRunError(null)
     try {
       if (isNew || !workflowId) {
         const wf = await api.createWorkflow(buildPayload())
@@ -199,6 +201,7 @@ export function WorkflowEditorPage() {
   const handleRun = async () => {
     if (!workflowId) return
     setRunError(null)
+    setSaveError(null)
     try {
       const result = await api.triggerRun(workflowId)
       startRun(result.run_id)

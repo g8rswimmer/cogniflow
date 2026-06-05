@@ -5,11 +5,13 @@ import type { NodeEvent } from '../api/types'
 export function useRunEvents(runId: string | null) {
   const setNodeStatus = useRunStore(s => s.setNodeStatus)
   const setRunFinished = useRunStore(s => s.setRunFinished)
+  const setConnectionLost = useRunStore(s => s.setConnectionLost)
 
   useEffect(() => {
     if (!runId) return
 
-    const ws = new WebSocket(`ws://${location.host}/v1/runs/${runId}/events`)
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${scheme}://${location.host}/v1/runs/${runId}/events`)
 
     ws.onmessage = (evt) => {
       const event: NodeEvent = JSON.parse(evt.data as string)
@@ -24,8 +26,11 @@ export function useRunEvents(runId: string | null) {
       }
     }
 
+    // A WebSocket error means the transport failed, not that the workflow run
+    // itself failed. Mark the connection as lost so the panel can direct the
+    // user to check run history, without incorrectly marking the run failed.
     ws.onerror = () => {
-      setRunFinished('failed')
+      setConnectionLost()
     }
 
     return () => {
@@ -33,5 +38,5 @@ export function useRunEvents(runId: string | null) {
         ws.close()
       }
     }
-  }, [runId, setNodeStatus, setRunFinished])
+  }, [runId, setNodeStatus, setRunFinished, setConnectionLost])
 }
