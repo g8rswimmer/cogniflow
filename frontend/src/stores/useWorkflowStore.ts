@@ -54,6 +54,7 @@ interface WorkflowStore {
   updateNodeLabel: (nodeId: string, label: string) => void
   updateNodeConfig: (nodeId: string, config: Record<string, unknown>) => void
   updateOutputParsers: (nodeId: string, parsers: Record<string, OutputParser>) => void
+  updateEdgeLabel: (edgeId: string, label: string | null) => void
 
   // Load / reset
   loadWorkflow: (wf: Workflow) => void
@@ -113,7 +114,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   onConnect: (connection) =>
     set(s => ({
-      edges: addEdge(connection, s.edges),
+      edges: addEdge({ ...connection, type: 'labeled' }, s.edges),
       isDirty: true,
     })),
 
@@ -154,6 +155,14 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       isDirty: true,
     })),
 
+  updateEdgeLabel: (edgeId, label) =>
+    set(s => ({
+      edges: s.edges.map(e =>
+        e.id === edgeId ? { ...e, label: label ?? undefined } : e,
+      ),
+      isDirty: true,
+    })),
+
   loadWorkflow: (wf) => {
     const nodes: WorkflowNode[] = wf.nodes.map(n => ({
       id: n.id,
@@ -164,6 +173,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
     const edges: Edge[] = wf.edges.map(e => ({
       id: e.id,
+      type: 'labeled',
       source: e.source_id,
       target: e.target_id,
       label: e.branch_label ?? undefined,

@@ -320,7 +320,10 @@ Draw these connections in order:
 
 **Setting branch labels on Conditional edges:**
 
-After drawing the edge from Urgency Check → Escalate Ticket, double-click the edge label area and type `true`. Repeat for Urgency Check → Standard Reply with `false`.
+After drawing each edge from Urgency Check, you will see a small **`+label`** button in the middle of the edge. Click it, type the label, then press **Enter** (or click away).
+
+- Urgency Check → Escalate Ticket: type `true`
+- Urgency Check → Standard Reply: type `false`
 
 > Branch labels tell the engine which outgoing edge to follow based on the conditional's result. Edges without labels on a conditional node are ignored.
 

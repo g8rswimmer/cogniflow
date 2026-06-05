@@ -9,7 +9,7 @@ import {
   useReactFlow,
   BackgroundVariant,
 } from '@xyflow/react'
-import type { NodeTypes } from '@xyflow/react'
+import type { NodeTypes, EdgeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import { useWorkflowStore } from '../stores/useWorkflowStore'
@@ -22,9 +22,11 @@ import { NodePalette } from '../components/palette/NodePalette'
 import { ConfigSidebar } from '../components/sidebar/ConfigSidebar'
 import { RunStatusPanel } from '../components/run/RunStatusPanel'
 import CustomNode from '../components/canvas/CustomNode'
+import { LabeledEdge } from '../components/canvas/LabeledEdge'
 
 // Defined outside the component to prevent React Flow re-render warnings.
 const nodeTypes: NodeTypes = { workflowNode: CustomNode }
+const edgeTypes: EdgeTypes = { labeled: LabeledEdge }
 
 // Inner canvas component — must live inside ReactFlowProvider to call useReactFlow().
 function EditorCanvas() {
@@ -82,6 +84,7 @@ function EditorCanvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -92,7 +95,7 @@ function EditorCanvas() {
         fitView
         deleteKeyCode="Delete"
         className="bg-gray-950"
-        defaultEdgeOptions={{ animated: false, style: { stroke: '#6366f1', strokeWidth: 2 } }}
+        defaultEdgeOptions={{ animated: false, type: 'labeled' }}
       >
         <Background variant={BackgroundVariant.Dots} color="#374151" gap={20} />
         <Controls className="!bg-gray-800 !border-gray-700 !text-gray-100" />
