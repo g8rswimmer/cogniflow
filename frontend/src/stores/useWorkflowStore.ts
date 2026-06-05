@@ -76,10 +76,34 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   outputParsers: {},
 
   onNodesChange: (changes) =>
-    set(s => ({
-      nodes: applyNodeChanges(changes, s.nodes),
-      isDirty: true,
-    })),
+    set(s => {
+      const nextNodes = applyNodeChanges(changes, s.nodes)
+
+      // Only mark dirty for user-initiated structural changes. React Flow fires
+      // 'select' and 'dimensions' changes internally (e.g. on fitView load) which
+      // should not flip the unsaved-changes flag.
+      const userChange = changes.some(
+        c => c.type === 'add' || c.type === 'remove' || c.type === 'position',
+      )
+
+      // Prune configs and outputParsers for any removed nodes so stale data
+      // does not accumulate in the store across the session.
+      const removedIds = changes
+        .filter(c => c.type === 'remove')
+        .map(c => c.id)
+
+      if (removedIds.length > 0) {
+        const configs = { ...s.configs }
+        const outputParsers = { ...s.outputParsers }
+        for (const id of removedIds) {
+          delete configs[id]
+          delete outputParsers[id]
+        }
+        return { nodes: nextNodes, configs, outputParsers, isDirty: true }
+      }
+
+      return { nodes: nextNodes, isDirty: userChange ? true : s.isDirty }
+    }),
 
   onEdgesChange: (changes) =>
     set(s => ({
