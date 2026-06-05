@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+  </head>
+  <body>
+    <div id="root">
+      <div id="pre-react-msg" style="font-family:monospace;padding:32px;background:#1a1a2e;color:#aaa;min-height:100vh">
+        Loading…
+      </div>
+    </div>
+    <script>
+      // If the ES module fails to load, this stays visible as a clue.
+      window.addEventListener('error', function(e) {
+        document.getElementById('pre-react-msg').innerHTML =
+          '<span style="color:#ff6b6b">Module load error:</span><br>' + e.message +
+          '<br><br><pre style="color:#ff9999;font-size:12px;white-space:pre-wrap">' +
+          (e.error && e.error.stack ? e.error.stack : '') + '</pre>'
+      })
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
