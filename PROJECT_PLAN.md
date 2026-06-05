@@ -631,11 +631,11 @@ M1, M2 (API must be running)
 ```
 
 ### Dependencies
-M1, M2, M3, M4, M10
+M1, M2, M3, M4, M11
 
 ---
 
-## M12: Production Build & Hardening
+## M13: Production Build & Hardening
 
 **Goal:** A developer can clone the repository, copy `.env.example` to `.env`, run `docker-compose up --build`, and have a fully functional cogniflow instance with no additional setup steps. The system handles edge cases, logs structured errors, and is documented for first-time users.
 
@@ -689,14 +689,15 @@ All prior milestones complete.
 M1 (Scaffold)
  └── M2 (Workflow CRUD + Node Registry)
       └── M3 (Execution Engine + Manual Trigger)
-           ├── M4 (Real-Time Events)         ──► M11 (Frontend Run & Observe)
+           ├── M4 (Real-Time Events)         ──► M12 (Frontend Run & Observe)
            ├── M5 (Trigger System)
            ├── M6 (AI Nodes)
            │    └── M7 (RAG Nodes)
            └── M8 (Advanced Deterministic Nodes)
       └── M9 (gRPC Plugin Protocol)
- └── M10 (Frontend Canvas & CRUD)            ──► M11
-All ──────────────────────────────────────────► M12 (Production Build)
+           └── M10 (Plugin Registry Admin API)
+ └── M11 (Frontend Canvas & CRUD)            ──► M12
+All ──────────────────────────────────────────► M13 (Production Build)
 ```
 
-Milestones M5, M6, M8, and M9 can be developed in parallel once M3 is complete. M10 can begin in parallel with M5–M9 as long as M2 is done and a mock API or real backend is available.
+Milestones M5, M6, M8, and M9 can be developed in parallel once M3 is complete. M10 requires M9. M11 can begin in parallel with M5–M10 as long as M2 is done and a mock API or real backend is available.

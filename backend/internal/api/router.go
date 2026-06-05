@@ -8,6 +8,7 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -42,6 +43,12 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatc
 	mux.HandleFunc("GET /v1/runs/{run_id}/events", wsh.streamEvents)
 
 	mux.HandleFunc("POST /v1/webhooks/{workflow_id}", tm.WebhookHandler())
+
+	pah := &pluginAdminHandler{store: st, registry: registry, registerFn: nodeplugin.RegisterOne}
+	mux.HandleFunc("GET /v1/admin/plugins", pah.list)
+	mux.HandleFunc("POST /v1/admin/plugins", pah.register)
+	mux.HandleFunc("PUT /v1/admin/plugins/{type_id}", pah.update)
+	mux.HandleFunc("DELETE /v1/admin/plugins/{type_id}", pah.deregister)
 
 	return mux
 }

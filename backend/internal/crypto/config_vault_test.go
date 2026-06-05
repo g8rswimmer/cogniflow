@@ -52,6 +52,16 @@ func (s *vaultStubStore) GetTriggerConfig(_ context.Context, _ string) (store.Tr
 func (s *vaultStubStore) ListTriggerConfigs(_ context.Context) ([]store.WorkflowTrigger, error) {
 	return nil, nil
 }
+func (s *vaultStubStore) SavePluginRegistration(_ context.Context, _ store.PluginRegistration) error {
+	return nil
+}
+func (s *vaultStubStore) GetPluginRegistration(_ context.Context, _ string) (store.PluginRegistration, error) {
+	return store.PluginRegistration{}, nil
+}
+func (s *vaultStubStore) ListPluginRegistrations(_ context.Context) ([]store.PluginRegistration, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
 
 // stubNode has one sensitive field "api_key".
 type stubNode struct{}

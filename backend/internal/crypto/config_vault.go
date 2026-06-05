@@ -96,6 +96,24 @@ func (v *ConfigVault) ListTriggerConfigs(ctx context.Context) ([]store.WorkflowT
 	return v.inner.ListTriggerConfigs(ctx)
 }
 
+// Plugin registration methods — no sensitive fields; delegate directly.
+
+func (v *ConfigVault) SavePluginRegistration(ctx context.Context, reg store.PluginRegistration) error {
+	return v.inner.SavePluginRegistration(ctx, reg)
+}
+
+func (v *ConfigVault) GetPluginRegistration(ctx context.Context, typeID string) (store.PluginRegistration, error) {
+	return v.inner.GetPluginRegistration(ctx, typeID)
+}
+
+func (v *ConfigVault) ListPluginRegistrations(ctx context.Context) ([]store.PluginRegistration, error) {
+	return v.inner.ListPluginRegistrations(ctx)
+}
+
+func (v *ConfigVault) DeletePluginRegistration(ctx context.Context, typeID string) error {
+	return v.inner.DeletePluginRegistration(ctx, typeID)
+}
+
 // encryptNodes mutates nodes in place: sensitive values become ciphertext ([]byte)
 // and SensitiveKeys is populated. Unknown node types are stored unencrypted.
 func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) {

@@ -11,6 +11,10 @@ import (
 // ErrNodeNotFound is returned by Lookup when a type ID is not registered.
 var ErrNodeNotFound = errors.New("node: type not found")
 
+// ErrDuplicateTypeID is returned by TryRegister when a handler with the same
+// TypeID is already registered.
+var ErrDuplicateTypeID = errors.New("node registry: duplicate type_id")
+
 // NodeRegistry is the central catalog of all available node types.
 // It is safe for concurrent use.
 type NodeRegistry struct {
@@ -54,10 +58,43 @@ func (r *NodeRegistry) TryRegister(handler NodeHandler) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.handlers[typeID]; exists {
-		return fmt.Errorf("node registry: duplicate type_id %q", typeID)
+		return fmt.Errorf("%w %q", ErrDuplicateTypeID, typeID)
 	}
 	r.handlers[typeID] = handler
 	return nil
+}
+
+// Unregister removes a handler from the registry by TypeID, calling Close()
+// if the handler implements io.Closer. Returns ErrNodeNotFound if absent.
+func (r *NodeRegistry) Unregister(typeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h, ok := r.handlers[typeID]
+	if !ok {
+		return fmt.Errorf("node type %q: %w", typeID, ErrNodeNotFound)
+	}
+	delete(r.handlers, typeID)
+	if c, ok := h.(io.Closer); ok {
+		_ = c.Close()
+	}
+	return nil
+}
+
+// Replace atomically substitutes the handler for the given TypeID, or registers
+// it if absent. The old handler's Close() is called outside the write lock to
+// avoid holding the lock during a potentially slow gRPC drain. Use this instead
+// of Unregister+TryRegister to avoid leaving a gap in the registry.
+func (r *NodeRegistry) Replace(handler NodeHandler) {
+	typeID := handler.Meta().TypeID
+	r.mu.Lock()
+	old := r.handlers[typeID]
+	r.handlers[typeID] = handler
+	r.mu.Unlock()
+	if old != nil {
+		if c, ok := old.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
 }
 
 // Shutdown closes any registered handler that implements io.Closer (e.g. gRPC

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -145,6 +146,19 @@ type RAGChunkResult struct {
 	Score     float32 `json:"score"`
 }
 
+// PluginRegistration is a persisted out-of-process gRPC plugin registration.
+// Plugins registered via PLUGIN_ADDRESSES (ephemeral) are not stored here.
+type PluginRegistration struct {
+	TypeID       string          `json:"type_id"`
+	Address      string          `json:"address"`
+	DisplayName  string          `json:"display_name"`
+	Category     string          `json:"category"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	OutputSchema json.RawMessage `json:"output_schema"`
+	RegisteredAt time.Time       `json:"registered_at"`
+}
+
 // Store is the persistence interface. The MySQL implementation lives in
 // internal/store/mysql/. Tests use an in-memory stub.
 type Store interface {
@@ -169,4 +183,10 @@ type Store interface {
 	SaveTriggerConfig(ctx context.Context, workflowID string, cfg TriggerConfig) error
 	GetTriggerConfig(ctx context.Context, workflowID string) (TriggerConfig, error)
 	ListTriggerConfigs(ctx context.Context) ([]WorkflowTrigger, error)
+
+	// Plugin Registrations
+	SavePluginRegistration(ctx context.Context, reg PluginRegistration) error
+	GetPluginRegistration(ctx context.Context, typeID string) (PluginRegistration, error)
+	ListPluginRegistrations(ctx context.Context) ([]PluginRegistration, error)
+	DeletePluginRegistration(ctx context.Context, typeID string) error
 }
