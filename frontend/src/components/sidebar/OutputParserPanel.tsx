@@ -42,7 +42,7 @@ export function OutputParserPanel({ nodeId, typeId }: Props) {
     if (!draft.name.trim()) { setError('Name is required'); return }
     if (!draft.source) { setError('Source field is required'); return }
     if (!draft.pattern.trim()) { setError('Pattern is required'); return }
-    if (parsers[draft.name]) { setError(`"${draft.name}" already exists`); return }
+    if (parsers[draft.name.trim()]) { setError(`"${draft.name.trim()}" already exists`); return }
 
     const parser: OutputParser = {
       kind: draft.kind,
