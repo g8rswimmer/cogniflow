@@ -14,10 +14,13 @@ import '@xyflow/react/dist/style.css'
 
 import { useWorkflowStore } from '../stores/useWorkflowStore'
 import { useNodeTypeStore } from '../stores/useNodeTypeStore'
+import { useRunStore } from '../stores/useRunStore'
+import { useRunEvents } from '../hooks/useRunEvents'
 import { api } from '../hooks/useApi'
 import { Navbar } from '../components/shared/Navbar'
 import { NodePalette } from '../components/palette/NodePalette'
 import { ConfigSidebar } from '../components/sidebar/ConfigSidebar'
+import { RunStatusPanel } from '../components/run/RunStatusPanel'
 import CustomNode from '../components/canvas/CustomNode'
 
 // Defined outside the component to prevent React Flow re-render warnings.
@@ -99,6 +102,8 @@ function EditorCanvas() {
           maskColor="rgba(0,0,0,0.5)"
         />
       </ReactFlow>
+
+      <RunStatusPanel />
     </div>
   )
 }
@@ -122,15 +127,25 @@ export function WorkflowEditorPage() {
 
   const loadNodeTypes = useNodeTypeStore(s => s.load)
 
+  const activeRunId = useRunStore(s => s.activeRunId)
+  const runStatus = useRunStore(s => s.runStatus)
+  const startRun = useRunStore(s => s.startRun)
+  const clearRun = useRunStore(s => s.clearRun)
+
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
+
+  // Subscribe to WebSocket events for the active run.
+  useRunEvents(activeRunId)
 
   // Load node types once on mount.
   useEffect(() => { loadNodeTypes() }, [loadNodeTypes])
 
-  // Load or reset workflow on route change.
+  // Load or reset workflow on route change; clear any stale run state.
   useEffect(() => {
+    clearRun()
     if (isNew) {
       reset()
     } else if (id) {
@@ -139,7 +154,8 @@ export function WorkflowEditorPage() {
         .then(wf => loadWorkflow(wf))
         .catch(err => setLoadError(err instanceof Error ? err.message : 'Failed to load'))
     }
-  }, [id, isNew, reset, loadWorkflow])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isNew])
 
   const buildPayload = () => ({
     name,
@@ -180,6 +196,17 @@ export function WorkflowEditorPage() {
     }
   }
 
+  const handleRun = async () => {
+    if (!workflowId) return
+    setRunError(null)
+    try {
+      const result = await api.triggerRun(workflowId)
+      startRun(result.run_id)
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : 'Run failed to start')
+    }
+  }
+
   if (loadError) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -198,7 +225,13 @@ export function WorkflowEditorPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 overflow-hidden">
-      <Navbar onSave={handleSave} saving={saving} saveError={saveError} />
+      <Navbar
+        onSave={handleSave}
+        onRun={handleRun}
+        saving={saving}
+        running={runStatus === 'running'}
+        saveError={saveError ?? runError}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <NodePalette />

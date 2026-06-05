@@ -115,6 +115,12 @@ export function WorkflowListPage() {
                   >
                     Edit
                   </Link>
+                  <Link
+                    to={`/workflows/${wf.id}/runs`}
+                    className="text-xs rounded-md border border-gray-600 bg-gray-700 hover:bg-gray-600 text-gray-200 px-2.5 py-1.5 transition-colors"
+                  >
+                    Runs
+                  </Link>
                   <button
                     onClick={() => handleDelete(wf.id, wf.name)}
                     disabled={deleting === wf.id}

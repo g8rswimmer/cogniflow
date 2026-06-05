@@ -3,6 +3,9 @@ import type {
   Workflow,
   WorkflowListResponse,
   NodeTypesResponse,
+  Run,
+  RunListResponse,
+  TriggerRunResponse,
 } from '../api/types'
 
 export const api = {
@@ -29,4 +32,16 @@ export const api = {
 
   listNodeTypes: () =>
     request<NodeTypesResponse>('/node-types'),
+
+  triggerRun: (workflowId: string, initialData?: Record<string, unknown>) =>
+    request<TriggerRunResponse>(`/workflows/${workflowId}/runs`, {
+      method: 'POST',
+      body: JSON.stringify({ initial_data: initialData ?? {} }),
+    }),
+
+  getRun: (runId: string) =>
+    request<Run>(`/runs/${runId}`),
+
+  listRuns: (workflowId: string) =>
+    request<RunListResponse>(`/workflows/${workflowId}/runs`),
 }

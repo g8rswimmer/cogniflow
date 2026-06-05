@@ -71,3 +71,45 @@ export interface ApiErrorBody {
     message?: string
   }
 }
+
+export type NodeEventType =
+  | 'node.pending'
+  | 'node.running'
+  | 'node.succeeded'
+  | 'node.failed'
+  | 'run.succeeded'
+  | 'run.failed'
+
+export interface NodeEvent {
+  run_id: string
+  node_id: string
+  type: NodeEventType
+  timestamp: string
+  output?: Record<string, unknown>
+  error?: string
+}
+
+export type RunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
+
+export interface Run {
+  run_id: string
+  workflow_id: string
+  status: RunStatus
+  triggered_by: 'manual' | 'webhook' | 'cron'
+  started_at: string
+  finished_at?: string
+  final_output?: Record<string, Record<string, unknown>>
+  error_detail?: unknown
+}
+
+export interface RunListResponse {
+  runs: Run[]
+}
+
+export interface TriggerRunResponse {
+  run_id: string
+  workflow_id: string
+  status: RunStatus
+  triggered_by: string
+  started_at: string
+}
