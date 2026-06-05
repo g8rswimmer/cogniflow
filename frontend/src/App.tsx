@@ -4,6 +4,7 @@ import { WorkflowListPage } from './pages/WorkflowListPage'
 import { WorkflowEditorPage } from './pages/WorkflowEditorPage'
 import { RunHistoryPage } from './pages/RunHistoryPage'
 import { RunDetailPage } from './pages/RunDetailPage'
+import { ToastContainer } from './components/shared/ToastContainer'
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <ToastContainer />
     </BrowserRouter>
   )
 }

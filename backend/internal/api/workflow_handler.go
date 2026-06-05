@@ -64,28 +64,9 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.validateRequiredFields(&wf); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := h.validateTemplates(&wf); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := validateOutputParsers(wf.Nodes); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := validateCELExpressions(wf.Nodes); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := validateEdgeBranchLabels(wf.Edges); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+	if verrs := h.collectValidationErrors(&wf); len(verrs) > 0 {
+		slog.Warn("workflow create: validation failed", "error_count", len(verrs), "errors", verrs)
+		writeValidationErrors(w, verrs)
 		return
 	}
 
@@ -160,28 +141,9 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.validateRequiredFields(&wf); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := h.validateTemplates(&wf); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := validateOutputParsers(wf.Nodes); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := validateCELExpressions(wf.Nodes); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-		return
-	}
-
-	if err := validateEdgeBranchLabels(wf.Edges); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+	if verrs := h.collectValidationErrors(&wf); len(verrs) > 0 {
+		slog.Warn("workflow update: validation failed", "workflow_id", id, "error_count", len(verrs), "errors", verrs)
+		writeValidationErrors(w, verrs)
 		return
 	}
 
@@ -260,11 +222,24 @@ func (h *workflowHandler) validate(wf *store.Workflow) error {
 	return nil
 }
 
+// collectValidationErrors runs all node/field validators and returns every
+// error found across all nodes in a single pass. The create and update handlers
+// call this once and respond with the full list so the frontend can highlight
+// every problem node simultaneously rather than surfacing one error at a time.
+func (h *workflowHandler) collectValidationErrors(wf *store.Workflow) []FieldValidationError {
+	var errs []FieldValidationError
+	errs = append(errs, h.validateRequiredFields(wf)...)
+	errs = append(errs, h.validateTemplates(wf)...)
+	errs = append(errs, validateOutputParsers(wf.Nodes)...)
+	errs = append(errs, validateCELExpressions(wf.Nodes)...)
+	errs = append(errs, validateEdgeBranchLabels(wf.Edges)...)
+	return errs
+}
+
 // validateRequiredFields checks that every field listed in a node's InputSchema
-// "required" array is present and non-empty in the node's config. This catches
-// missing required fields at save time rather than deferring the error to the
-// first execution.
-func (h *workflowHandler) validateRequiredFields(wf *store.Workflow) error {
+// "required" array is present and non-empty in the node's config.
+func (h *workflowHandler) validateRequiredFields(wf *store.Workflow) []FieldValidationError {
+	var errs []FieldValidationError
 	for _, n := range wf.Nodes {
 		handler, err := h.registry.Lookup(n.TypeID)
 		if err != nil {
@@ -273,14 +248,15 @@ func (h *workflowHandler) validateRequiredFields(wf *store.Workflow) error {
 		for _, field := range parseRequiredFields(handler.Meta().InputSchema) {
 			v, ok := n.Config[field]
 			if !ok || v == nil {
-				return fmt.Errorf("node %q: required field %q is missing", n.ID, field)
+				errs = append(errs, FieldValidationError{NodeID: n.ID, Field: field, Message: "required field is missing"})
+				continue
 			}
 			if s, ok := v.(string); ok && s == "" {
-				return fmt.Errorf("node %q: required field %q must not be empty", n.ID, field)
+				errs = append(errs, FieldValidationError{NodeID: n.ID, Field: field, Message: "required field must not be empty"})
 			}
 		}
 	}
-	return nil
+	return errs
 }
 
 // parseRequiredFields extracts the "required" array from a JSON Schema.
@@ -295,9 +271,9 @@ func parseRequiredFields(schema json.RawMessage) []string {
 }
 
 // validateTemplates parses any x-template:true config field value that contains
-// "{{" to catch syntax errors before the workflow is saved. This mirrors the
-// CEL validation pattern used by the Conditional node.
-func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
+// "{{" to catch syntax errors before the workflow is saved.
+func (h *workflowHandler) validateTemplates(wf *store.Workflow) []FieldValidationError {
+	var errs []FieldValidationError
 	for _, n := range wf.Nodes {
 		handler, err := h.registry.Lookup(n.TypeID)
 		if err != nil {
@@ -306,7 +282,6 @@ func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
 		fields := parseTemplateFields(handler.Meta().InputSchema)
 		for _, f := range fields {
 			if f.isMap {
-				// e.g. headers: map[string]string where each value may be a template.
 				m, ok := n.Config[f.key].(map[string]any)
 				if !ok {
 					continue
@@ -316,8 +291,12 @@ func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
 					if !ok || !strings.Contains(val, "{{") {
 						continue
 					}
-					if _, err := template.New("").Parse(val); err != nil {
-						return fmt.Errorf("node %q field %q[%q]: invalid template: %w", n.ID, f.key, mapKey, err)
+					if _, parseErr := template.New("").Parse(val); parseErr != nil {
+						errs = append(errs, FieldValidationError{
+							NodeID:  n.ID,
+							Field:   fmt.Sprintf("%s[%s]", f.key, mapKey),
+							Message: "invalid template: " + parseErr.Error(),
+						})
 					}
 				}
 			} else {
@@ -325,13 +304,17 @@ func (h *workflowHandler) validateTemplates(wf *store.Workflow) error {
 				if !ok || !strings.Contains(val, "{{") {
 					continue
 				}
-				if _, err := template.New("").Parse(val); err != nil {
-					return fmt.Errorf("node %q field %q: invalid template: %w", n.ID, f.key, err)
+				if _, parseErr := template.New("").Parse(val); parseErr != nil {
+					errs = append(errs, FieldValidationError{
+						NodeID:  n.ID,
+						Field:   f.key,
+						Message: "invalid template: " + parseErr.Error(),
+					})
 				}
 			}
 		}
 	}
-	return nil
+	return errs
 }
 
 // templateField describes a single config key whose value(s) may contain Go templates.
@@ -365,51 +348,59 @@ func parseTemplateFields(schema json.RawMessage) []templateField {
 	return fields
 }
 
-// validateEdgeBranchLabels rejects any edge whose branch_label is set to a value
-// other than "true" or "false". branchAllows in the engine does a string-equality
-// check against exactly those two values; any other label would produce inverted
-// or undefined routing at runtime with no error.
-func validateEdgeBranchLabels(edges []store.WorkflowEdge) error {
-	for _, e := range edges {
-		if e.BranchLabel == nil {
-			continue
-		}
-		if *e.BranchLabel != "true" && *e.BranchLabel != "false" {
-			return fmt.Errorf("edge %q: branch_label must be \"true\" or \"false\", got %q", e.ID, *e.BranchLabel)
-		}
-	}
-	return nil
-}
 
 // validateCELExpressions compiles the CEL expression on every conditional.branch
-// node and verifies it returns bool. Returns an error if any expression has a
-// syntax error or a non-boolean return type.
-func validateCELExpressions(nodes []store.WorkflowNode) error {
+// node and verifies it returns bool.
+func validateCELExpressions(nodes []store.WorkflowNode) []FieldValidationError {
+	var errs []FieldValidationError
 	for _, n := range nodes {
 		if n.TypeID != "conditional.branch" {
 			continue
 		}
 		expr, _ := n.Config["expression"].(string)
 		if expr == "" {
-			continue // missing required field is caught by validateRequiredFields
+			continue // missing required field caught by validateRequiredFields
 		}
 		if err := conditional.ValidateExpression(expr); err != nil {
-			return fmt.Errorf("node %q: %w", n.ID, err)
+			errs = append(errs, FieldValidationError{
+				NodeID:  n.ID,
+				Field:   "expression",
+				Message: err.Error(),
+			})
 		}
 	}
-	return nil
+	return errs
 }
 
 // validateOutputParsers checks that every output_parser defined on each node
-// has a valid kind and pattern, returning VALIDATION_FAILED at save time so
-// broken extractors are caught before execution.
-func validateOutputParsers(nodes []store.WorkflowNode) error {
+// has a valid kind and pattern.
+func validateOutputParsers(nodes []store.WorkflowNode) []FieldValidationError {
+	var errs []FieldValidationError
 	for _, n := range nodes {
 		if err := outputparser.ValidateAll(n.OutputParsers); err != nil {
-			return fmt.Errorf("node %q: %w", n.ID, err)
+			errs = append(errs, FieldValidationError{
+				NodeID:  n.ID,
+				Message: "output parser error: " + err.Error(),
+			})
 		}
 	}
-	return nil
+	return errs
+}
+
+// validateEdgeBranchLabels rejects edges whose branch_label is not "true" or "false".
+func validateEdgeBranchLabels(edges []store.WorkflowEdge) []FieldValidationError {
+	var errs []FieldValidationError
+	for _, e := range edges {
+		if e.BranchLabel == nil {
+			continue
+		}
+		if *e.BranchLabel != "true" && *e.BranchLabel != "false" {
+			errs = append(errs, FieldValidationError{
+				Message: fmt.Sprintf("edge %q: branch_label must be \"true\" or \"false\", got %q", e.ID, *e.BranchLabel),
+			})
+		}
+	}
+	return errs
 }
 
 // ---- response types ------------------------------------------------------

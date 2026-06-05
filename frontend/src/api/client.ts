@@ -1,15 +1,17 @@
-import type { ApiErrorBody } from './types'
+import type { ApiErrorBody, FieldValidationError } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
 export class ApiError extends Error {
   status: number
   code: string
+  validationErrors: FieldValidationError[]
 
   constructor(status: number, body: ApiErrorBody) {
     super(body.error?.message ?? `HTTP ${status}`)
     this.status = status
     this.code = body.error?.code ?? 'UNKNOWN'
+    this.validationErrors = body.error?.details?.validation_errors ?? []
   }
 }
 

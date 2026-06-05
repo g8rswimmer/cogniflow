@@ -68,11 +68,19 @@ interface Props {
   formData: Record<string, unknown>
   onChange: (data: Record<string, unknown>) => void
   focusRef: React.MutableRefObject<HTMLInputElement | HTMLTextAreaElement | null>
+  fieldErrors?: Record<string, string>
 }
 
-export function SchemaForm({ schema, formData, onChange, focusRef }: Props) {
+export function SchemaForm({ schema, formData, onChange, focusRef, fieldErrors }: Props) {
   const uiSchema = useMemo(() => buildUiSchema(schema), [schema])
   const widgets = useMemo(() => ({ TemplateTextWidget: makeTemplateWidget(focusRef) }), [focusRef])
+
+  const extraErrors = useMemo(() => {
+    if (!fieldErrors || Object.keys(fieldErrors).length === 0) return undefined
+    return Object.fromEntries(
+      Object.entries(fieldErrors).map(([field, msg]) => [field, { __errors: [msg] }])
+    )
+  }, [fieldErrors])
 
   // Track the last JSON snapshot we propagated upward. RJSF fires onChange on
   // mount with the initial formData, which would cause an infinite Zustand loop
@@ -96,6 +104,7 @@ export function SchemaForm({ schema, formData, onChange, focusRef }: Props) {
         validator={validator}
         widgets={widgets}
         onChange={handleChange}
+        extraErrors={extraErrors}
         noHtml5Validate
         liveValidate={false}
       >

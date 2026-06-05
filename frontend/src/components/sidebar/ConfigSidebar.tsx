@@ -13,6 +13,8 @@ export function ConfigSidebar() {
   const updateNodeConfig = useWorkflowStore(s => s.updateNodeConfig)
   const updateNodeLabel = useWorkflowStore(s => s.updateNodeLabel)
   const selectNode = useWorkflowStore(s => s.selectNode)
+  const nodeErrors = useWorkflowStore(s => s.nodeErrors)
+  const fieldErrors = useWorkflowStore(s => s.fieldErrors)
   const byTypeId = useNodeTypeStore(s => s.byTypeId)
 
   // Shared ref for tracking the last-focused template input
@@ -28,6 +30,8 @@ export function ConfigSidebar() {
   const schema = meta?.input_schema ?? {}
   const config = configs[selectedNodeId] ?? {}
   const templateFields = meta ? getTemplateFields(meta.input_schema) : []
+  const currentNodeErrors = nodeErrors[selectedNodeId]
+  const currentFieldErrors = fieldErrors[selectedNodeId]
 
   return (
     <aside className="w-72 flex-shrink-0 border-l border-gray-700 bg-gray-800 flex flex-col overflow-hidden">
@@ -50,6 +54,17 @@ export function ConfigSidebar() {
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Validation error banner */}
+        {currentNodeErrors && currentNodeErrors.length > 0 && (
+          <div className="rounded-md bg-red-900/40 border border-red-700 px-3 py-2">
+            <p className="text-xs font-semibold text-red-400 mb-1">Save validation errors</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {currentNodeErrors.map((msg, i) => (
+                <li key={i} className="text-xs text-red-300">{msg}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {/* Label */}
         <div>
           <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-1">
@@ -78,6 +93,7 @@ export function ConfigSidebar() {
               formData={config}
               onChange={data => updateNodeConfig(selectedNodeId, data)}
               focusRef={templateInputRef}
+              fieldErrors={currentFieldErrors}
             />
           </div>
         )}

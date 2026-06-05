@@ -65,10 +65,19 @@ export interface WorkflowListResponse {
   workflows: Workflow[]
 }
 
+export interface FieldValidationError {
+  node_id?: string
+  field?: string
+  message: string
+}
+
 export interface ApiErrorBody {
   error?: {
     code?: string
     message?: string
+    details?: {
+      validation_errors?: FieldValidationError[]
+    }
   }
 }
 

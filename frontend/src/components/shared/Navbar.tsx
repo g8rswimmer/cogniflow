@@ -8,7 +8,6 @@ interface Props {
   onRun: () => void
   saving: boolean
   running: boolean
-  saveError: string | null
 }
 
 const triggerIcons: Record<string, string> = {
@@ -17,7 +16,7 @@ const triggerIcons: Record<string, string> = {
   cron: '⏰',
 }
 
-export function Navbar({ onSave, onRun, saving, running, saveError }: Props) {
+export function Navbar({ onSave, onRun, saving, running }: Props) {
   const name = useWorkflowStore(s => s.name)
   const setName = useWorkflowStore(s => s.setName)
   const isDirty = useWorkflowStore(s => s.isDirty)
@@ -56,13 +55,6 @@ export function Navbar({ onSave, onRun, saving, running, saveError }: Props) {
         {/* Dirty indicator */}
         {isDirty && (
           <span className="text-xs text-amber-400 flex-shrink-0">unsaved</span>
-        )}
-
-        {/* Save error */}
-        {saveError && (
-          <span className="text-xs text-red-400 flex-shrink-0 max-w-32 truncate" title={saveError}>
-            {saveError}
-          </span>
         )}
 
         {/* Trigger button */}

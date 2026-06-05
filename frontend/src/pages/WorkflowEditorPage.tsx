@@ -15,8 +15,10 @@ import '@xyflow/react/dist/style.css'
 import { useWorkflowStore } from '../stores/useWorkflowStore'
 import { useNodeTypeStore } from '../stores/useNodeTypeStore'
 import { useRunStore } from '../stores/useRunStore'
+import { useToastStore } from '../stores/useToastStore'
 import { useRunEvents } from '../hooks/useRunEvents'
 import { api } from '../hooks/useApi'
+import { ApiError } from '../api/client'
 import { Navbar } from '../components/shared/Navbar'
 import { NodePalette } from '../components/palette/NodePalette'
 import { ConfigSidebar } from '../components/sidebar/ConfigSidebar'
@@ -130,15 +132,18 @@ export function WorkflowEditorPage() {
 
   const loadNodeTypes = useNodeTypeStore(s => s.load)
 
+  const setValidationErrors = useWorkflowStore(s => s.setValidationErrors)
+  const clearValidationErrors = useWorkflowStore(s => s.clearValidationErrors)
+
   const activeRunId = useRunStore(s => s.activeRunId)
   const runStatus = useRunStore(s => s.runStatus)
   const startRun = useRunStore(s => s.startRun)
   const clearRun = useRunStore(s => s.clearRun)
 
+  const addToast = useToastStore(s => s.addToast)
+
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [runError, setRunError] = useState<string | null>(null)
 
   // Subscribe to WebSocket events for the active run.
   useRunEvents(activeRunId)
@@ -183,8 +188,7 @@ export function WorkflowEditorPage() {
 
   const handleSave = async () => {
     setSaving(true)
-    setSaveError(null)
-    setRunError(null)
+    clearValidationErrors()
     try {
       if (isNew || !workflowId) {
         const wf = await api.createWorkflow(buildPayload())
@@ -194,8 +198,27 @@ export function WorkflowEditorPage() {
         await api.updateWorkflow(workflowId, buildPayload())
         markClean(workflowId)
       }
+      addToast('success', 'Workflow saved')
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed')
+      if (err instanceof ApiError) {
+        if (err.validationErrors.length > 0) {
+          setValidationErrors(err.validationErrors)
+          const nodeCount = new Set(
+            err.validationErrors.filter(e => e.node_id).map(e => e.node_id)
+          ).size
+          const hint = nodeCount > 0
+            ? ` — ${nodeCount} node${nodeCount > 1 ? 's' : ''} highlighted on canvas`
+            : ''
+          addToast('error', 'Validation failed', err.message + hint)
+          console.error('[save] validation errors:', err.validationErrors)
+        } else {
+          addToast('error', 'Save failed', err.message)
+          console.error('[save] api error:', { code: err.code, message: err.message })
+        }
+      } else {
+        addToast('error', 'Save failed', 'Unexpected error — check console')
+        console.error('[save] unexpected error:', err)
+      }
     } finally {
       setSaving(false)
     }
@@ -203,13 +226,13 @@ export function WorkflowEditorPage() {
 
   const handleRun = async () => {
     if (!workflowId) return
-    setRunError(null)
-    setSaveError(null)
     try {
       const result = await api.triggerRun(workflowId)
       startRun(result.run_id)
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : 'Run failed to start')
+      const msg = err instanceof Error ? err.message : 'Run failed to start'
+      addToast('error', 'Run failed', msg)
+      console.error('[run]', err)
     }
   }
 
@@ -236,7 +259,6 @@ export function WorkflowEditorPage() {
         onRun={handleRun}
         saving={saving}
         running={runStatus === 'running'}
-        saveError={saveError ?? runError}
       />
 
       <div className="flex flex-1 overflow-hidden">

@@ -11,7 +11,7 @@ import type {
   EdgeChange,
   Connection,
 } from '@xyflow/react'
-import type { Trigger, OutputParser, Workflow } from '../api/types'
+import type { Trigger, OutputParser, Workflow, FieldValidationError } from '../api/types'
 
 export interface NodeData {
   type_id: string
@@ -56,6 +56,12 @@ interface WorkflowStore {
   updateOutputParsers: (nodeId: string, parsers: Record<string, OutputParser>) => void
   updateEdgeLabel: (edgeId: string, label: string | null) => void
 
+  // Save-time validation errors — populated on VALIDATION_FAILED, cleared on success
+  nodeErrors: Record<string, string[]>
+  fieldErrors: Record<string, Record<string, string>>
+  setValidationErrors: (errs: FieldValidationError[]) => void
+  clearValidationErrors: () => void
+
   // Load / reset
   loadWorkflow: (wf: Workflow) => void
   reset: () => void
@@ -75,6 +81,9 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   configs: {},
   outputParsers: {},
+
+  nodeErrors: {},
+  fieldErrors: {},
 
   onNodesChange: (changes) =>
     set(s => {
@@ -163,6 +172,24 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       isDirty: true,
     })),
 
+  setValidationErrors: (errs) => {
+    const nodeErrors: Record<string, string[]> = {}
+    const fieldErrors: Record<string, Record<string, string>> = {}
+    for (const e of errs) {
+      const nid = e.node_id
+      if (!nid) continue
+      if (!nodeErrors[nid]) nodeErrors[nid] = []
+      nodeErrors[nid].push(e.field ? `${e.field}: ${e.message}` : e.message)
+      if (e.field) {
+        if (!fieldErrors[nid]) fieldErrors[nid] = {}
+        fieldErrors[nid][e.field] = e.message
+      }
+    }
+    set({ nodeErrors, fieldErrors })
+  },
+
+  clearValidationErrors: () => set({ nodeErrors: {}, fieldErrors: {} }),
+
   loadWorkflow: (wf) => {
     const nodes: WorkflowNode[] = wf.nodes.map(n => ({
       id: n.id,
@@ -212,9 +239,11 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       outputParsers: {},
       selectedNodeId: null,
       isDirty: false,
+      nodeErrors: {},
+      fieldErrors: {},
     }),
 
-  markClean: (id) => set({ workflowId: id, isDirty: false }),
+  markClean: (id) => set({ workflowId: id, isDirty: false, nodeErrors: {}, fieldErrors: {} }),
 }))
 
 // Utility: find all ancestor node IDs for a given node
