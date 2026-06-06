@@ -118,7 +118,6 @@ func (h *workflowHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maskSensitiveConfig(wf.Nodes)
 	writeJSON(w, http.StatusOK, toWorkflowResponse(wf))
 }
 

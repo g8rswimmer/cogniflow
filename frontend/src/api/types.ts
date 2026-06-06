@@ -61,8 +61,19 @@ export interface NodeTypesResponse {
   node_types: NodeMeta[]
 }
 
+export interface WorkflowSummary {
+  id: string
+  name: string
+  description?: string
+  trigger_kind: string
+  timeout_seconds: number
+  node_count: number
+  created_at: string
+  updated_at: string
+}
+
 export interface WorkflowListResponse {
-  workflows: Workflow[]
+  workflows: WorkflowSummary[]
 }
 
 export interface FieldValidationError {

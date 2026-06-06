@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../hooks/useApi'
-import type { Workflow } from '../api/types'
+import type { WorkflowSummary } from '../api/types'
 
 function formatDate(iso: string) {
   try {
@@ -15,7 +15,7 @@ function formatDate(iso: string) {
 }
 
 export function WorkflowListPage() {
-  const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -102,8 +102,8 @@ export function WorkflowListPage() {
                     {wf.name}
                   </Link>
                   <div className="text-xs text-gray-500 mt-0.5 flex gap-3">
-                    <span className="capitalize">{wf.trigger?.kind ?? 'manual'}</span>
-                    <span>{(wf.nodes ?? []).length} node{(wf.nodes ?? []).length !== 1 ? 's' : ''}</span>
+                    <span className="capitalize">{wf.trigger_kind ?? 'manual'}</span>
+                    <span>{wf.node_count} node{wf.node_count !== 1 ? 's' : ''}</span>
                     <span>{formatDate(wf.updated_at)}</span>
                   </div>
                 </div>
