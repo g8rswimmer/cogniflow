@@ -1,34 +1,62 @@
 services:
+
   mysql:
     image: mysql:9.1
-    container_name: cogniflow_mysql
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-cogniflow_root}
       MYSQL_DATABASE: cogniflow
       MYSQL_USER: cogniflow
-      MYSQL_PASSWORD: cogniflow_pass
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cogniflow_pass}
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "cogniflow", "-pcogniflow_pass"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "cogniflow", "--password=${MYSQL_PASSWORD:-cogniflow_pass}"]
       interval: 5s
       timeout: 5s
       retries: 12
+      start_period: 30s
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: cogniflow_backend
-    env_file: .env
-    ports:
-      - "8080:8080"
+    restart: unless-stopped
     depends_on:
       mysql:
         condition: service_healthy
+    environment:
+      DB_DSN: "cogniflow:${MYSQL_PASSWORD:-cogniflow_pass}@tcp(mysql:3306)/cogniflow?parseTime=true&multiStatements=true"
+      COGNIFLOW_ENCRYPTION_KEY: ${COGNIFLOW_ENCRYPTION_KEY}
+      COGNIFLOW_ALLOWED_ORIGIN: "http://localhost:${FRONTEND_PORT:-3000}"
+      PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PLUGIN_ADDRESSES: ${PLUGIN_ADDRESSES:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ""
     restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
 
 volumes:
   mysql_data:

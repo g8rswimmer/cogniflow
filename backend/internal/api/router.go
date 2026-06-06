@@ -13,8 +13,9 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
-// NewRouter wires all HTTP routes and returns the configured mux.
-func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus, tm *trigger.Manager, level *slog.LevelVar) *http.ServeMux {
+// NewRouter wires all HTTP routes and returns the handler wrapped with
+// CORS, request-ID, and access-log middleware.
+func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus, tm *trigger.Manager, level *slog.LevelVar) http.Handler {
 	mux := http.NewServeMux()
 
 	// Infrastructure endpoints — unversioned.
@@ -50,5 +51,5 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatc
 	mux.HandleFunc("PUT /v1/admin/plugins/{type_id}", pah.update)
 	mux.HandleFunc("DELETE /v1/admin/plugins/{type_id}", pah.deregister)
 
-	return mux
+	return cors(requestID(logRequests(mux)))
 }
