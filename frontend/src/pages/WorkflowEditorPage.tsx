@@ -4,7 +4,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
   useReactFlow,
   BackgroundVariant,
@@ -25,6 +24,7 @@ import { ConfigSidebar } from '../components/sidebar/ConfigSidebar'
 import { RunStatusPanel } from '../components/run/RunStatusPanel'
 import CustomNode from '../components/canvas/CustomNode'
 import { LabeledEdge } from '../components/canvas/LabeledEdge'
+import { CanvasControls } from '../components/canvas/CanvasControls'
 
 // Defined outside the component to prevent React Flow re-render warnings.
 const nodeTypes: NodeTypes = { workflowNode: CustomNode }
@@ -100,7 +100,7 @@ function EditorCanvas() {
         defaultEdgeOptions={{ animated: false, type: 'labeled' }}
       >
         <Background variant={BackgroundVariant.Dots} color="#374151" gap={20} />
-        <Controls className="!bg-gray-800 !border-gray-700 !text-gray-100" />
+        <CanvasControls />
         <MiniMap
           className="!bg-gray-800 !border-gray-700"
           nodeColor="#6366f1"

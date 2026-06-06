@@ -4,7 +4,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   Handle,
   Position,
   BackgroundVariant,
@@ -13,6 +12,7 @@ import type { Node, Edge, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import { api } from '../hooks/useApi'
+import { CanvasControls } from '../components/canvas/CanvasControls'
 import type { Run, Workflow } from '../api/types'
 import { StatusBadge } from '../components/shared/StatusBadge'
 import { NodeStatusList } from '../components/run/NodeStatusList'
@@ -194,7 +194,7 @@ export function RunDetailPage() {
             defaultEdgeOptions={{ animated: false }}
           >
             <Background variant={BackgroundVariant.Dots} color="#374151" gap={20} />
-            <Controls className="!bg-gray-800 !border-gray-700 !text-gray-100" />
+            <CanvasControls showInteractive={false} />
           </ReactFlow>
         </ReactFlowProvider>
       </div>
