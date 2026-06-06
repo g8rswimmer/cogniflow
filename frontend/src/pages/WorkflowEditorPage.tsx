@@ -56,7 +56,9 @@ function EditorCanvas() {
       if (!typeId) return
 
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const id = `${typeId}-${Date.now()}`
+      // Replace dots and hyphens so the ID is a valid Go template identifier.
+      // e.g. "llm.anthropic" → "llm_anthropic_1780706153289"
+      const id = `${typeId.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`
       const meta = byTypeId(typeId)
 
       addNode({

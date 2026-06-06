@@ -214,12 +214,12 @@ The Conditional node's CEL expression and the LLM prompts downstream need to ref
 3. You will see an **↑ Upstream Nodes** section that lists every node connected upstream.
 4. Find the **Classify Ticket** row. It shows:
    - The node label (`Classify Ticket`)
-   - The raw node ID in small monospace text (e.g. `llm.anthropic-1748976543210`)
+   - The raw node ID in small monospace text (e.g. `llm_anthropic_1748976543210`)
    - A `copy id` button
    - Clickable field chips: `completion`, `urgent`, `summary`
 5. Click **copy id** next to Classify Ticket to copy the node ID to your clipboard.
 
-> The field chips (e.g. clicking `urgent`) copy the full CEL reference `ctx["llm.anthropic-1748976543210"]["urgent"]` directly — paste it into the Expression field.
+> The field chips (e.g. clicking `urgent`) copy the full CEL reference `ctx["llm_anthropic_1748976543210"]["urgent"]` directly — paste it into the Expression field.
 
 ---
 
@@ -233,7 +233,7 @@ Click **Urgency Check** to select it.
 
 Replace `CLASSIFY_NODE_ID` with the ID you copied in 5c. Example:
 ```
-ctx["llm.anthropic-1748976543210"]["urgent"] == true
+ctx["llm_anthropic_1748976543210"]["urgent"] == true
 ```
 
 > This is a CEL expression. `ctx` is the merged upstream data map, keyed by node ID. The output parser placed `urgent` (a boolean) into the Classify node's output, so this comparison is type-safe.
