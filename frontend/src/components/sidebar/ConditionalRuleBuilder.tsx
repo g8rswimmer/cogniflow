@@ -42,8 +42,10 @@ function emptyCondition(): ConditionalCondition {
   return { node_id: '', field: '', operator: '==', value: '', value_type: 'string' }
 }
 
-function emptyRule(index: number): ConditionalRule {
-  return { label: `rule_${index + 1}`, logic: 'AND', conditions: [emptyCondition()] }
+function emptyRule(existingLabels: Set<string>): ConditionalRule {
+  let n = 1
+  while (existingLabels.has(`rule_${n}`)) n++
+  return { label: `rule_${n}`, logic: 'AND', conditions: [emptyCondition()] }
 }
 
 // ---------------------------------------------------------------------------
@@ -323,11 +325,12 @@ export function ConditionalRuleBuilder({ nodeId, config, onChange, fieldErrors }
     const initial: ConditionalRule[] = [
       { label: 'rule_1', logic: 'AND', conditions: [emptyCondition()] },
     ]
-    // Remove 'expression', set 'rules'
     const next = { ...config, rules: initial }
     delete next['expression']
     onChange(next)
-  }, [config, onChange])
+    // Clear stale "true"/"false" edge labels that are no longer valid rule names.
+    syncConditionalEdgeLabels(nodeId, initial)
+  }, [config, onChange, syncConditionalEdgeLabels, nodeId])
 
   const handleLegacyExprChange = useCallback((expr: string) => {
     onChange({ ...config, expression: expr })
@@ -353,7 +356,7 @@ export function ConditionalRuleBuilder({ nodeId, config, onChange, fieldErrors }
             onClick={handleMigrateToRules}
             className="mt-1.5 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors underline underline-offset-2"
           >
-            Switch to visual rule builder (edge labels must be updated manually)
+            Switch to visual rule builder
           </button>
         </div>
       </div>
@@ -380,7 +383,7 @@ export function ConditionalRuleBuilder({ nodeId, config, onChange, fieldErrors }
     setRules(rules.map((old, idx) => (idx === i ? r : old)))
   }
   const removeRule = (i: number) => setRules(rules.filter((_, idx) => idx !== i))
-  const addRule    = () => setRules([...rules, emptyRule(rules.length)])
+  const addRule    = () => setRules([...rules, emptyRule(new Set(rules.map(r => r.label)))])
   const moveUp   = (i: number) => {
     if (i === 0) return
     const next = [...rules]

@@ -12,9 +12,10 @@ import (
 )
 
 type nodeResult struct {
-	nodeID string
-	output map[string]any
-	err    error
+	nodeID        string
+	output        map[string]any // post-parser output; stored in ExecutionContext for downstream nodes
+	routingOutput map[string]any // pre-parser output; used by branchAllows for conditional routing
+	err           error
 }
 
 // runDAG executes a workflow DAG, returning the outputs of all sink nodes on success.
@@ -126,7 +127,7 @@ func runDAG(
 		}
 
 		for _, outEdge := range dag.OutEdges[result.nodeID] {
-			if !branchAllows(outEdge, result.output) {
+			if !branchAllows(outEdge, result.routingOutput) {
 				// Suppressed edge: account for this predecessor without dispatching.
 				propagateSkip(outEdge.TargetID)
 				continue
@@ -241,6 +242,10 @@ func executeNode(
 
 	// Apply output parsers defined on the node to extract named fields from
 	// the raw output (e.g. regex or JSON path over an LLM completion).
+	// Keep the pre-parser output separately so conditional routing (branchAllows)
+	// is not affected by a parser whose name happens to collide with "matched_rule"
+	// or "result" — the keys the conditional handler uses for routing.
+	routingOutput := out.Data
 	outData := outputparser.Apply(out.Data, n.OutputParsers)
 
 	slog.Debug("node succeeded",
@@ -251,7 +256,7 @@ func executeNode(
 		"output_keys", mapKeys(outData),
 	)
 	bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeSucceeded, Output: outData, Timestamp: time.Now().UTC()})
-	resultCh <- nodeResult{nodeID: nodeID, output: outData}
+	resultCh <- nodeResult{nodeID: nodeID, output: outData, routingOutput: routingOutput}
 }
 
 // executeWithRetry calls handler.Execute, retrying up to MaxRetries times with linear backoff.

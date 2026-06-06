@@ -357,8 +357,16 @@ func validateCELExpressions(nodes []store.WorkflowNode) []FieldValidationError {
 		if n.TypeID != "conditional.branch" {
 			continue
 		}
-		// New format: structured rules.
-		if rawRules, ok := n.Config["rules"]; ok && rawRules != nil {
+		// New format: structured rules key is present.
+		if rawRules, hasRules := n.Config["rules"]; hasRules {
+			if rawRules == nil {
+				errs = append(errs, FieldValidationError{
+					NodeID:  n.ID,
+					Field:   "rules",
+					Message: "rules must not be null; define at least one rule or use a CEL expression",
+				})
+				continue
+			}
 			rules, err := parseConditionalRules(rawRules)
 			if err != nil {
 				errs = append(errs, FieldValidationError{
@@ -380,7 +388,11 @@ func validateCELExpressions(nodes []store.WorkflowNode) []FieldValidationError {
 		// Legacy format: raw CEL expression.
 		expr, _ := n.Config["expression"].(string)
 		if expr == "" {
-			continue // missing required field caught by validateRequiredFields
+			errs = append(errs, FieldValidationError{
+				NodeID:  n.ID,
+				Message: "conditional.branch node must have either a 'rules' array (new format) or a non-empty 'expression' (legacy CEL)",
+			})
+			continue
 		}
 		if err := conditional.ValidateExpression(expr); err != nil {
 			errs = append(errs, FieldValidationError{
@@ -436,10 +448,16 @@ func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.Workflow
 		if n.TypeID != "conditional.branch" {
 			continue
 		}
-		if rawRules, ok := n.Config["rules"]; ok && rawRules != nil {
+		if rawRules, hasRules := n.Config["rules"]; hasRules {
+			// Null or malformed rules — validateCELExpressions already reported the error.
+			// Treat as new-format with no allowed labels so edge validation is consistent.
+			if rawRules == nil {
+				nodeFormats[n.ID] = nodeFormat{isNew: true, labels: map[string]bool{"fallback": true}}
+				continue
+			}
 			rules, err := parseConditionalRules(rawRules)
 			if err != nil {
-				// Malformed rules — format error already caught by validateCELExpressions.
+				nodeFormats[n.ID] = nodeFormat{isNew: true, labels: map[string]bool{"fallback": true}}
 				continue
 			}
 			allowed := make(map[string]bool, len(rules)+1)
@@ -461,7 +479,12 @@ func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.Workflow
 		label := *e.BranchLabel
 		nf, isConditional := nodeFormats[e.SourceID]
 		if !isConditional {
-			continue // non-conditional source; no label constraint
+			// Only conditional.branch nodes may have labelled edges; reject any other source.
+			errs = append(errs, FieldValidationError{
+				NodeID:  e.SourceID,
+				Message: fmt.Sprintf("branch_label %q on a non-conditional node — only conditional.branch nodes may have labelled edges", label),
+			})
+			continue
 		}
 		if nf.isNew {
 			if !nf.labels[label] {
