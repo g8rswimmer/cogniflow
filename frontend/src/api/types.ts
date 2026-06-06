@@ -3,6 +3,28 @@ export interface Position {
   y: number
 }
 
+// ---------------------------------------------------------------------------
+// Conditional node — structured rule format
+// ---------------------------------------------------------------------------
+
+export type ConditionalOperator = '==' | '!=' | '>' | '>=' | '<' | '<=' | 'contains'
+
+export interface ConditionalCondition {
+  node_id: string
+  field: string
+  operator: ConditionalOperator
+  value: string
+  value_type: 'string' | 'number' | 'boolean'
+}
+
+export interface ConditionalRule {
+  label: string
+  logic: 'AND' | 'OR'
+  conditions: ConditionalCondition[]
+}
+
+// ---------------------------------------------------------------------------
+
 export type OutputParserKind = 'json_path' | 'regex'
 
 export interface OutputParser {

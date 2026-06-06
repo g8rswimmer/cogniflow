@@ -11,7 +11,7 @@ import type {
   EdgeChange,
   Connection,
 } from '@xyflow/react'
-import type { Trigger, OutputParser, Workflow, FieldValidationError } from '../api/types'
+import type { Trigger, OutputParser, Workflow, FieldValidationError, ConditionalRule } from '../api/types'
 
 export interface NodeData {
   type_id: string
@@ -55,6 +55,9 @@ interface WorkflowStore {
   updateNodeConfig: (nodeId: string, config: Record<string, unknown>) => void
   updateOutputParsers: (nodeId: string, parsers: Record<string, OutputParser>) => void
   updateEdgeLabel: (edgeId: string, label: string | null) => void
+
+  // Conditional node edge sync — call after rules change to clear stale edge labels
+  syncConditionalEdgeLabels: (nodeId: string, rules: ConditionalRule[]) => void
 
   // Save-time validation errors — populated on VALIDATION_FAILED, cleared on success
   nodeErrors: Record<string, string[]>
@@ -177,6 +180,23 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       ),
       isDirty: true,
     })),
+
+  syncConditionalEdgeLabels: (nodeId, rules) =>
+    set(s => {
+      const valid = new Set<string>(rules.map(r => r.label))
+      valid.add('fallback')
+      let changed = false
+      const edges = s.edges.map(e => {
+        if (e.source !== nodeId || !e.label) return e
+        if (!valid.has(e.label as string)) {
+          changed = true
+          return { ...e, label: undefined }
+        }
+        return e
+      })
+      if (!changed) return {}
+      return { edges, isDirty: true }
+    }),
 
   setValidationErrors: (errs) => {
     const nodeErrors: Record<string, string[]> = {}

@@ -67,7 +67,7 @@ export function LabeledEdge({
                 if (e.key === 'Escape') setEditing(false)
               }}
               className="w-24 text-xs text-center bg-gray-800 border border-indigo-500 rounded px-1.5 py-0.5 text-gray-100 outline-none"
-              placeholder="true / false"
+              placeholder="rule label"
             />
           ) : (
             <button

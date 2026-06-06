@@ -12,9 +12,10 @@ import (
 )
 
 type nodeResult struct {
-	nodeID string
-	output map[string]any
-	err    error
+	nodeID        string
+	output        map[string]any // post-parser output; stored in ExecutionContext for downstream nodes
+	routingOutput map[string]any // pre-parser output; used by branchAllows for conditional routing
+	err           error
 }
 
 // runDAG executes a workflow DAG, returning the outputs of all sink nodes on success.
@@ -126,7 +127,7 @@ func runDAG(
 		}
 
 		for _, outEdge := range dag.OutEdges[result.nodeID] {
-			if !branchAllows(outEdge, result.output) {
+			if !branchAllows(outEdge, result.routingOutput) {
 				// Suppressed edge: account for this predecessor without dispatching.
 				propagateSkip(outEdge.TargetID)
 				continue
@@ -159,17 +160,28 @@ func runDAG(
 }
 
 // branchAllows reports whether the given edge should fire given the completed
-// node's output. Edges without a branch_label always fire. Edges labelled
-// "true" or "false" fire only when the output "result" bool matches.
+// node's output. Edges without a branch_label always fire.
+//
+// New format (conditional.branch with structured rules): the output contains
+// "matched_rule" (string) and the edge's branch_label must equal that string.
+//
+// Legacy format (raw CEL expression): the output contains "result" (bool) and
+// the edge's branch_label must be "true" or "false" matching that bool.
 func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
 	if edge.BranchLabel == nil {
 		return true
 	}
-	res, ok := output["result"].(bool)
-	if !ok {
-		return false
+	label := *edge.BranchLabel
+
+	// New format: string match against matched_rule.
+	if mr, ok := output["matched_rule"].(string); ok {
+		return mr == label
 	}
-	return (*edge.BranchLabel == "true") == res
+	// Legacy format: bool match against "true"/"false" label.
+	if res, ok := output["result"].(bool); ok {
+		return (label == "true") == res
+	}
+	return false
 }
 
 // executeNode runs a single node inside a goroutine, respecting retry policy.
@@ -230,6 +242,10 @@ func executeNode(
 
 	// Apply output parsers defined on the node to extract named fields from
 	// the raw output (e.g. regex or JSON path over an LLM completion).
+	// Keep the pre-parser output separately so conditional routing (branchAllows)
+	// is not affected by a parser whose name happens to collide with "matched_rule"
+	// or "result" — the keys the conditional handler uses for routing.
+	routingOutput := out.Data
 	outData := outputparser.Apply(out.Data, n.OutputParsers)
 
 	slog.Debug("node succeeded",
@@ -240,7 +256,7 @@ func executeNode(
 		"output_keys", mapKeys(outData),
 	)
 	bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeSucceeded, Output: outData, Timestamp: time.Now().UTC()})
-	resultCh <- nodeResult{nodeID: nodeID, output: outData}
+	resultCh <- nodeResult{nodeID: nodeID, output: outData, routingOutput: routingOutput}
 }
 
 // executeWithRetry calls handler.Execute, retrying up to MaxRetries times with linear backoff.

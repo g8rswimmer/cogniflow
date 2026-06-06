@@ -202,9 +202,10 @@ cogniflow/                              # Repository root
 │   │   │   │   ├── NodePalette.tsx     # Left sidebar; grouped + searchable node list
 │   │   │   │   └── PaletteNodeCard.tsx # Draggable node type card
 │   │   │   ├── sidebar/
-│   │   │   │   ├── ConfigSidebar.tsx          # Right sidebar; shown when a node is selected
-│   │   │   │   ├── SchemaForm.tsx             # @rjsf/core form driven by node input_schema
-│   │   │   │   └── TemplateVariablePicker.tsx # Variable browser for x-template:true fields
+│   │   │   │   ├── ConfigSidebar.tsx             # Right sidebar; dispatches to ConditionalRuleBuilder for conditional.branch, SchemaForm for all others
+│   │   │   │   ├── SchemaForm.tsx                # @rjsf/core form driven by node input_schema
+│   │   │   │   ├── TemplateVariablePicker.tsx    # Variable browser for x-template:true fields
+│   │   │   │   └── ConditionalRuleBuilder.tsx    # Visual rule builder for conditional.branch nodes; no raw CEL required
 │   │   │   ├── run/
 │   │   │   │   ├── RunStatusPanel.tsx  # Bottom drawer; live per-node status
 │   │   │   │   ├── RunSummary.tsx      # run_id, status, elapsed time
@@ -270,7 +271,7 @@ cogniflow/                              # Repository root
 |--------|---------------|
 | `src/components/canvas` | React Flow canvas, custom node/edge renderers, toolbar |
 | `src/components/palette` | Draggable node type list, search, category grouping |
-| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form; field-level validation error display via RJSF `extraErrors` |
+| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form (`SchemaForm`) for most nodes; `ConditionalRuleBuilder` for `conditional.branch` (visual rule builder with no raw CEL); field-level validation error display via RJSF `extraErrors` |
 | `src/components/run` | Live run status panel and per-node detail display |
 | `src/components/shared` | App shell, navigation, dismissible toast notifications (`ToastContainer` / `Toast`) |
 | `src/pages` | Top-level route components |
@@ -1430,20 +1431,117 @@ Standard error codes: `NOT_FOUND`, `VALIDATION_FAILED`, `CYCLE_DETECTED`, `WORKF
 
 ---
 
-## 10. CEL Expression Evaluation
+## 10. Conditional Node — Rule Engine
 
-### Compile at Workflow Save Time
+The conditional node (`conditional.branch`) supports two config formats that coexist without migration:
 
-When `PUT /workflows/:id` is called, the API validates every Conditional node's expression:
+- **New format** (`config.rules`): structured rules defined visually in the UI; CEL is generated internally by the backend. Edges carry the rule label as `branch_label`.
+- **Legacy format** (`config.expression`): a single raw CEL string; edges labeled `"true"` / `"false"`. Existing workflows continue to operate unchanged.
+
+### New Format: Structured Rules
+
+#### Data Structures
 
 ```go
 // internal/node/builtin/conditional/handler.go
 
+type ConditionalCondition struct {
+    NodeID    string `json:"node_id"`    // upstream node whose output to inspect
+    Field     string `json:"field"`      // field name in that node's output map
+    Operator  string `json:"operator"`   // "==" | "!=" | ">" | ">=" | "<" | "<=" | "contains"
+    Value     string `json:"value"`      // right-hand operand (always stored as string)
+    ValueType string `json:"value_type"` // "string" | "number" | "boolean" — drives CEL literal formatting
+}
+
+type ConditionalRule struct {
+    Label      string                 `json:"label"`      // unique per node; "fallback" is reserved
+    Logic      string                 `json:"logic"`      // "AND" | "OR" — applies to all conditions in this rule
+    Conditions []ConditionalCondition `json:"conditions"` // at least one required
+}
+```
+
+**Config shape** (`config["rules"]` is `[]ConditionalRule`):
+
+```json
+{
+  "rules": [
+    {
+      "label": "success",
+      "logic": "AND",
+      "conditions": [
+        { "node_id": "n1", "field": "status_code", "operator": "==", "value": "200", "value_type": "number" }
+      ]
+    },
+    {
+      "label": "error",
+      "logic": "AND",
+      "conditions": [
+        { "node_id": "n1", "field": "status_code", "operator": ">=", "value": "400", "value_type": "number" }
+      ]
+    }
+  ]
+}
+```
+
+#### CEL Generation — `rulesToCEL(rule ConditionalRule) string`
+
+For each condition, emit a CEL term:
+
+| Operator | Generated CEL |
+|----------|--------------|
+| `==`, `!=`, `>`, `>=`, `<`, `<=` | `ctx["<node_id>"]["<field>"] <op> <literal>` |
+| `contains` | `ctx["<node_id>"]["<field>"].contains("<value>")` |
+
+Literal formatting by `value_type`:
+- `"string"` → `"value"` (quoted)
+- `"number"` → `value` (unquoted)
+- `"boolean"` → `true` / `false`
+
+Conditions are joined with ` && ` (AND logic) or ` || ` (OR logic).
+
+#### Validation — `ValidateRules(rules []ConditionalRule) error`
+
+Called at workflow save time (`POST/PUT /workflows`):
+- Rejects an empty rules slice
+- Rejects empty or duplicate rule labels; rejects `"fallback"` as a label (reserved)
+- Rejects rules with zero conditions or unknown operators
+- Generates CEL for each rule and compiles it; rejects if not bool-typed
+
+#### Execution
+
+`Execute()` detects the config format at runtime:
+
+1. If `config["expression"]` is a non-empty string → **legacy path**: evaluate the raw CEL, return `{"result": bool}` (unchanged behaviour).
+2. If `config["rules"]` is present → **new path**: unmarshal rules, evaluate each in definition order using `rulesToCEL` + cached CEL program, return `{"matched_rule": "<first matching label>"}` or `{"matched_rule": "fallback"}` when none match.
+
+#### Engine Routing — `branchAllows()` (internal/engine/runner.go)
+
+```go
+func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
+    if edge.BranchLabel == nil { return true }
+    label := *edge.BranchLabel
+
+    // New format: string match against matched_rule
+    if mr, ok := output["matched_rule"].(string); ok {
+        return mr == label
+    }
+    // Legacy format: bool match against "true"/"false" label
+    if res, ok := output["result"].(bool); ok {
+        return (label == "true") == res
+    }
+    return false
+}
+```
+
+Edges whose `branch_label` does not match `matched_rule` are suppressed; the existing `propagateSkip` mechanism prevents downstream deadlock.
+
+### Legacy Format: Raw CEL Expression
+
+For nodes with `config["expression"]` set, behaviour is identical to the pre-M14 implementation:
+
+```go
 func ValidateExpression(expr string) error {
-    env, err := cel.NewEnv(
-        cel.Variable("ctx", cel.MapType(cel.StringType, cel.DynType)),
-    )
-    if err != nil { return err }
+    env, _ := cel.NewEnv(cel.Variable("ctx", cel.MapType(cel.StringType, cel.DynType)))
     ast, issues := env.Compile(expr)
     if issues != nil && issues.Err() != nil {
         return fmt.Errorf("CEL compile error: %w", issues.Err())
@@ -1455,38 +1553,18 @@ func ValidateExpression(expr string) error {
 }
 ```
 
-Validation failures propagate as `VALIDATION_FAILED` API errors so the frontend can display them inline before the workflow is saved.
+Returns `{"result": bool}`; edges labeled `"true"` or `"false"` route accordingly.
 
-### Bind Data Context at Run Time
+### Frontend — ConditionalRuleBuilder
 
-```go
-func (h *ConditionalHandler) Execute(ctx context.Context, input NodeInput) (NodeOutput, error) {
-    prog, err := h.program(input.Config["expression"].(string))
-    if err != nil { return NodeOutput{}, err }
+`ConfigSidebar` detects `type_id === "conditional.branch"` and renders `ConditionalRuleBuilder` instead of `SchemaForm`. The builder provides:
+- Per-rule cards with an editable label, AND/OR logic toggle, and a list of conditions
+- Each condition row: upstream-field dropdown (from ancestor node output_schemas) + operator selector + value input
+- Add/remove/reorder rules; Add/remove conditions
+- A static **Fallback** chip (fires when no rule matches)
+- Legacy-format detection: shows a banner with a "Migrate" button for old `expression`-only nodes
 
-    // "ctx" is the merged upstream data map, keyed by node ID.
-    // Example: ctx["node-1"]["completion"]
-    activation, _ := interpreter.NewActivation(map[string]any{
-        "ctx": input.UpstreamData,
-    })
-
-    out, _, err := prog.Eval(activation)
-    if err != nil { return NodeOutput{}, err }
-
-    result := out.Value().(bool)
-    return NodeOutput{Data: map[string]any{"result": result}}, nil
-}
-```
-
-The engine uses `NodeOutput.Data["result"]` to resolve which branch edge to follow — only the successor whose `branch_label` matches `"true"` or `"false"` is pushed onto the ready queue.
-
-### Expression Examples
-
-```
-ctx["node-1"]["status"] == "urgent"
-size(ctx["node-2"]["items"]) > 0
-ctx["classify"]["category"] in ["billing", "refund"]
-```
+When rules are renamed or deleted, `useWorkflowStore.syncConditionalEdgeLabels()` nullifies stale edge labels automatically.
 
 ---
 

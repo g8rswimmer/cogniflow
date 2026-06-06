@@ -17,9 +17,9 @@ Initial Data: { "ticket": "..." }
            │  output parser: urgent (boolean)
            ▼
   ┌─────────────────┐
-  │  Urgency Check   │  ← conditional (CEL)
+  │  Urgency Check   │  ← conditional (visual rules)
   └────────┬────────┘
-     true ╱ ╲ false
+   urgent ╱ ╲ fallback
           ╱   ╲
   ┌──────────┐ ┌──────────────┐
   │ Escalate │ │ Standard     │  ← llm.anthropic (one per branch)
@@ -205,40 +205,40 @@ Click **Add**.
 
 ### 5c · Find the Classify Ticket node ID
 
-The Conditional node's CEL expression and the LLM prompts downstream need to reference the **Classify Ticket** node by its internal ID (not its label).
+The downstream LLM prompts (**Escalate Ticket** and **Standard Reply**) reference the **Classify Ticket** node by its internal ID via template variables like `{{.CLASSIFY_NODE_ID.summary}}`. The conditional rule builder selects upstream nodes from a dropdown by label, so you only need the raw ID for the prompt fields.
 
 **How to find it:**
 
-1. Click the **Urgency Check** (conditional) node to select it.
-2. In the right-hand Config Sidebar, scroll down below the Expression field.
-3. You will see an **↑ Upstream Nodes** section that lists every node connected upstream.
-4. Find the **Classify Ticket** row. It shows:
+1. Click the **Escalate Ticket** node to select it.
+2. Scroll down past the prompt fields in the Config Sidebar to the **↑ Upstream Nodes** section.
+3. Find the **Classify Ticket** row. It shows:
    - The node label (`Classify Ticket`)
-   - The raw node ID in small monospace text (e.g. `llm_anthropic_1748976543210`)
+   - The raw node ID in monospace text (e.g. `llm_anthropic_1748976543210`)
    - A `copy id` button
    - Clickable field chips: `completion`, `urgent`, `summary`
-5. Click **copy id** next to Classify Ticket to copy the node ID to your clipboard.
+4. Click **copy id** to copy the node ID to your clipboard.
 
-> The field chips (e.g. clicking `urgent`) copy the full CEL reference `ctx["llm_anthropic_1748976543210"]["urgent"]` directly — paste it into the Expression field.
+> You will paste this ID into the prompt template variables in steps 5e and 5f. The **Urgency Check** conditional no longer needs it — the rule builder selects nodes by name from a dropdown.
 
 ---
 
 ### 5d · Urgency Check (conditional node)
 
-Click **Urgency Check** to select it.
+Click **Urgency Check** to select it. The Config Sidebar shows the **Rules** panel — a visual rule builder instead of a raw expression field.
 
-| Field | Value |
-|-------|-------|
-| Expression | `ctx["CLASSIFY_NODE_ID"]["urgent"] == true` |
+**Define the "urgent" rule:**
 
-Replace `CLASSIFY_NODE_ID` with the ID you copied in 5c. Example:
-```
-ctx["llm_anthropic_1748976543210"]["urgent"] == true
-```
+1. The panel starts with one empty rule card. Click the label field (pre-filled with `rule_1`) and type **`urgent`**.
+2. In the condition row below:
+   - **Node ▾** — select **Classify Ticket** from the dropdown
+   - **Field ▾** — select **`urgent`** from the dropdown (populated from Classify Ticket's output schema + parsers)
+   - **Operator ▾** — select **`==`**
+   - **Value** — type **`true`** (the field auto-detects this as boolean)
+3. Leave **AND** selected (only one condition, so it has no effect).
 
-> This is a CEL expression. `ctx` is the merged upstream data map, keyed by node ID. The output parser placed `urgent` (a boolean) into the Classify node's output, so this comparison is type-safe.
->
-> The engine routes the **true** edge to Escalate Ticket and the **false** edge to Standard Reply.
+The bottom of the panel shows a static **fallback** chip — this edge fires automatically when no rule matches (i.e. `urgent` is false).
+
+> The engine evaluates rules in order, top-to-bottom. The first matching rule label is used to route execution. Here: if `urgent == true`, the `urgent` edge fires; otherwise the `fallback` edge fires.
 
 ---
 
@@ -313,8 +313,8 @@ Draw these connections in order:
 | From | To | Branch label |
 |------|----|-------------|
 | Classify Ticket | Urgency Check | *(none)* |
-| Urgency Check | Escalate Ticket | `true` |
-| Urgency Check | Standard Reply | `false` |
+| Urgency Check | Escalate Ticket | `urgent` |
+| Urgency Check | Standard Reply | `fallback` |
 | Escalate Ticket | Merge | *(none)* |
 | Standard Reply | Merge | *(none)* |
 
@@ -322,10 +322,10 @@ Draw these connections in order:
 
 After drawing each edge from Urgency Check, you will see a small **`+label`** button in the middle of the edge. Click it, type the label, then press **Enter** (or click away).
 
-- Urgency Check → Escalate Ticket: type `true`
-- Urgency Check → Standard Reply: type `false`
+- Urgency Check → Escalate Ticket: type **`urgent`** (matches the rule label you defined in step 5d)
+- Urgency Check → Standard Reply: type **`fallback`** (the reserved label that fires when no rule matches)
 
-> Branch labels tell the engine which outgoing edge to follow based on the conditional's result. Edges without labels on a conditional node are ignored.
+> Labels must exactly match the rule labels defined in the conditional node's rule builder (or the reserved word `fallback`). The save validator will flag any edge whose label does not match a defined rule or `fallback`.
 
 ---
 
@@ -336,7 +336,8 @@ Click **Save** in the top-right of the navbar.
 The URL will update from `/workflows/new` to `/workflows/<uuid>`. The "unsaved" indicator disappears.
 
 If you see a validation error:
-- `VALIDATION_FAILED` on the expression → check the CEL syntax and node ID in step 5d
+- `VALIDATION_FAILED` on rules → check that the rule label is non-empty and not `fallback`; ensure Node and Field are selected in every condition row
+- `VALIDATION_FAILED` on an edge label → the label on a Urgency Check edge doesn't match any rule label or `fallback`; retype it to match exactly
 - `VALIDATION_FAILED` on a template → check the `{{. ... }}` syntax in your prompts
 
 ---
@@ -420,16 +421,17 @@ These are things worth noticing as you use the system — useful for evaluating 
 - **Template variable picker:** clicking upstream output fields inserts the snippet at the cursor. No memorising node IDs.
 - **Output parsers:** extracting typed fields from an LLM completion and making them available downstream is a clean pattern that avoids a dedicated "JSON parse" node.
 - **Live events:** watching each node flip from amber to green during execution makes the DAG scheduling visible.
-- **CEL branching:** the conditional node correctly skips the Standard Reply branch entirely — skipped nodes never appear in the run panel's output.
+- **Visual rule builder:** the conditional node's config sidebar shows a rule builder (node dropdown → field dropdown → operator → value) rather than a raw CEL expression. The `fallback` edge fires automatically when no rule matches — no second rule needed for the "else" case.
+- **Multi-branch routing:** adding more rules to the conditional node routes to more than two downstream paths without any code changes.
 
 ### Current friction points
 
 | Area | Observation |
 |------|-------------|
-| **Node IDs in CEL** | The conditional expression requires the raw auto-generated node ID (e.g. `llm.anthropic-1748976543210`). Users must fish this out from the template variable picker. A named-reference system or node aliases would eliminate this. |
-| **Branch labels on edges** | Typing `true`/`false` on conditional edges is not discoverable — a dropdown on the edge would be clearer. |
+| **Node IDs in prompts** | Template variables in LLM prompts still require the raw auto-generated node ID (e.g. `{{.llm_anthropic_1748976543210.summary}}`). The template variable picker helps, but node aliases would be cleaner. |
+| **Branch labels on edges** | Labels must be typed manually on each edge and must match the rule names defined in the conditional panel exactly. A dropdown populated from the source node's rules would reduce friction. |
 | **Run detail graph** | Nodes without output (skipped branch, non-sink nodes) are all grey — the detail page cannot distinguish "ran and succeeded" from "never ran" without per-node status persisted in the DB. |
-| **CEL expression validation feedback** | Save-time CEL errors highlight the specific node with a red badge and show inline field errors in the Config Sidebar — the expression field is flagged directly. |
+| **Rule validation feedback** | Save-time rule errors highlight the specific node with a red badge and show an inline error banner in the Rules panel. Duplicate or missing rule labels are caught client-side before save. |
 | **No retry-on-failure UI** | Retry policy fields (`max_retries`, `backoff_ms`) exist in the backend schema but are not exposed in the config sidebar forms yet. |
 
 ### Suggested follow-up experiments
