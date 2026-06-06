@@ -5,6 +5,7 @@ import { SchemaForm, getTemplateFields } from './SchemaForm'
 import { TemplateVariablePicker } from './TemplateVariablePicker'
 import { UpstreamNodeReferences } from './UpstreamNodeReferences'
 import { OutputParserPanel } from './OutputParserPanel'
+import { ConditionalRuleBuilder } from './ConditionalRuleBuilder'
 
 export function ConfigSidebar() {
   const selectedNodeId = useWorkflowStore(s => s.selectedNodeId)
@@ -82,20 +83,34 @@ export function ConfigSidebar() {
           />
         </div>
 
-        {/* Config form */}
-        {meta && Object.keys(schema).length > 0 && (
+        {/* Config form — conditional.branch gets a visual rule builder; all other nodes use SchemaForm */}
+        {type_id === 'conditional.branch' ? (
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-1">
-              Configuration
+              Rules
             </label>
-            <SchemaForm
-              schema={schema}
-              formData={config}
+            <ConditionalRuleBuilder
+              nodeId={selectedNodeId}
+              config={config}
               onChange={data => updateNodeConfig(selectedNodeId, data)}
-              focusRef={templateInputRef}
               fieldErrors={currentFieldErrors}
             />
           </div>
+        ) : (
+          meta && Object.keys(schema).length > 0 && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-1">
+                Configuration
+              </label>
+              <SchemaForm
+                schema={schema}
+                formData={config}
+                onChange={data => updateNodeConfig(selectedNodeId, data)}
+                focusRef={templateInputRef}
+                fieldErrors={currentFieldErrors}
+              />
+            </div>
+          )
         )}
 
         {/* Upstream node references — always visible when upstream nodes exist.

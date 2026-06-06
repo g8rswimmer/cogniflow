@@ -159,17 +159,28 @@ func runDAG(
 }
 
 // branchAllows reports whether the given edge should fire given the completed
-// node's output. Edges without a branch_label always fire. Edges labelled
-// "true" or "false" fire only when the output "result" bool matches.
+// node's output. Edges without a branch_label always fire.
+//
+// New format (conditional.branch with structured rules): the output contains
+// "matched_rule" (string) and the edge's branch_label must equal that string.
+//
+// Legacy format (raw CEL expression): the output contains "result" (bool) and
+// the edge's branch_label must be "true" or "false" matching that bool.
 func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
 	if edge.BranchLabel == nil {
 		return true
 	}
-	res, ok := output["result"].(bool)
-	if !ok {
-		return false
+	label := *edge.BranchLabel
+
+	// New format: string match against matched_rule.
+	if mr, ok := output["matched_rule"].(string); ok {
+		return mr == label
 	}
-	return (*edge.BranchLabel == "true") == res
+	// Legacy format: bool match against "true"/"false" label.
+	if res, ok := output["result"].(bool); ok {
+		return (label == "true") == res
+	}
+	return false
 }
 
 // executeNode runs a single node inside a goroutine, respecting retry policy.

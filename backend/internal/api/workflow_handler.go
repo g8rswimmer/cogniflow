@@ -232,7 +232,7 @@ func (h *workflowHandler) collectValidationErrors(wf *store.Workflow) []FieldVal
 	errs = append(errs, h.validateTemplates(wf)...)
 	errs = append(errs, validateOutputParsers(wf.Nodes)...)
 	errs = append(errs, validateCELExpressions(wf.Nodes)...)
-	errs = append(errs, validateEdgeBranchLabels(wf.Edges)...)
+	errs = append(errs, validateEdgeBranchLabels(wf.Nodes, wf.Edges)...)
 	return errs
 }
 
@@ -349,14 +349,35 @@ func parseTemplateFields(schema json.RawMessage) []templateField {
 }
 
 
-// validateCELExpressions compiles the CEL expression on every conditional.branch
-// node and verifies it returns bool.
+// validateCELExpressions validates every conditional.branch node at save time.
+// Detects old format (config["expression"]) vs new format (config["rules"]) per node.
 func validateCELExpressions(nodes []store.WorkflowNode) []FieldValidationError {
 	var errs []FieldValidationError
 	for _, n := range nodes {
 		if n.TypeID != "conditional.branch" {
 			continue
 		}
+		// New format: structured rules.
+		if rawRules, ok := n.Config["rules"]; ok && rawRules != nil {
+			rules, err := parseConditionalRules(rawRules)
+			if err != nil {
+				errs = append(errs, FieldValidationError{
+					NodeID:  n.ID,
+					Field:   "rules",
+					Message: "invalid rules format: " + err.Error(),
+				})
+				continue
+			}
+			if err := conditional.ValidateRules(rules); err != nil {
+				errs = append(errs, FieldValidationError{
+					NodeID:  n.ID,
+					Field:   "rules",
+					Message: err.Error(),
+				})
+			}
+			continue
+		}
+		// Legacy format: raw CEL expression.
 		expr, _ := n.Config["expression"].(string)
 		if expr == "" {
 			continue // missing required field caught by validateRequiredFields
@@ -370,6 +391,20 @@ func validateCELExpressions(nodes []store.WorkflowNode) []FieldValidationError {
 		}
 	}
 	return errs
+}
+
+// parseConditionalRules round-trips the raw config value through JSON to get
+// a typed []conditional.ConditionalRule slice.
+func parseConditionalRules(raw any) ([]conditional.ConditionalRule, error) {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var rules []conditional.ConditionalRule
+	if err := json.Unmarshal(b, &rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
 }
 
 // validateOutputParsers checks that every output_parser defined on each node
@@ -387,19 +422,61 @@ func validateOutputParsers(nodes []store.WorkflowNode) []FieldValidationError {
 	return errs
 }
 
-// validateEdgeBranchLabels rejects edges whose branch_label is not "true" or "false".
-func validateEdgeBranchLabels(edges []store.WorkflowEdge) []FieldValidationError {
+// validateEdgeBranchLabels validates branch labels on edges from conditional nodes.
+// For new-format nodes, labels must match a defined rule label or "fallback".
+// For legacy-format nodes, labels must be "true" or "false".
+func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.WorkflowEdge) []FieldValidationError {
+	// Build a map of conditional node ID → allowed branch labels.
+	type nodeFormat struct {
+		isNew  bool
+		labels map[string]bool // nil means legacy ("true"/"false" only)
+	}
+	nodeFormats := make(map[string]nodeFormat, len(nodes))
+	for _, n := range nodes {
+		if n.TypeID != "conditional.branch" {
+			continue
+		}
+		if rawRules, ok := n.Config["rules"]; ok && rawRules != nil {
+			rules, err := parseConditionalRules(rawRules)
+			if err != nil {
+				// Malformed rules — format error already caught by validateCELExpressions.
+				continue
+			}
+			allowed := make(map[string]bool, len(rules)+1)
+			for _, r := range rules {
+				allowed[r.Label] = true
+			}
+			allowed["fallback"] = true
+			nodeFormats[n.ID] = nodeFormat{isNew: true, labels: allowed}
+		} else {
+			nodeFormats[n.ID] = nodeFormat{isNew: false}
+		}
+	}
+
 	var errs []FieldValidationError
 	for _, e := range edges {
 		if e.BranchLabel == nil {
 			continue
 		}
-		if *e.BranchLabel != "true" && *e.BranchLabel != "false" {
-			errs = append(errs, FieldValidationError{
-				// NodeID is the source (conditional) node so the frontend can highlight it.
-				NodeID:  e.SourceID,
-				Message: fmt.Sprintf("branch_label must be \"true\" or \"false\", got %q", *e.BranchLabel),
-			})
+		label := *e.BranchLabel
+		nf, isConditional := nodeFormats[e.SourceID]
+		if !isConditional {
+			continue // non-conditional source; no label constraint
+		}
+		if nf.isNew {
+			if !nf.labels[label] {
+				errs = append(errs, FieldValidationError{
+					NodeID:  e.SourceID,
+					Message: fmt.Sprintf("branch_label %q does not match any rule label or \"fallback\"", label),
+				})
+			}
+		} else {
+			if label != "true" && label != "false" {
+				errs = append(errs, FieldValidationError{
+					NodeID:  e.SourceID,
+					Message: fmt.Sprintf("branch_label must be \"true\" or \"false\", got %q", label),
+				})
+			}
 		}
 	}
 	return errs

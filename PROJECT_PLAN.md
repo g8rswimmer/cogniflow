@@ -25,6 +25,7 @@ Each milestone leaves the system in a **runnable, verifiable state**. Later mile
 | M11 | [Frontend — Canvas & CRUD](#m11-frontend--canvas--crud) | Browser UI: create workflows, add/connect nodes, save |
 | M12 | [Frontend — Run & Observe](#m12-frontend--run--observe) | Browser UI: trigger runs, watch live status, browse history |
 | M13 | [Production Build & Hardening](#m13-production-build--hardening) | Single `docker-compose up` from a clean clone; full system E2E |
+| M14 | [Enhanced Conditional Node](#m14-enhanced-conditional-node) | Visual rule builder; N-rule + fallback routing; AND/OR compound conditions |
 
 ---
 
@@ -680,6 +681,53 @@ curl http://localhost:8080/workflows  # previously created workflows still prese
 
 ### Dependencies
 All prior milestones complete.
+
+---
+
+## M14: Enhanced Conditional Node
+
+**Goal:** Replace the raw CEL expression input with a visual rule builder. Support N named rules (each with compound AND/OR conditions) plus an implicit fallback, enabling workflows with more than two downstream branches. Old-format workflows remain fully functional without migration.
+
+### Deliverables
+
+- **DB migration** — widen `workflow_edges.branch_label` from `VARCHAR(20)` to `VARCHAR(100)` to accommodate user-defined rule labels
+- `backend/internal/node/builtin/conditional/handler.go` — `ConditionalCondition` / `ConditionalRule` structs; `rulesToCEL()` generates CEL from structured conditions; `ValidateRules()` validates rules at save time; `Execute()` detects old vs. new config format, new path returns `{"matched_rule": "<label>"}` or `"fallback"`
+- `backend/internal/engine/runner.go` — `branchAllows()` updated to match `matched_rule` string against edge `branch_label`; legacy `{"result": bool}` path kept for backward compat
+- `backend/internal/api/workflow_handler.go` — `validateCELExpressions()` detects format per node and calls the appropriate validator; `validateEdgeBranchLabels()` cross-references rule labels from the node config to validate edge labels
+- `frontend/src/api/types.ts` — `ConditionalCondition`, `ConditionalRule` TypeScript types
+- `frontend/src/components/sidebar/ConditionalRuleBuilder.tsx` — new visual rule builder component: rule cards, field/operator/value condition rows, AND/OR toggle, fallback chip, legacy migration banner
+- `frontend/src/components/sidebar/ConfigSidebar.tsx` — dispatch to `ConditionalRuleBuilder` for `conditional.branch`, `SchemaForm` for all other node types
+- `frontend/src/stores/useWorkflowStore.ts` — `syncConditionalEdgeLabels()` action: nullifies edge labels that no longer match any rule after a rename or delete
+- `frontend/src/components/canvas/LabeledEdge.tsx` — placeholder text updated from `"true / false"` to `"rule label"`
+
+### Testable Criteria
+
+```
+1. Create a workflow: n1 (HTTP Request) → n2 (conditional.branch)
+   → Open n2 config sidebar; the ConditionalRuleBuilder renders (not a raw text field)
+
+2. Add 2 rules in the builder:
+   - "success": n1.status_code == 200 (number)
+   - "error":   n1.status_code >= 400 (number)
+   Connect n3 via "success" edge, n4 via "error" edge, n5 via "fallback" edge
+
+3. Point n1 at httpbin.org/status/200 → trigger → only n3 (success) appears in final_output
+4. Point n1 at httpbin.org/status/500 → trigger → only n4 (error) appears in final_output
+5. Point n1 at httpbin.org/status/302 → trigger → only n5 (fallback) appears in final_output
+
+6. Save a workflow with a duplicate rule label → VALIDATION_FAILED returned; sidebar shows inline error
+7. Save a workflow with an edge pointing to a nonexistent rule label → VALIDATION_FAILED
+
+8. Load an old-format workflow (config.expression present) → migration banner appears in sidebar;
+   workflow still executes correctly via the legacy branchAllows path
+9. Click "Migrate" in the banner → old expression is replaced by a single rule; banner disappears
+
+10. Rename a rule from "success" to "ok" → the previously connected "success" edge label is
+    cleared automatically; canvas shows the edge as unlabelled
+```
+
+### Dependencies
+M8, M11, M12
 
 ---
 
