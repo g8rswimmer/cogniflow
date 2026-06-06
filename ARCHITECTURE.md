@@ -271,7 +271,7 @@ cogniflow/                              # Repository root
 |--------|---------------|
 | `src/components/canvas` | React Flow canvas, custom node/edge renderers, toolbar |
 | `src/components/palette` | Draggable node type list, search, category grouping |
-| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form (`SchemaForm`) for most nodes; `ConditionalRuleBuilder` for `conditional.branch` (visual rule builder with no raw CEL); field-level validation error display via RJSF `extraErrors` |
+| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form (`SchemaForm`) for most nodes; `ConditionalRuleBuilder` for `conditional.branch` (visual rule builder with no raw CEL); field-level validation error display via RJSF `extraErrors`. `SchemaForm` detects `"x-textarea": true` schema properties and renders a multi-line textarea with an inline variable picker (node + field dropdowns) instead of a single-line input. |
 | `src/components/run` | Live run status panel and per-node detail display |
 | `src/components/shared` | App shell, navigation, dismissible toast notifications (`ToastContainer` / `Toast`) |
 | `src/pages` | Top-level route components |
@@ -1576,7 +1576,9 @@ Node config fields can reference the outputs of upstream nodes using Go `text/te
 
 The mechanism is enabled field-by-field via a JSON Schema extension, consistent with the existing `"x-sensitive": true` convention.
 
-### JSON Schema Extension: `x-template`
+### JSON Schema Extensions
+
+#### `x-template`
 
 Any `input_schema` property marked `"x-template": true` accepts template expressions. Fields without this marker are stored and passed as literal strings.
 
@@ -1590,17 +1592,20 @@ Example — HTTP Request node `url` field:
 }
 ```
 
-Example — LLM Call node `prompt` field:
+Fields may carry both `x-sensitive: true` and `x-template: true` simultaneously (e.g., a URL that contains an auth token derived from an upstream node).
+
+#### `x-textarea`
+
+A property marked `"x-textarea": true` renders as a multi-line scrollable `<textarea>` in the Config Sidebar instead of a single-line `<input>`. This flag is independent of `x-template`.
+
+When both flags are set (e.g., LLM `prompt` and `system_msg`), `SchemaForm` renders the `TextareaTemplateWidget`: a textarea with an inline variable picker (upstream node dropdown → field dropdown → Insert button) directly below it. The standard chip-based `TemplateVariablePicker` panel is suppressed for these fields since they carry their own inline picker.
+
+Example — LLM Call node `prompt` and `system_msg` fields:
 
 ```json
-"prompt": {
-  "type": "string",
-  "title": "Prompt",
-  "x-template": true
-}
+"prompt":     { "type": "string", "title": "Prompt",         "x-template": true, "x-textarea": true },
+"system_msg": { "type": "string", "title": "System Message", "x-template": true, "x-textarea": true }
 ```
-
-Fields may carry both `x-sensitive: true` and `x-template: true` simultaneously (e.g., a URL that contains an auth token derived from an upstream node).
 
 ### Template Syntax
 

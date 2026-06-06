@@ -1,10 +1,10 @@
-import { useMemo, useRef, useCallback, useState } from 'react'
+import { useMemo, useRef, useCallback, useState, useEffect } from 'react'
 import Form from '@rjsf/core'
 import validator from '@rjsf/validator-ajv8'
 import type { RJSFSchema, UiSchema, WidgetProps } from '@rjsf/utils'
-
-// Module-level ref so TemplateVariablePicker can call insertSnippet() without prop-drilling.
-// See lib/templateFocus.ts for the insertion logic.
+import { useWorkflowStore, getAncestors } from '../../stores/useWorkflowStore'
+import { useNodeTypeStore } from '../../stores/useNodeTypeStore'
+import { insertSnippet } from '../../lib/templateFocus'
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
@@ -59,8 +59,12 @@ function buildUiSchema(schema: Record<string, unknown>): UiSchema {
   for (const [key, prop] of Object.entries(properties)) {
     if (prop['x-sensitive']) {
       uiSchema[key] = { 'ui:widget': 'SensitiveWidget' }
+    } else if (prop['x-textarea'] && prop['x-template']) {
+      uiSchema[key] = { 'ui:widget': 'TextareaTemplateWidget' }
     } else if (prop['x-template']) {
       uiSchema[key] = { 'ui:widget': 'TemplateTextWidget' }
+    } else if (prop['x-textarea']) {
+      uiSchema[key] = { 'ui:widget': 'textarea' }
     }
   }
 
@@ -108,7 +112,146 @@ function makeTemplateWidget(
   }
 }
 
+// ---------------------------------------------------------------------------
+// TextareaTemplateWidget — module-level stable component so RJSF's function-
+// equality check never prevents it from seeing a fresh nodeId. nodeId is read
+// from RJSF formContext (props.registry.formContext) instead of a factory
+// closure, so it is always current and correctly included in useMemo deps.
+// ---------------------------------------------------------------------------
+
+const selectCls =
+  'appearance-none bg-gray-700 border border-gray-600 text-gray-100 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer'
+
+function TextareaTemplateWidget(props: WidgetProps) {
+  const { id, value, onChange, onFocus: rjsfFocus, onBlur: rjsfBlur, disabled, readonly, placeholder, registry } =
+    props
+  const nodeId = (registry.formContext as { nodeId?: string }).nodeId ?? ''
+
+  const edges         = useWorkflowStore(s => s.edges)
+  const nodes         = useWorkflowStore(s => s.nodes)
+  const outputParsers = useWorkflowStore(s => s.outputParsers)
+  const byTypeId      = useNodeTypeStore(s => s.byTypeId)
+
+  const ancestors = useMemo(() => {
+    return getAncestors(nodeId, edges)
+      .map(ancestorId => {
+        const rfNode = nodes.find(n => n.id === ancestorId)
+        if (!rfNode) return null
+        const meta = byTypeId(rfNode.data.type_id)
+        const schemaProps =
+          ((meta?.output_schema as Record<string, unknown> | undefined)?.properties as
+            Record<string, unknown> | undefined) ?? {}
+        const schemaFields = Object.keys(schemaProps)
+        const parserFields = Object.keys(outputParsers[ancestorId] ?? {})
+        return {
+          id: ancestorId,
+          label: (rfNode.data.label as string) || ancestorId,
+          fields: [...new Set([...schemaFields, ...parserFields])],
+        }
+      })
+      .filter(Boolean) as { id: string; label: string; fields: string[] }[]
+  }, [nodeId, edges, nodes, outputParsers, byTypeId])
+
+  // Single field state covers both _initial (free-text) and node-field (select) branches.
+  const [pickerNodeId, setPickerNodeId] = useState('')
+  const [pickerField, setPickerField]   = useState('')
+
+  // Explicitly reset picker when the selected workflow node changes.
+  useEffect(() => {
+    setPickerNodeId('')
+    setPickerField('')
+  }, [nodeId])
+
+  const fieldsForPickerNode = useMemo(() => {
+    if (!pickerNodeId || pickerNodeId === '_initial') return []
+    return ancestors.find(a => a.id === pickerNodeId)?.fields ?? []
+  }, [ancestors, pickerNodeId])
+
+  const insertDisabled = !pickerNodeId || pickerField.trim() === ''
+
+  return (
+    <div className="space-y-1.5">
+      <textarea
+        id={id}
+        rows={5}
+        value={value ?? ''}
+        disabled={disabled || readonly}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value === '' ? undefined : e.target.value)}
+        onFocus={() => rjsfFocus(id, value)}
+        onBlur={() => rjsfBlur(id, value)}
+        className="
+          w-full rounded-md bg-gray-700 border border-gray-600
+          px-3 py-1.5 text-sm text-gray-100 placeholder-gray-400
+          focus:outline-none focus:border-indigo-500 resize-none font-mono leading-relaxed
+        "
+      />
+
+      {/* Inline variable picker */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {/* Node selector */}
+        <select
+          value={pickerNodeId}
+          onChange={e => { setPickerNodeId(e.target.value); setPickerField('') }}
+          className={`${selectCls} flex-1 min-w-0`}
+          aria-label="Select upstream node"
+        >
+          <option value="">— node —</option>
+          <option value="_initial">Initial Data</option>
+          {ancestors.map(a => (
+            <option key={a.id} value={a.id}>{a.label}</option>
+          ))}
+        </select>
+
+        {/* Field selector / free-text for _initial */}
+        {pickerNodeId === '_initial' ? (
+          <input
+            type="text"
+            value={pickerField}
+            onChange={e => setPickerField(e.target.value)}
+            placeholder="field name"
+            className="flex-1 min-w-0 bg-gray-700 border border-gray-600 text-gray-100 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+            aria-label="Initial data field name"
+          />
+        ) : (
+          <select
+            value={pickerField}
+            onChange={e => setPickerField(e.target.value)}
+            disabled={!pickerNodeId}
+            className={`${selectCls} flex-1 min-w-0`}
+            aria-label="Select field"
+          >
+            <option value="">— field —</option>
+            {fieldsForPickerNode.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        )}
+
+        {/* onMouseDown+preventDefault keeps the textarea focused so insertSnippet
+            reads the correct document.activeElement and cursor position. */}
+        <button
+          type="button"
+          onMouseDown={e => {
+            if (insertDisabled) return
+            e.preventDefault()
+            const snippet = pickerNodeId === '_initial'
+              ? `{{._initial.${pickerField}}}`
+              : `{{.${pickerNodeId}.${pickerField}}}`
+            insertSnippet(snippet)
+          }}
+          disabled={insertDisabled}
+          className="flex-shrink-0 text-xs bg-indigo-700 hover:bg-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded px-2 py-1.5 transition-colors"
+        >
+          Insert
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
+  nodeId: string
   schema: Record<string, unknown>
   formData: Record<string, unknown>
   onChange: (data: Record<string, unknown>) => void
@@ -116,10 +259,12 @@ interface Props {
   fieldErrors?: Record<string, string>
 }
 
-export function SchemaForm({ schema, formData, onChange, focusRef, fieldErrors }: Props) {
+export function SchemaForm({ nodeId, schema, formData, onChange, focusRef, fieldErrors }: Props) {
   const uiSchema = useMemo(() => buildUiSchema(schema), [schema])
+  // TextareaTemplateWidget is module-level (stable reference); no nodeId dep needed.
   const widgets = useMemo(() => ({
     TemplateTextWidget: makeTemplateWidget(focusRef),
+    TextareaTemplateWidget,
     SensitiveWidget,
   }), [focusRef])
 
@@ -149,6 +294,7 @@ export function SchemaForm({ schema, formData, onChange, focusRef, fieldErrors }
         schema={schema as RJSFSchema}
         uiSchema={uiSchema}
         formData={formData}
+        formContext={{ nodeId }}
         validator={validator}
         widgets={widgets}
         onChange={handleChange}
@@ -166,7 +312,8 @@ export function SchemaForm({ schema, formData, onChange, focusRef, fieldErrors }
 export function getTemplateFields(schema: Record<string, unknown>): string[] {
   const properties =
     (schema.properties as Record<string, Record<string, unknown>> | undefined) ?? {}
+  // Exclude x-textarea fields — they carry their own inline variable picker
   return Object.entries(properties)
-    .filter(([, p]) => p['x-template'])
+    .filter(([, p]) => p['x-template'] && !p['x-textarea'])
     .map(([k]) => k)
 }

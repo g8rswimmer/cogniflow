@@ -103,6 +103,7 @@ export function ConfigSidebar() {
                 Configuration
               </label>
               <SchemaForm
+                nodeId={selectedNodeId}
                 schema={schema}
                 formData={config}
                 onChange={data => updateNodeConfig(selectedNodeId, data)}
