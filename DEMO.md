@@ -345,9 +345,7 @@ If you see a validation error:
 
 Click the green **▶ Run** button in the navbar.
 
-A **RunStatusPanel** slides up from the bottom of the canvas. It shows each node with a grey dot (pending).
-
-You will be asked for initial data. Paste this JSON into the initial data field:
+An **Initial Run Data** dialog appears. Clear the default `{}` and paste:
 
 ```json
 {
@@ -355,7 +353,9 @@ You will be asked for initial data. Paste this JSON into the initial data field:
 }
 ```
 
-Click **Run**.
+Click **Run** (or press **Cmd/Ctrl + Enter**).
+
+A **RunStatusPanel** slides up from the bottom of the canvas showing each node with a grey dot (pending).
 
 > This scenario should classify as `urgent: true` and route through the Escalate Ticket branch.
 
@@ -429,8 +429,7 @@ These are things worth noticing as you use the system — useful for evaluating 
 | **Node IDs in CEL** | The conditional expression requires the raw auto-generated node ID (e.g. `llm.anthropic-1748976543210`). Users must fish this out from the template variable picker. A named-reference system or node aliases would eliminate this. |
 | **Branch labels on edges** | Typing `true`/`false` on conditional edges is not discoverable — a dropdown on the edge would be clearer. |
 | **Run detail graph** | Nodes without output (skipped branch, non-sink nodes) are all grey — the detail page cannot distinguish "ran and succeeded" from "never ran" without per-node status persisted in the DB. |
-| **No initial-data modal** | The Run button fires with empty `{}` unless the user edits code. A small "Initial data" dialog on the Run button would make parameterised runs self-service. |
-| **CEL expression validation feedback** | Save-time CEL errors return `VALIDATION_FAILED` but the UI shows the error in the navbar — it would be more helpful to highlight the specific Conditional node's field inline. |
+| **CEL expression validation feedback** | Save-time CEL errors highlight the specific node with a red badge and show inline field errors in the Config Sidebar — the expression field is flagged directly. |
 | **No retry-on-failure UI** | Retry policy fields (`max_retries`, `backoff_ms`) exist in the backend schema but are not exposed in the config sidebar forms yet. |
 
 ### Suggested follow-up experiments

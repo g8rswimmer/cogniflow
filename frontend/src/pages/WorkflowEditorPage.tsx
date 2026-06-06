@@ -22,6 +22,7 @@ import { Navbar } from '../components/shared/Navbar'
 import { NodePalette } from '../components/palette/NodePalette'
 import { ConfigSidebar } from '../components/sidebar/ConfigSidebar'
 import { RunStatusPanel } from '../components/run/RunStatusPanel'
+import { InitialDataModal } from '../components/run/InitialDataModal'
 import CustomNode from '../components/canvas/CustomNode'
 import { LabeledEdge } from '../components/canvas/LabeledEdge'
 import { CanvasControls } from '../components/canvas/CanvasControls'
@@ -146,6 +147,7 @@ export function WorkflowEditorPage() {
 
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showInitialDataModal, setShowInitialDataModal] = useState(false)
 
   // Subscribe to WebSocket events for the active run.
   useRunEvents(activeRunId)
@@ -226,10 +228,16 @@ export function WorkflowEditorPage() {
     }
   }
 
-  const handleRun = async () => {
+  const handleRun = () => {
+    if (!workflowId) return
+    setShowInitialDataModal(true)
+  }
+
+  const handleRunWithData = async (initialData: Record<string, unknown>) => {
+    setShowInitialDataModal(false)
     if (!workflowId) return
     try {
-      const result = await api.triggerRun(workflowId)
+      const result = await api.triggerRun(workflowId, initialData)
       startRun(result.run_id)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Run failed to start'
@@ -256,6 +264,12 @@ export function WorkflowEditorPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 overflow-hidden">
+      {showInitialDataModal && (
+        <InitialDataModal
+          onRun={handleRunWithData}
+          onCancel={() => setShowInitialDataModal(false)}
+        />
+      )}
       <Navbar
         onSave={handleSave}
         onRun={handleRun}
