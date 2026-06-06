@@ -11,7 +11,7 @@ import type {
   EdgeChange,
   Connection,
 } from '@xyflow/react'
-import type { Trigger, OutputParser, Workflow } from '../api/types'
+import type { Trigger, OutputParser, Workflow, FieldValidationError } from '../api/types'
 
 export interface NodeData {
   type_id: string
@@ -54,6 +54,13 @@ interface WorkflowStore {
   updateNodeLabel: (nodeId: string, label: string) => void
   updateNodeConfig: (nodeId: string, config: Record<string, unknown>) => void
   updateOutputParsers: (nodeId: string, parsers: Record<string, OutputParser>) => void
+  updateEdgeLabel: (edgeId: string, label: string | null) => void
+
+  // Save-time validation errors — populated on VALIDATION_FAILED, cleared on success
+  nodeErrors: Record<string, string[]>
+  fieldErrors: Record<string, Record<string, string>>
+  setValidationErrors: (errs: FieldValidationError[]) => void
+  clearValidationErrors: () => void
 
   // Load / reset
   loadWorkflow: (wf: Workflow) => void
@@ -74,6 +81,9 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   configs: {},
   outputParsers: {},
+
+  nodeErrors: {},
+  fieldErrors: {},
 
   onNodesChange: (changes) =>
     set(s => {
@@ -106,14 +116,20 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     }),
 
   onEdgesChange: (changes) =>
-    set(s => ({
-      edges: applyEdgeChanges(changes, s.edges),
-      isDirty: true,
-    })),
+    set(s => {
+      const userChange = changes.some(c => c.type !== 'select')
+      return {
+        edges: applyEdgeChanges(changes, s.edges),
+        isDirty: userChange ? true : s.isDirty,
+      }
+    }),
 
   onConnect: (connection) =>
     set(s => ({
-      edges: addEdge(connection, s.edges),
+      // Supply an explicit UUID so the edge ID fits the DB CHAR(36) column.
+      // React Flow's default id is "xy-edge__{source}-{target}" which exceeds
+      // 36 chars when node IDs are long.
+      edges: addEdge({ ...connection, id: crypto.randomUUID(), type: 'labeled' }, s.edges),
       isDirty: true,
     })),
 
@@ -154,6 +170,32 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       isDirty: true,
     })),
 
+  updateEdgeLabel: (edgeId, label) =>
+    set(s => ({
+      edges: s.edges.map(e =>
+        e.id === edgeId ? { ...e, label: label ?? undefined } : e,
+      ),
+      isDirty: true,
+    })),
+
+  setValidationErrors: (errs) => {
+    const nodeErrors: Record<string, string[]> = {}
+    const fieldErrors: Record<string, Record<string, string>> = {}
+    for (const e of errs) {
+      const nid = e.node_id
+      if (!nid) continue
+      if (!nodeErrors[nid]) nodeErrors[nid] = []
+      nodeErrors[nid].push(e.field ? `${e.field}: ${e.message}` : e.message)
+      if (e.field) {
+        if (!fieldErrors[nid]) fieldErrors[nid] = {}
+        fieldErrors[nid][e.field] = e.message
+      }
+    }
+    set({ nodeErrors, fieldErrors })
+  },
+
+  clearValidationErrors: () => set({ nodeErrors: {}, fieldErrors: {} }),
+
   loadWorkflow: (wf) => {
     const nodes: WorkflowNode[] = wf.nodes.map(n => ({
       id: n.id,
@@ -164,6 +206,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
     const edges: Edge[] = wf.edges.map(e => ({
       id: e.id,
+      type: 'labeled',
       source: e.source_id,
       target: e.target_id,
       label: e.branch_label ?? undefined,
@@ -202,9 +245,11 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       outputParsers: {},
       selectedNodeId: null,
       isDirty: false,
+      nodeErrors: {},
+      fieldErrors: {},
     }),
 
-  markClean: (id) => set({ workflowId: id, isDirty: false }),
+  markClean: (id) => set({ workflowId: id, isDirty: false, nodeErrors: {}, fieldErrors: {} }),
 }))
 
 // Utility: find all ancestor node IDs for a given node

@@ -136,13 +136,18 @@ func (s *WorkflowStore) ListWorkflows(ctx context.Context) ([]store.WorkflowSumm
 		Description    string    `db:"description"`
 		TriggerKind    string    `db:"trigger_kind"`
 		TimeoutSeconds int       `db:"timeout_seconds"`
+		NodeCount      int       `db:"node_count"`
 		CreatedAt      time.Time `db:"created_at"`
 		UpdatedAt      time.Time `db:"updated_at"`
 	}
 	if err := s.db.SelectContext(ctx, &rows,
-		`SELECT id, name, COALESCE(description,'') AS description, trigger_kind,
-		        timeout_seconds, created_at, updated_at
-		 FROM workflows ORDER BY updated_at DESC`); err != nil {
+		`SELECT w.id, w.name, COALESCE(w.description,'') AS description, w.trigger_kind,
+		        w.timeout_seconds, w.created_at, w.updated_at,
+		        COUNT(n.id) AS node_count
+		 FROM workflows w
+		 LEFT JOIN workflow_nodes n ON n.workflow_id = w.id
+		 GROUP BY w.id
+		 ORDER BY w.updated_at DESC`); err != nil {
 		return nil, fmt.Errorf("workflow store: list workflows: %w", err)
 	}
 
@@ -154,6 +159,7 @@ func (s *WorkflowStore) ListWorkflows(ctx context.Context) ([]store.WorkflowSumm
 			Description:    r.Description,
 			TriggerKind:    r.TriggerKind,
 			TimeoutSeconds: r.TimeoutSeconds,
+			NodeCount:      r.NodeCount,
 			CreatedAt:      r.CreatedAt,
 			UpdatedAt:      r.UpdatedAt,
 		})

@@ -83,6 +83,7 @@ type WorkflowSummary struct {
 	Description    string    `json:"description,omitempty"`
 	TriggerKind    string    `json:"trigger_kind"`
 	TimeoutSeconds int       `json:"timeout_seconds"`
+	NodeCount      int       `json:"node_count"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

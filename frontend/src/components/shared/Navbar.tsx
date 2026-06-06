@@ -5,8 +5,9 @@ import { TriggerPanel } from './TriggerPanel'
 
 interface Props {
   onSave: () => void
+  onRun: () => void
   saving: boolean
-  saveError: string | null
+  running: boolean
 }
 
 const triggerIcons: Record<string, string> = {
@@ -15,7 +16,7 @@ const triggerIcons: Record<string, string> = {
   cron: '⏰',
 }
 
-export function Navbar({ onSave, saving, saveError }: Props) {
+export function Navbar({ onSave, onRun, saving, running }: Props) {
   const name = useWorkflowStore(s => s.name)
   const setName = useWorkflowStore(s => s.setName)
   const isDirty = useWorkflowStore(s => s.isDirty)
@@ -56,13 +57,6 @@ export function Navbar({ onSave, saving, saveError }: Props) {
           <span className="text-xs text-amber-400 flex-shrink-0">unsaved</span>
         )}
 
-        {/* Save error */}
-        {saveError && (
-          <span className="text-xs text-red-400 flex-shrink-0 max-w-32 truncate" title={saveError}>
-            {saveError}
-          </span>
-        )}
-
         {/* Trigger button */}
         <button
           onClick={() => setShowTrigger(true)}
@@ -75,6 +69,20 @@ export function Navbar({ onSave, saving, saveError }: Props) {
         >
           <span>{triggerIcons[trigger.kind] ?? '▶'}</span>
           <span className="capitalize">{trigger.kind}</span>
+        </button>
+
+        {/* Run button — enabled only when workflow is saved */}
+        <button
+          onClick={onRun}
+          disabled={running || !workflowId}
+          title={!workflowId ? 'Save the workflow first' : 'Trigger a manual run'}
+          className="
+            rounded-md bg-green-700 hover:bg-green-600 disabled:opacity-40
+            text-white text-xs font-semibold px-3 py-1.5 transition-colors flex-shrink-0
+            flex items-center gap-1.5
+          "
+        >
+          {running ? '…' : '▶'} {running ? 'Running' : 'Run'}
         </button>
 
         {/* Save button */}

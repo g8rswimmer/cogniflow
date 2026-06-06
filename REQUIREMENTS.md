@@ -200,6 +200,7 @@ All nodes (built-in and extended) must conform to the following interface:
 | UI-02 | A node palette listing all available node types (built-in + extensions), searchable |
 | UI-03 | Clicking a node opens a configuration sidebar with a generated form for that node's config schema |
 | UI-11 | For config fields marked `"x-template": true`, the sidebar displays a variable picker listing the outputs of all upstream nodes (derived from their `output_schema`); clicking a variable inserts the `{{.nodeID.field}}` snippet into the field |
+| UI-12 | Save validation errors are surfaced at three levels: (a) **canvas node highlight** — nodes with errors show a red ring and a `!` badge; hovering the badge reveals the error messages as a tooltip; (b) **config sidebar field-level errors** — when a node with errors is selected, each invalid field shows an inline error message below the input (driven by RJSF `extraErrors`); (c) **toast notification** — a dismissible toast appears in the top-right corner with the full error summary and auto-dismisses after 6 s. All error indicators clear automatically on the next successful save. |
 | UI-04 | Users can name/rename a workflow |
 | UI-05 | A "Save" button persists the current workflow definition |
 | UI-06 | A "Run" button manually triggers a workflow (with optional initial data input) |

@@ -270,14 +270,14 @@ cogniflow/                              # Repository root
 |--------|---------------|
 | `src/components/canvas` | React Flow canvas, custom node/edge renderers, toolbar |
 | `src/components/palette` | Draggable node type list, search, category grouping |
-| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form |
+| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form; field-level validation error display via RJSF `extraErrors` |
 | `src/components/run` | Live run status panel and per-node detail display |
-| `src/components/shared` | App shell, navigation |
+| `src/components/shared` | App shell, navigation, dismissible toast notifications (`ToastContainer` / `Toast`) |
 | `src/pages` | Top-level route components |
 | `src/hooks` | WebSocket subscription, typed REST fetch wrappers |
-| `src/stores` | Zustand stores for workflow state, node type cache, run state |
+| `src/stores` | Zustand stores for workflow state (incl. `nodeErrors`/`fieldErrors` for save validation), node type cache, run state, toast queue |
 | `src/types` | Shared TypeScript type definitions mirroring backend JSON shapes |
-| `src/api` | Base HTTP client with content-type and base URL configuration |
+| `src/api` | Base HTTP client; `ApiError` class carries `validationErrors: FieldValidationError[]` parsed from `details.validation_errors` |
 
 ---
 
@@ -1009,11 +1009,12 @@ Template fields still accept plain text — the picker is optional and can be ig
 
 ### State Management — Zustand
 
-Three stores:
+Four stores:
 
-1. **`useWorkflowStore`** — canvas nodes, edges, per-node configs, dirty flag, workflow metadata (id, name, trigger config).
+1. **`useWorkflowStore`** — canvas nodes, edges, per-node configs, dirty flag, workflow metadata (id, name, trigger config). Also holds `nodeErrors: Record<string, string[]>` and `fieldErrors: Record<string, Record<string, string>>` — populated by `setValidationErrors()` when a save returns `VALIDATION_FAILED`, cleared by `clearValidationErrors()` on the next successful save.
 2. **`useNodeTypeStore`** — cached `GET /node-types` response (loaded once at app startup); `NodeMeta[]` for palette rendering and schema lookup.
-3. **`useRunStore`** — active `run_id`, per-node status map, run history list.
+3. **`useRunStore`** — active `run_id`, per-node status map, panel visibility, `connectionLost` flag.
+4. **`useToastStore`** — dismissible notification queue; `addToast(type, title, message?)` appends an entry; `ToastContainer` renders and auto-removes entries after their configured duration.
 
 React Flow's `onNodesChange` / `onEdgesChange` callbacks write directly into `useWorkflowStore`, keeping a single source of truth.
 
@@ -1396,6 +1397,34 @@ Event types: `node.pending`, `node.running`, `node.succeeded`, `node.failed`, `r
   }
 }
 ```
+
+For `VALIDATION_FAILED` responses, `details` is populated with a `validation_errors` array so the frontend can highlight specific nodes and fields without parsing the human-readable message string:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Workflow validation failed: 2 error(s)",
+    "details": {
+      "validation_errors": [
+        { "node_id": "llm.anthropic-1748976543210", "field": "prompt",     "message": "invalid template: unexpected EOF" },
+        { "node_id": "conditional.branch-1748976600000", "field": "expression", "message": "CEL compile error: undeclared reference to 'x'" }
+      ]
+    }
+  }
+}
+```
+
+`FieldValidationError` struct (defined in `backend/internal/api/response.go`):
+```go
+type FieldValidationError struct {
+    NodeID  string `json:"node_id,omitempty"`  // empty for workflow-level errors
+    Field   string `json:"field,omitempty"`    // empty when the error covers the whole node
+    Message string `json:"message"`
+}
+```
+
+`writeValidationErrors(w, summary, []FieldValidationError)` is used instead of `writeError` when validation produces structured node/field context. All four save-time validators (`validateRequiredFields`, `validateTemplates`, `validateCELExpressions`, `validateOutputParsers`) accumulate errors across every node rather than failing on the first one, so the full list is returned in a single response.
 
 Standard error codes: `NOT_FOUND`, `VALIDATION_FAILED`, `CYCLE_DETECTED`, `WORKFLOW_SAVE_FAILED`, `ENGINE_ERROR`, `INTERNAL_ERROR`.
 

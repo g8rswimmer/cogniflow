@@ -4,24 +4,32 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
   useReactFlow,
   BackgroundVariant,
 } from '@xyflow/react'
-import type { NodeTypes } from '@xyflow/react'
+import type { NodeTypes, EdgeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import { useWorkflowStore } from '../stores/useWorkflowStore'
 import { useNodeTypeStore } from '../stores/useNodeTypeStore'
+import { useRunStore } from '../stores/useRunStore'
+import { useToastStore } from '../stores/useToastStore'
+import { useRunEvents } from '../hooks/useRunEvents'
 import { api } from '../hooks/useApi'
+import { ApiError } from '../api/client'
 import { Navbar } from '../components/shared/Navbar'
 import { NodePalette } from '../components/palette/NodePalette'
 import { ConfigSidebar } from '../components/sidebar/ConfigSidebar'
+import { RunStatusPanel } from '../components/run/RunStatusPanel'
+import { InitialDataModal } from '../components/run/InitialDataModal'
 import CustomNode from '../components/canvas/CustomNode'
+import { LabeledEdge } from '../components/canvas/LabeledEdge'
+import { CanvasControls } from '../components/canvas/CanvasControls'
 
 // Defined outside the component to prevent React Flow re-render warnings.
 const nodeTypes: NodeTypes = { workflowNode: CustomNode }
+const edgeTypes: EdgeTypes = { labeled: LabeledEdge }
 
 // Inner canvas component — must live inside ReactFlowProvider to call useReactFlow().
 function EditorCanvas() {
@@ -49,7 +57,9 @@ function EditorCanvas() {
       if (!typeId) return
 
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const id = `${typeId}-${Date.now()}`
+      // Replace dots and hyphens so the ID is a valid Go template identifier.
+      // e.g. "llm.anthropic" → "llm_anthropic_1780706153289"
+      const id = `${typeId.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`
       const meta = byTypeId(typeId)
 
       addNode({
@@ -79,6 +89,7 @@ function EditorCanvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -89,16 +100,18 @@ function EditorCanvas() {
         fitView
         deleteKeyCode="Delete"
         className="bg-gray-950"
-        defaultEdgeOptions={{ animated: false, style: { stroke: '#6366f1', strokeWidth: 2 } }}
+        defaultEdgeOptions={{ animated: false, type: 'labeled' }}
       >
         <Background variant={BackgroundVariant.Dots} color="#374151" gap={20} />
-        <Controls className="!bg-gray-800 !border-gray-700 !text-gray-100" />
+        <CanvasControls />
         <MiniMap
           className="!bg-gray-800 !border-gray-700"
           nodeColor="#6366f1"
           maskColor="rgba(0,0,0,0.5)"
         />
       </ReactFlow>
+
+      <RunStatusPanel />
     </div>
   )
 }
@@ -122,15 +135,31 @@ export function WorkflowEditorPage() {
 
   const loadNodeTypes = useNodeTypeStore(s => s.load)
 
+  const setValidationErrors = useWorkflowStore(s => s.setValidationErrors)
+  const clearValidationErrors = useWorkflowStore(s => s.clearValidationErrors)
+
+  const activeRunId = useRunStore(s => s.activeRunId)
+  const runStatus = useRunStore(s => s.runStatus)
+  const startRun = useRunStore(s => s.startRun)
+  const clearRun = useRunStore(s => s.clearRun)
+
+  const addToast = useToastStore(s => s.addToast)
+
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [showInitialDataModal, setShowInitialDataModal] = useState(false)
+
+  // Subscribe to WebSocket events for the active run.
+  useRunEvents(activeRunId)
 
   // Load node types once on mount.
   useEffect(() => { loadNodeTypes() }, [loadNodeTypes])
 
-  // Load or reset workflow on route change.
+  // Load or reset workflow on route change; clear any stale run state.
+  // Zustand actions (clearRun, reset, loadWorkflow) are stable references —
+  // including them in deps is safe and keeps the lint rule satisfied.
   useEffect(() => {
+    clearRun()
     if (isNew) {
       reset()
     } else if (id) {
@@ -139,7 +168,7 @@ export function WorkflowEditorPage() {
         .then(wf => loadWorkflow(wf))
         .catch(err => setLoadError(err instanceof Error ? err.message : 'Failed to load'))
     }
-  }, [id, isNew, reset, loadWorkflow])
+  }, [id, isNew, clearRun, reset, loadWorkflow])
 
   const buildPayload = () => ({
     name,
@@ -163,7 +192,7 @@ export function WorkflowEditorPage() {
 
   const handleSave = async () => {
     setSaving(true)
-    setSaveError(null)
+    clearValidationErrors()
     try {
       if (isNew || !workflowId) {
         const wf = await api.createWorkflow(buildPayload())
@@ -173,10 +202,47 @@ export function WorkflowEditorPage() {
         await api.updateWorkflow(workflowId, buildPayload())
         markClean(workflowId)
       }
+      addToast('success', 'Workflow saved')
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed')
+      if (err instanceof ApiError) {
+        if (err.validationErrors.length > 0) {
+          setValidationErrors(err.validationErrors)
+          const nodeCount = new Set(
+            err.validationErrors.filter(e => e.node_id).map(e => e.node_id)
+          ).size
+          const hint = nodeCount > 0
+            ? ` — ${nodeCount} node${nodeCount > 1 ? 's' : ''} highlighted on canvas`
+            : ''
+          addToast('error', 'Validation failed', err.message + hint)
+          console.error('[save] validation errors:', err.validationErrors)
+        } else {
+          addToast('error', 'Save failed', err.message)
+          console.error('[save] api error:', { code: err.code, message: err.message })
+        }
+      } else {
+        addToast('error', 'Save failed', 'Unexpected error — check console')
+        console.error('[save] unexpected error:', err)
+      }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleRun = () => {
+    if (!workflowId) return
+    setShowInitialDataModal(true)
+  }
+
+  const handleRunWithData = async (initialData: Record<string, unknown>) => {
+    setShowInitialDataModal(false)
+    if (!workflowId) return
+    try {
+      const result = await api.triggerRun(workflowId, initialData)
+      startRun(result.run_id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Run failed to start'
+      addToast('error', 'Run failed', msg)
+      console.error('[run]', err)
     }
   }
 
@@ -198,7 +264,18 @@ export function WorkflowEditorPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 overflow-hidden">
-      <Navbar onSave={handleSave} saving={saving} saveError={saveError} />
+      {showInitialDataModal && (
+        <InitialDataModal
+          onRun={handleRunWithData}
+          onCancel={() => setShowInitialDataModal(false)}
+        />
+      )}
+      <Navbar
+        onSave={handleSave}
+        onRun={handleRun}
+        saving={saving}
+        running={runStatus === 'running'}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <NodePalette />

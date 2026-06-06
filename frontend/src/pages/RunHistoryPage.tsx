@@ -1,0 +1,74 @@
+import { useEffect, useState } from 'react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { api } from '../hooks/useApi'
+import { StatusBadge } from '../components/shared/StatusBadge'
+import type { Run } from '../api/types'
+
+export function RunHistoryPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const [runs, setRuns] = useState<Run[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!id) return
+    setLoading(true)
+    api.listRuns(id)
+      .then(r => setRuns(r.runs ?? []))
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load runs'))
+      .finally(() => setLoading(false))
+  }, [id])
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-6">
+          <Link
+            to={`/workflows/${id}`}
+            className="text-indigo-400 hover:text-indigo-300 text-sm transition-colors"
+          >
+            ← Back to Editor
+          </Link>
+          <h1 className="text-xl font-bold text-gray-100">Run History</h1>
+        </div>
+
+        {loading && (
+          <p className="text-gray-400 text-sm">Loading runs…</p>
+        )}
+
+        {error && (
+          <p className="text-red-400 text-sm">{error}</p>
+        )}
+
+        {!loading && !error && runs.length === 0 && (
+          <p className="text-gray-500 italic text-sm">No runs yet. Trigger a run from the editor.</p>
+        )}
+
+        <div className="space-y-2">
+          {runs.map(run => (
+            <div
+              key={run.run_id}
+              onClick={() => navigate(`/runs/${run.run_id}`, { state: { workflow_id: id } })}
+              className="flex items-center justify-between rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-700 transition-colors group cursor-pointer"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-mono text-gray-300 truncate group-hover:text-gray-100 transition-colors">
+                  {run.run_id}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {new Date(run.started_at).toLocaleString()} · triggered by {run.triggered_by}
+                  {run.finished_at && (
+                    <> · {Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s</>
+                  )}
+                </div>
+              </div>
+              <StatusBadge status={run.status} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
