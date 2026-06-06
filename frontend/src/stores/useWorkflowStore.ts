@@ -123,7 +123,10 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   onConnect: (connection) =>
     set(s => ({
-      edges: addEdge({ ...connection, type: 'labeled' }, s.edges),
+      // Supply an explicit UUID so the edge ID fits the DB CHAR(36) column.
+      // React Flow's default id is "xy-edge__{source}-{target}" which exceeds
+      // 36 chars when node IDs are long.
+      edges: addEdge({ ...connection, id: crypto.randomUUID(), type: 'labeled' }, s.edges),
       isDirty: true,
     })),
 
