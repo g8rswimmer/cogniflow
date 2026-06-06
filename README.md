@@ -96,6 +96,12 @@ go run ./cmd/server
 
 ---
 
+## Try the demo workflow
+
+[`DEMO.md`](DEMO.md) walks through building a complete **IT Support Ticket Triage** workflow end-to-end: an Anthropic LLM node classifies urgency, a visual conditional node routes tickets to an escalation or standard-reply branch, and a merge node collects the result. It covers every major feature — output parsers, template variables, edge labels, live run events, and run history.
+
+---
+
 ## Architecture
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full system design: package structure, Go interfaces, MySQL schema, REST API contract, WebSocket event protocol, gRPC plugin protocol, and Docker Compose service graph.
