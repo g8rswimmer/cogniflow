@@ -79,78 +79,84 @@ function ConditionRow({ condition, ancestors, onChange, onRemove, removable }: C
     onChange({ ...condition, value, value_type: detectValueType(value) })
   }, [condition, onChange])
 
-  const inputCls = 'bg-gray-700 border border-gray-600 text-gray-100 text-xs rounded px-1.5 py-1 focus:outline-none focus:border-indigo-500 w-full'
-  const selectCls = `${inputCls} cursor-pointer`
+  const inputCls =
+    'w-full bg-gray-700 border border-gray-600 text-gray-100 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500'
+  // appearance-none removes the browser's default chrome so our bg/text colours
+  // apply reliably on macOS Safari; the ▾ glyph replaces the native arrow.
+  const selectCls =
+    'w-full appearance-none bg-gray-700 border border-gray-600 text-gray-100 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer'
+  const labelCls = 'block text-[10px] text-gray-500 mb-0.5'
 
   return (
-    <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr 5rem 5rem auto' }}>
-      {/* Node selector */}
-      <select
-        value={condition.node_id}
-        onChange={e => setNode(e.target.value)}
-        className={selectCls}
-        title="Upstream node"
-      >
-        <option value="">— node —</option>
-        {ancestors.map(a => (
-          <option key={a.id} value={a.id}>{a.label}</option>
-        ))}
-      </select>
-
-      {/* Field selector */}
-      {condition.node_id && fieldsForNode.length > 0 ? (
-        <select
-          value={condition.field}
-          onChange={e => setField(e.target.value)}
-          className={selectCls}
-          title="Output field"
+    <div className="space-y-1.5 rounded bg-gray-800 border border-gray-700 p-2">
+      {/* Node + remove button */}
+      <div className="flex items-end gap-1.5">
+        <div className="flex-1 min-w-0">
+          <label className={labelCls}>Node ▾</label>
+          <select value={condition.node_id} onChange={e => setNode(e.target.value)} className={selectCls}>
+            <option value="">— select node —</option>
+            {ancestors.map(a => (
+              <option key={a.id} value={a.id}>{a.label}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={onRemove}
+          disabled={!removable}
+          className="pb-1.5 text-gray-600 hover:text-red-400 transition-colors disabled:opacity-25 disabled:cursor-not-allowed text-sm leading-none"
+          title="Remove condition"
         >
-          <option value="">— field —</option>
-          {fieldsForNode.map(f => (
-            <option key={f} value={f}>{f}</option>
-          ))}
-        </select>
-      ) : (
-        <input
-          type="text"
-          value={condition.field}
-          onChange={e => setField(e.target.value)}
-          className={inputCls}
-          placeholder="field"
-          title="Output field name"
-        />
-      )}
+          ✕
+        </button>
+      </div>
 
-      {/* Operator */}
-      <select
-        value={condition.operator}
-        onChange={e => setOperator(e.target.value)}
-        className={selectCls}
-      >
-        {OPERATORS.map(op => (
-          <option key={op.value} value={op.value}>{op.label}</option>
-        ))}
-      </select>
+      {/* Field */}
+      <div>
+        <label className={labelCls}>Field ▾</label>
+        {condition.node_id && fieldsForNode.length > 0 ? (
+          <select value={condition.field} onChange={e => setField(e.target.value)} className={selectCls}>
+            <option value="">— select field —</option>
+            {fieldsForNode.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={condition.field}
+            onChange={e => setField(e.target.value)}
+            className={inputCls}
+            placeholder="field name"
+          />
+        )}
+      </div>
 
-      {/* Value */}
-      <input
-        type="text"
-        value={condition.value}
-        onChange={e => setValue(e.target.value)}
-        className={inputCls}
-        placeholder="value"
-        title={`Value (auto-detected type: ${condition.value_type})`}
-      />
-
-      {/* Remove button */}
-      <button
-        onClick={onRemove}
-        disabled={!removable}
-        className="text-gray-600 hover:text-red-400 transition-colors disabled:opacity-25 disabled:cursor-not-allowed text-sm"
-        title="Remove condition"
-      >
-        ✕
-      </button>
+      {/* Operator + Value side by side — both wide enough to read */}
+      <div className="flex gap-1.5">
+        <div className="w-28 flex-shrink-0">
+          <label className={labelCls}>Operator ▾</label>
+          <select value={condition.operator} onChange={e => setOperator(e.target.value)} className={selectCls}>
+            {OPERATORS.map(op => (
+              <option key={op.value} value={op.value}>{op.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-0">
+          <label className={labelCls}>
+            Value
+            {condition.value !== '' && (
+              <span className="ml-1 text-gray-600">({condition.value_type})</span>
+            )}
+          </label>
+          <input
+            type="text"
+            value={condition.value}
+            onChange={e => setValue(e.target.value)}
+            className={inputCls}
+            placeholder="value"
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -250,11 +256,11 @@ function RuleCard({ rule, index, total, labelError, ancestors, onChange, onRemov
       </div>
 
       {/* Conditions */}
-      <div className="space-y-1.5 pl-6">
+      <div className="space-y-1.5">
         {rule.conditions.map((c, i) => (
           <div key={i}>
             {i > 0 && (
-              <div className="text-[10px] text-gray-500 font-semibold my-1">{rule.logic}</div>
+              <div className="text-[10px] text-gray-500 font-semibold px-1">{rule.logic}</div>
             )}
             <ConditionRow
               condition={c}
