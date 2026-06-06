@@ -26,6 +26,7 @@ Each milestone leaves the system in a **runnable, verifiable state**. Later mile
 | M12 | [Frontend — Run & Observe](#m12-frontend--run--observe) | Browser UI: trigger runs, watch live status, browse history |
 | M13 | [Production Build & Hardening](#m13-production-build--hardening) | Single `docker-compose up` from a clean clone; full system E2E |
 | M14 | [Enhanced Conditional Node](#m14-enhanced-conditional-node) | Visual rule builder; N-rule + fallback routing; AND/OR compound conditions |
+| M15 | [Improved LLM Node Inputs](#m15-improved-llm-node-inputs) | Textarea rendering for prompt fields; inline variable picker matching ConditionalRuleBuilder UX |
 
 ---
 
@@ -731,6 +732,51 @@ M8, M11, M12
 
 ---
 
+## M15: Improved LLM Node Inputs
+
+**Goal:** Replace single-line text inputs for `prompt` and `system_msg` on LLM nodes with multi-line textareas and inline variable pickers, giving authors a consistent, friction-free experience when writing prompts that reference upstream node outputs.
+
+### Deliverables
+
+- **Backend schema annotation** — `"x-textarea": true` added to `system_msg` and `prompt` in both `openAIInputSchema` and `anthropicInputSchema` (`backend/internal/node/builtin/llm/handler.go`)
+- **`x-textarea` schema extension** — documented alongside `x-template` and `x-sensitive` in `ARCHITECTURE.md §11`
+- **`TextareaTemplateWidget`** — new RJSF custom widget created inside `SchemaForm` via `makeTextareaTemplateWidget(nodeId, focusRef)` factory:
+  - Renders a 5-row `<textarea>` with monospace font, focus tracking, and scroll
+  - Below the textarea: node selector dropdown → field selector dropdown (or free-text input for `_initial`) → Insert button
+  - Ancestor data derived via `getAncestors` + `useWorkflowStore` + `useNodeTypeStore` (same pattern as `ConditionalRuleBuilder`)
+  - Insert calls `insertSnippet` from `lib/templateFocus.ts` with `{{.nodeId.field}}` or `{{._initial.fieldname}}`
+- **`buildUiSchema` updated** — detects `x-textarea && x-template` → `TextareaTemplateWidget`; `x-template` only → existing `TemplateTextWidget`; `x-textarea` only → RJSF built-in `textarea`
+- **`getTemplateFields` updated** — excludes fields with `x-textarea: true` so `TemplateVariablePicker` chip panel is not shown for fields that already have inline pickers
+- **`SchemaForm` props updated** — new `nodeId: string` prop passed from `ConfigSidebar`
+- **`ConfigSidebar` updated** — passes `nodeId={selectedNodeId}` to `SchemaForm`
+
+### Testable Criteria
+
+```
+1. Place an llm.anthropic node on the canvas; click it
+   → system_msg and prompt fields render as multi-line textareas (not single-line inputs)
+   → Both fields accept newlines and scroll when content exceeds the visible area
+
+2. Add an http.request node upstream; draw an edge to the LLM node
+   → Below the prompt textarea: Node dropdown shows "Initial Data" + "HTTP Request" (or whatever label)
+   → Select the HTTP node → Field dropdown populates with its output fields (status_code, body, headers)
+   → Select status_code → click Insert → {{.httpNodeId.status_code}} inserted at cursor in textarea
+
+3. Select "Initial Data" from Node dropdown
+   → Field dropdown is replaced by a text input
+   → Type "ticket" → click Insert → {{._initial.ticket}} inserted at cursor
+
+4. The "⚡ Template Variables" chip panel does NOT appear for prompt / system_msg
+   → It still appears for any x-template fields without x-textarea (none currently, but the behaviour is correct)
+
+5. Save and run the workflow → template references in the textarea resolve correctly
+```
+
+### Dependencies
+M6, M11, M14
+
+---
+
 ## Milestone Dependency Graph
 
 ```
@@ -746,6 +792,7 @@ M1 (Scaffold)
            └── M10 (Plugin Registry Admin API)
  └── M11 (Frontend Canvas & CRUD)            ──► M12
 All ──────────────────────────────────────────► M13 (Production Build)
+M6 + M11 + M14 ────────────────────────────► M15 (Improved LLM Inputs)
 ```
 
-Milestones M5, M6, M8, and M9 can be developed in parallel once M3 is complete. M10 requires M9. M11 can begin in parallel with M5–M10 as long as M2 is done and a mock API or real backend is available.
+Milestones M5, M6, M8, and M9 can be developed in parallel once M3 is complete. M10 requires M9. M11 can begin in parallel with M5–M10 as long as M2 is done and a mock API or real backend is available. M15 requires M6 (LLM nodes), M11 (frontend), and M14 (pattern consistency with the rule builder).

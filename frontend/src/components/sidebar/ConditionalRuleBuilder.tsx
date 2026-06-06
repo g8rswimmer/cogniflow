@@ -325,7 +325,7 @@ export function ConditionalRuleBuilder({ nodeId, config, onChange, fieldErrors }
     const initial: ConditionalRule[] = [
       { label: 'rule_1', logic: 'AND', conditions: [emptyCondition()] },
     ]
-    const next = { ...config, rules: initial }
+    const next: Record<string, unknown> = { ...config, rules: initial }
     delete next['expression']
     onChange(next)
     // Clear stale "true"/"false" edge labels that are no longer valid rule names.

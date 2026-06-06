@@ -19,8 +19,8 @@ var openAIInputSchema = json.RawMessage(`{
   "properties": {
     "api_key":     { "type": "string",  "title": "API Key",        "x-sensitive": true },
     "model":       { "type": "string",  "title": "Model",          "default": "gpt-4o" },
-    "system_msg":  { "type": "string",  "title": "System Message", "x-template": true },
-    "prompt":      { "type": "string",  "title": "Prompt",         "x-template": true },
+    "system_msg":  { "type": "string",  "title": "System Message", "x-template": true, "x-textarea": true },
+    "prompt":      { "type": "string",  "title": "Prompt",         "x-template": true, "x-textarea": true },
     "max_tokens":  { "type": "integer", "title": "Max Tokens",     "default": 1024 },
     "temperature": { "type": "number",  "title": "Temperature",    "default": 0.7 }
   }
@@ -32,8 +32,8 @@ var anthropicInputSchema = json.RawMessage(`{
   "properties": {
     "api_key":     { "type": "string",  "title": "API Key",        "x-sensitive": true },
     "model":       { "type": "string",  "title": "Model",          "default": "claude-sonnet-4-6" },
-    "system_msg":  { "type": "string",  "title": "System Message", "x-template": true },
-    "prompt":      { "type": "string",  "title": "Prompt",         "x-template": true },
+    "system_msg":  { "type": "string",  "title": "System Message", "x-template": true, "x-textarea": true },
+    "prompt":      { "type": "string",  "title": "Prompt",         "x-template": true, "x-textarea": true },
     "max_tokens":  { "type": "integer", "title": "Max Tokens",     "default": 1024 },
     "temperature": { "type": "number",  "title": "Temperature",    "default": 0.7 }
   }
