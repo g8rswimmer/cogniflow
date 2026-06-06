@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -43,8 +44,11 @@ func (h *webhookHandler) handle(w http.ResponseWriter, r *http.Request) {
 
 	var initialData map[string]any
 	if r.Body != nil {
-		// Ignore decode errors — an empty or non-JSON body results in empty initial data.
-		_ = json.NewDecoder(r.Body).Decode(&initialData)
+		if err := json.NewDecoder(r.Body).Decode(&initialData); err != nil && !errors.Is(err, io.EOF) {
+			writeWebhookError(w, http.StatusBadRequest, "INVALID_BODY",
+				"request body must be a JSON object or empty")
+			return
+		}
 	}
 	if initialData == nil {
 		initialData = map[string]any{}

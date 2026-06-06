@@ -1,5 +1,5 @@
 import { useEffect, useState, memo } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useLocation } from 'react-router-dom'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -58,6 +58,11 @@ const detailNodeTypes: NodeTypes = { detailNode: MemoDetailNode }
 
 export function RunDetailPage() {
   const { run_id } = useParams<{ run_id: string }>()
+  // RunHistoryPage passes workflow_id via location state so both fetches can
+  // fire in parallel. Falls back to serial (getRun first) on direct navigation.
+  const location = useLocation()
+  const stateWorkflowId = (location.state as { workflow_id?: string } | null)?.workflow_id
+
   const [run, setRun] = useState<Run | null>(null)
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
   const [loading, setLoading] = useState(true)
@@ -66,34 +71,30 @@ export function RunDetailPage() {
   useEffect(() => {
     if (!run_id) return
 
-    // Guard against stale setState calls when the component unmounts or
-    // run_id changes mid-fetch (e.g. user navigates between two run detail pages).
     let alive = true
-
     setLoading(true)
     setError(null)
     setRun(null)
     setWorkflow(null)
 
-    api.getRun(run_id)
-      .then(async r => {
-        if (!alive) return
-        setRun(r)
-        const wf = await api.getWorkflow(r.workflow_id)
-        if (!alive) return
-        setWorkflow(wf)
-      })
-      .catch(err => {
-        if (!alive) return
-        setError(err instanceof Error ? err.message : 'Failed to load')
-      })
-      .finally(() => {
-        if (!alive) return
-        setLoading(false)
-      })
+    const load = stateWorkflowId
+      ? Promise.all([api.getRun(run_id), api.getWorkflow(stateWorkflowId)])
+          .then(([r, wf]) => { if (alive) { setRun(r); setWorkflow(wf) } })
+      : api.getRun(run_id)
+          .then(async r => {
+            if (!alive) return
+            setRun(r)
+            const wf = await api.getWorkflow(r.workflow_id)
+            if (!alive) return
+            setWorkflow(wf)
+          })
+
+    load
+      .catch(err => { if (alive) setError(err instanceof Error ? err.message : 'Failed to load') })
+      .finally(() => { if (alive) setLoading(false) })
 
     return () => { alive = false }
-  }, [run_id])
+  }, [run_id, stateWorkflowId])
 
   if (loading) {
     return (

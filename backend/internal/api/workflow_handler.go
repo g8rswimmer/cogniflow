@@ -118,6 +118,7 @@ func (h *workflowHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	maskSensitiveConfig(wf.Nodes)
 	writeJSON(w, http.StatusOK, toWorkflowResponse(wf))
 }
 
@@ -395,7 +396,9 @@ func validateEdgeBranchLabels(edges []store.WorkflowEdge) []FieldValidationError
 		}
 		if *e.BranchLabel != "true" && *e.BranchLabel != "false" {
 			errs = append(errs, FieldValidationError{
-				Message: fmt.Sprintf("edge %q: branch_label must be \"true\" or \"false\", got %q", e.ID, *e.BranchLabel),
+				// NodeID is the source (conditional) node so the frontend can highlight it.
+				NodeID:  e.SourceID,
+				Message: fmt.Sprintf("branch_label must be \"true\" or \"false\", got %q", *e.BranchLabel),
 			})
 		}
 	}

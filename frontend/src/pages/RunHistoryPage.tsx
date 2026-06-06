@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import { StatusBadge } from '../components/shared/StatusBadge'
 import type { Run } from '../api/types'
 
 export function RunHistoryPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -47,10 +48,10 @@ export function RunHistoryPage() {
 
         <div className="space-y-2">
           {runs.map(run => (
-            <Link
+            <div
               key={run.run_id}
-              to={`/runs/${run.run_id}`}
-              className="flex items-center justify-between rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-700 transition-colors group"
+              onClick={() => navigate(`/runs/${run.run_id}`, { state: { workflow_id: id } })}
+              className="flex items-center justify-between rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-700 transition-colors group cursor-pointer"
             >
               <div className="min-w-0">
                 <div className="text-sm font-mono text-gray-300 truncate group-hover:text-gray-100 transition-colors">
@@ -64,7 +65,7 @@ export function RunHistoryPage() {
                 </div>
               </div>
               <StatusBadge status={run.status} />
-            </Link>
+            </div>
           ))}
         </div>
       </div>

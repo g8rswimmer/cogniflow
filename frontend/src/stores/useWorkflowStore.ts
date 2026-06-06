@@ -116,10 +116,13 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     }),
 
   onEdgesChange: (changes) =>
-    set(s => ({
-      edges: applyEdgeChanges(changes, s.edges),
-      isDirty: true,
-    })),
+    set(s => {
+      const userChange = changes.some(c => c.type !== 'select')
+      return {
+        edges: applyEdgeChanges(changes, s.edges),
+        isDirty: userChange ? true : s.isDirty,
+      }
+    }),
 
   onConnect: (connection) =>
     set(s => ({

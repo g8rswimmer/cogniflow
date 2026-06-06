@@ -33,12 +33,16 @@ func (v *ConfigVault) CreateWorkflow(ctx context.Context, w store.Workflow) (sto
 }
 
 // GetWorkflow delegates to the inner store then decrypts sensitive config values.
+// Returns an error if any ciphertext fails to decrypt so callers never receive
+// a silently-corrupted workflow with empty strings in place of secrets.
 func (v *ConfigVault) GetWorkflow(ctx context.Context, id string) (store.Workflow, error) {
 	w, err := v.inner.GetWorkflow(ctx, id)
 	if err != nil {
 		return store.Workflow{}, err
 	}
-	v.decryptNodes(w.Nodes)
+	if err := v.decryptNodes(w.Nodes); err != nil {
+		return store.Workflow{}, fmt.Errorf("config vault: decrypt workflow %s: %w", id, err)
+	}
 	return w, nil
 }
 
@@ -99,7 +103,9 @@ func (v *ConfigVault) encryptNodesPreserving(nodes []store.WorkflowNode, existin
 						}
 					}
 				}
-				// No prior value found — drop the sentinel so we don't store garbage.
+				// No prior value found (new node) — drop the sentinel so we don't store garbage.
+				slog.Warn("config vault: sentinel '***' on node with no prior ciphertext; field dropped",
+					"node", n.ID, "key", key)
 				delete(n.Config, key)
 				continue
 			}
@@ -210,8 +216,9 @@ func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) {
 }
 
 // decryptNodes mutates nodes in place: []byte ciphertext values in SensitiveKeys
-// are replaced with their plaintext strings.
-func (v *ConfigVault) decryptNodes(nodes []store.WorkflowNode) {
+// are replaced with their plaintext strings. Returns the first decryption error
+// so the caller can surface it rather than continuing with a corrupted config.
+func (v *ConfigVault) decryptNodes(nodes []store.WorkflowNode) error {
 	for i := range nodes {
 		n := &nodes[i]
 		for key, isSensitive := range n.SensitiveKeys {
@@ -229,12 +236,12 @@ func (v *ConfigVault) decryptNodes(nodes []store.WorkflowNode) {
 			plaintext, err := v.cipher.Decrypt(ciphertext)
 			if err != nil {
 				slog.Error("config vault: decrypt failed", "node", n.ID, "key", key, "error", err)
-				n.Config[key] = ""
-				continue
+				return fmt.Errorf("node %s field %q: %w", n.ID, key, err)
 			}
 			n.Config[key] = string(plaintext)
 		}
 	}
+	return nil
 }
 
 // sensitiveKeys returns the list of config keys marked x-sensitive:true in the
