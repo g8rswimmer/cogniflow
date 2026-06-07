@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback, useState, useEffect } from 'react'
+import { useMemo, useRef, useCallback, useState } from 'react'
 import Form from '@rjsf/core'
 import validator from '@rjsf/validator-ajv8'
 import type { RJSFSchema, UiSchema, WidgetProps } from '@rjsf/utils'
@@ -156,11 +156,15 @@ function TextareaTemplateWidget(props: WidgetProps) {
   const [pickerNodeId, setPickerNodeId] = useState('')
   const [pickerField, setPickerField]   = useState('')
 
-  // Explicitly reset picker when the selected workflow node changes.
-  useEffect(() => {
+  // Reset picker state during render when the selected node changes (avoids an
+  // effect-triggered re-render; this is the React-recommended pattern for
+  // "adjusting state when a prop changes").
+  const [prevNodeId, setPrevNodeId] = useState(nodeId)
+  if (nodeId !== prevNodeId) {
+    setPrevNodeId(nodeId)
     setPickerNodeId('')
     setPickerField('')
-  }, [nodeId])
+  }
 
   const fieldsForPickerNode = useMemo(() => {
     if (!pickerNodeId || pickerNodeId === '_initial') return []
@@ -309,11 +313,3 @@ export function SchemaForm({ nodeId, schema, formData, onChange, focusRef, field
   )
 }
 
-export function getTemplateFields(schema: Record<string, unknown>): string[] {
-  const properties =
-    (schema.properties as Record<string, Record<string, unknown>> | undefined) ?? {}
-  // Exclude x-textarea fields — they carry their own inline variable picker
-  return Object.entries(properties)
-    .filter(([, p]) => p['x-template'] && !p['x-textarea'])
-    .map(([k]) => k)
-}

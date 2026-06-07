@@ -321,6 +321,12 @@ export function ConditionalRuleBuilder({ nodeId, config, onChange, fieldErrors }
   // ---------------------------------------------------------------------------
   const legacyExpr = config['expression'] as string | undefined
 
+  // Declared before the early return so it is never called conditionally.
+  const setRules = useCallback((next: ConditionalRule[]) => {
+    onChange({ ...config, rules: next })
+    syncConditionalEdgeLabels(nodeId, next)
+  }, [config, onChange, syncConditionalEdgeLabels, nodeId])
+
   const handleMigrateToRules = useCallback(() => {
     const initial: ConditionalRule[] = [
       { label: 'rule_1', logic: 'AND', conditions: [emptyCondition()] },
@@ -367,11 +373,6 @@ export function ConditionalRuleBuilder({ nodeId, config, onChange, fieldErrors }
   // New format: config.rules
   // ---------------------------------------------------------------------------
   const rules = (config['rules'] as ConditionalRule[] | undefined) ?? []
-
-  const setRules = useCallback((next: ConditionalRule[]) => {
-    onChange({ ...config, rules: next })
-    syncConditionalEdgeLabels(nodeId, next)
-  }, [config, onChange, syncConditionalEdgeLabels, nodeId])
 
   // Duplicate label detection
   const labelCounts = rules.reduce<Record<string, number>>((acc, r) => {
