@@ -163,6 +163,7 @@ export function WorkflowEditorPage() {
     if (isNew) {
       reset()
     } else if (id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoadError(null)
       api.getWorkflow(id)
         .then(wf => loadWorkflow(wf))

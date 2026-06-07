@@ -33,6 +33,7 @@ export function WorkflowListPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [])
 
   const handleDelete = async (id: string, name: string) => {

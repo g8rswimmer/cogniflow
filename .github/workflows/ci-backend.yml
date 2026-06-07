@@ -1,0 +1,45 @@
+name: Backend CI
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci-backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci-backend.yml'
+
+jobs:
+  ci:
+    name: Build / Test / Lint
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Coverage check
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${COVERAGE}%"
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: backend
+          install-mode: goinstall

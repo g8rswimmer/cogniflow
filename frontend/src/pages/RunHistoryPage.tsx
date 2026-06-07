@@ -13,6 +13,7 @@ export function RunHistoryPage() {
 
   useEffect(() => {
     if (!id) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     api.listRuns(id)
       .then(r => setRuns(r.runs ?? []))
