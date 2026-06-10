@@ -1,6 +1,6 @@
 # cogniflow — Workflow Evaluation Requirements
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Last Updated:** 2026-06-10
 > **Depends on:** REQUIREMENTS.md v0.4
 
