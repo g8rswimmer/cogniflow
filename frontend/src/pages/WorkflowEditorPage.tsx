@@ -131,6 +131,7 @@ export function WorkflowEditorPage() {
   const edges = useWorkflowStore(s => s.edges)
   const configs = useWorkflowStore(s => s.configs)
   const outputParsers = useWorkflowStore(s => s.outputParsers)
+  const initialDataSchema = useWorkflowStore(s => s.initialDataSchema)
   const markClean = useWorkflowStore(s => s.markClean)
 
   const loadNodeTypes = useNodeTypeStore(s => s.load)
@@ -175,6 +176,7 @@ export function WorkflowEditorPage() {
     name,
     trigger,
     timeout_seconds: timeoutSeconds,
+    initial_data_schema: initialDataSchema,
     nodes: nodes.map(n => ({
       id: n.id,
       type_id: n.data.type_id,
@@ -267,6 +269,7 @@ export function WorkflowEditorPage() {
     <div className="h-screen flex flex-col bg-gray-950 overflow-hidden">
       {showInitialDataModal && (
         <InitialDataModal
+          schema={initialDataSchema}
           onRun={handleRunWithData}
           onCancel={() => setShowInitialDataModal(false)}
         />

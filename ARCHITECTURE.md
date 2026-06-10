@@ -202,9 +202,10 @@ cogniflow/                              # Repository root
 │   │   │   │   ├── NodePalette.tsx     # Left sidebar; grouped + searchable node list
 │   │   │   │   └── PaletteNodeCard.tsx # Draggable node type card
 │   │   │   ├── sidebar/
-│   │   │   │   ├── ConfigSidebar.tsx             # Right sidebar; dispatches to ConditionalRuleBuilder for conditional.branch, SchemaForm for all others
+│   │   │   │   ├── ConfigSidebar.tsx             # Right sidebar; shows InitialDataSchemaEditor when no node selected; dispatches to ConditionalRuleBuilder for conditional.branch, SchemaForm for all others
+│   │   │   │   ├── InitialDataSchemaEditor.tsx  # Workflow Inputs panel — field row editor for initial_data_schema
 │   │   │   │   ├── SchemaForm.tsx                # @rjsf/core form driven by node input_schema
-│   │   │   │   ├── TemplateVariablePicker.tsx    # Variable browser for x-template:true fields
+│   │   │   │   ├── TemplateVariablePicker.tsx    # Variable browser for x-template:true fields; shows _initial fields from schema
 │   │   │   │   └── ConditionalRuleBuilder.tsx    # Visual rule builder for conditional.branch nodes; no raw CEL required
 │   │   │   ├── run/
 │   │   │   │   ├── RunStatusPanel.tsx  # Bottom drawer; live per-node status
@@ -271,7 +272,7 @@ cogniflow/                              # Repository root
 |--------|---------------|
 | `src/components/canvas` | React Flow canvas, custom node/edge renderers, toolbar |
 | `src/components/palette` | Draggable node type list, search, category grouping |
-| `src/components/sidebar` | Selected-node config panel; JSON schema-driven form (`SchemaForm`) for most nodes; `ConditionalRuleBuilder` for `conditional.branch` (visual rule builder with no raw CEL); field-level validation error display via RJSF `extraErrors`. `SchemaForm` detects `"x-textarea": true` schema properties and renders a multi-line textarea with an inline variable picker (node + field dropdowns) instead of a single-line input. |
+| `src/components/sidebar` | Right sidebar with two states: (1) **node selected** — config panel with `SchemaForm` (or `ConditionalRuleBuilder` for `conditional.branch`), `TemplateVariablePicker`, and `OutputParserPanel`; (2) **no node selected** — "Workflow Settings" panel with `InitialDataSchemaEditor` for defining the workflow's initial data schema (WF-09). `TemplateVariablePicker` and the textarea inline picker show declared `_initial` field chips when a schema is present. |
 | `src/components/run` | Live run status panel and per-node detail display |
 | `src/components/shared` | App shell, navigation, dismissible toast notifications (`ToastContainer` / `Toast`) |
 | `src/pages` | Top-level route components |
@@ -1060,6 +1061,8 @@ CREATE TABLE workflows (
     description           TEXT,
     trigger_kind          ENUM('manual','webhook','cron') NOT NULL DEFAULT 'manual',
     trigger_cron_expr     VARCHAR(100),
+    -- Advisory JSON Schema for the run's initial data (migration 0011). NULL = no schema defined.
+    initial_data_schema   JSON         NULL,
     timeout_seconds       INT          NOT NULL DEFAULT 300,
     created_at            DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at            DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
@@ -1694,6 +1697,9 @@ TemplateVariablePicker
   └── for each predecessor node:
         looks up its NodeMeta.output_schema from useNodeTypeStore
         renders a tree of clickable {{.nodeID.field}} snippets
+  └── _initial section:
+        if workflow.initialDataSchema is defined → one chip per declared field ({{._initial.fieldname}})
+        otherwise                                → single {{._initial}} chip (backward compatible)
   └── clicking a snippet: inserts it at the cursor position in the focused input field
 ```
 

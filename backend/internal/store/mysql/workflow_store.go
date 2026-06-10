@@ -59,17 +59,18 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 	defer tx.Rollback() //nolint:errcheck
 
 	_, err = tx.NamedExecContext(ctx,
-		`INSERT INTO workflows (id, name, description, trigger_kind, trigger_config, timeout_seconds, created_at, updated_at)
-		 VALUES (:id, :name, :description, :trigger_kind, :trigger_config, :timeout_seconds, :created_at, :updated_at)`,
+		`INSERT INTO workflows (id, name, description, trigger_kind, trigger_config, initial_data_schema, timeout_seconds, created_at, updated_at)
+		 VALUES (:id, :name, :description, :trigger_kind, :trigger_config, :initial_data_schema, :timeout_seconds, :created_at, :updated_at)`,
 		workflowWriteRow{
-			ID:             w.ID,
-			Name:           w.Name,
-			Description:    w.Description,
-			TriggerKind:    w.Trigger.Kind,
-			TriggerConfig:  string(triggerCfgBytes),
-			TimeoutSeconds: w.TimeoutSeconds,
-			CreatedAt:      w.CreatedAt,
-			UpdatedAt:      w.UpdatedAt,
+			ID:                w.ID,
+			Name:              w.Name,
+			Description:       w.Description,
+			TriggerKind:       w.Trigger.Kind,
+			TriggerConfig:     string(triggerCfgBytes),
+			InitialDataSchema: rawMessageToPtr(w.InitialDataSchema),
+			TimeoutSeconds:    w.TimeoutSeconds,
+			CreatedAt:         w.CreatedAt,
+			UpdatedAt:         w.UpdatedAt,
 		},
 	)
 	if err != nil {
@@ -90,11 +91,26 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 	return w, nil
 }
 
+func (s *WorkflowStore) GetWorkflowSchema(ctx context.Context, id string) (json.RawMessage, error) {
+	var row struct {
+		InitialDataSchema *string `db:"initial_data_schema"`
+	}
+	err := s.db.GetContext(ctx, &row,
+		`SELECT initial_data_schema FROM workflows WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("workflow store: get workflow schema: %w", err)
+	}
+	return ptrToRawMessage(row.InitialDataSchema), nil
+}
+
 func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workflow, error) {
 	var row dbWorkflow
 	err := s.db.GetContext(ctx, &row,
 		`SELECT id, name, COALESCE(description,'') AS description, trigger_kind,
-		        trigger_config, timeout_seconds, created_at, updated_at
+		        trigger_config, initial_data_schema, timeout_seconds, created_at, updated_at
 		 FROM workflows WHERE id = ?`, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Workflow{}, store.ErrNotFound
@@ -105,13 +121,14 @@ func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workf
 
 	tc := unmarshalTriggerConfig(row.TriggerKind, row.TriggerConfig)
 	w := store.Workflow{
-		ID:             row.ID,
-		Name:           row.Name,
-		Description:    row.Description,
-		TimeoutSeconds: row.TimeoutSeconds,
-		Trigger:        store.Trigger(tc),
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
+		ID:                row.ID,
+		Name:              row.Name,
+		Description:       row.Description,
+		TimeoutSeconds:    row.TimeoutSeconds,
+		Trigger:           store.Trigger(tc),
+		InitialDataSchema: ptrToRawMessage(row.InitialDataSchema),
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
 	}
 
 	nodes, err := s.loadNodes(ctx, id)
@@ -186,15 +203,17 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 	res, err := tx.NamedExecContext(ctx,
 		`UPDATE workflows
 		 SET name=:name, description=:description, trigger_kind=:trigger_kind,
-		     trigger_config=:trigger_config, timeout_seconds=:timeout_seconds
+		     trigger_config=:trigger_config, initial_data_schema=:initial_data_schema,
+		     timeout_seconds=:timeout_seconds
 		 WHERE id=:id`,
 		workflowWriteRow{
-			ID:             w.ID,
-			Name:           w.Name,
-			Description:    w.Description,
-			TriggerKind:    w.Trigger.Kind,
-			TriggerConfig:  string(triggerCfgBytes),
-			TimeoutSeconds: w.TimeoutSeconds,
+			ID:                w.ID,
+			Name:              w.Name,
+			Description:       w.Description,
+			TriggerKind:       w.Trigger.Kind,
+			TriggerConfig:     string(triggerCfgBytes),
+			InitialDataSchema: rawMessageToPtr(w.InitialDataSchema),
+			TimeoutSeconds:    w.TimeoutSeconds,
 		},
 	)
 	if err != nil {
@@ -351,6 +370,25 @@ func unmarshalTriggerConfig(kind string, raw *string) store.TriggerConfig {
 	return cfg
 }
 
+// rawMessageToPtr converts a json.RawMessage to a *string for nullable DB columns.
+// Returns nil (SQL NULL) when the message is empty or the JSON null literal,
+// so that "no schema defined" is always stored as SQL NULL rather than the string "null".
+func rawMessageToPtr(msg json.RawMessage) *string {
+	if len(msg) == 0 || string(msg) == "null" {
+		return nil
+	}
+	s := string(msg)
+	return &s
+}
+
+// ptrToRawMessage converts a nullable *string DB column back to json.RawMessage.
+func ptrToRawMessage(s *string) json.RawMessage {
+	if s == nil {
+		return nil
+	}
+	return json.RawMessage(*s)
+}
+
 // ---- internal helpers ----------------------------------------------------
 
 // defaultRetryBackoffMs is the backoff stored when a node has no RetryPolicy.
@@ -360,26 +398,28 @@ const defaultRetryBackoffMs = 1000
 
 // dbWorkflow is the read-side row struct for SELECT queries against the workflows table.
 type dbWorkflow struct {
-	ID             string    `db:"id"`
-	Name           string    `db:"name"`
-	Description    string    `db:"description"`
-	TriggerKind    string    `db:"trigger_kind"`
-	TriggerConfig  *string   `db:"trigger_config"` // nullable on read
-	TimeoutSeconds int       `db:"timeout_seconds"`
-	CreatedAt      time.Time `db:"created_at"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	ID                string    `db:"id"`
+	Name              string    `db:"name"`
+	Description       string    `db:"description"`
+	TriggerKind       string    `db:"trigger_kind"`
+	TriggerConfig     *string   `db:"trigger_config"`      // nullable on read
+	InitialDataSchema *string   `db:"initial_data_schema"` // nullable on read
+	TimeoutSeconds    int       `db:"timeout_seconds"`
+	CreatedAt         time.Time `db:"created_at"`
+	UpdatedAt         time.Time `db:"updated_at"`
 }
 
 // workflowWriteRow is the write-side row struct for INSERT/UPDATE named queries.
 type workflowWriteRow struct {
-	ID             string    `db:"id"`
-	Name           string    `db:"name"`
-	Description    string    `db:"description"`
-	TriggerKind    string    `db:"trigger_kind"`
-	TriggerConfig  string    `db:"trigger_config"`
-	TimeoutSeconds int       `db:"timeout_seconds"`
-	CreatedAt      time.Time `db:"created_at"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	ID                string    `db:"id"`
+	Name              string    `db:"name"`
+	Description       string    `db:"description"`
+	TriggerKind       string    `db:"trigger_kind"`
+	TriggerConfig     string    `db:"trigger_config"`
+	InitialDataSchema *string   `db:"initial_data_schema"` // nil → NULL
+	TimeoutSeconds    int       `db:"timeout_seconds"`
+	CreatedAt         time.Time `db:"created_at"`
+	UpdatedAt         time.Time `db:"updated_at"`
 }
 
 // nodeWriteRow is the write-side row struct for INSERT into workflow_nodes.

@@ -65,15 +65,16 @@ type Trigger struct {
 
 // Workflow is the full definition of a workflow including its graph.
 type Workflow struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Description    string         `json:"description,omitempty"`
-	Trigger        Trigger        `json:"trigger"`
-	TimeoutSeconds int            `json:"timeout_seconds"`
-	Nodes          []WorkflowNode `json:"nodes"`
-	Edges          []WorkflowEdge `json:"edges"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	Description       string          `json:"description,omitempty"`
+	Trigger           Trigger         `json:"trigger"`
+	TimeoutSeconds    int             `json:"timeout_seconds"`
+	Nodes             []WorkflowNode  `json:"nodes"`
+	Edges             []WorkflowEdge  `json:"edges"`
+	InitialDataSchema json.RawMessage `json:"initial_data_schema,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
 }
 
 // WorkflowSummary is a lightweight view of a workflow for list responses.
@@ -166,6 +167,11 @@ type Store interface {
 	// Workflow CRUD
 	CreateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	GetWorkflow(ctx context.Context, id string) (Workflow, error)
+	// GetWorkflowSchema returns only the initial_data_schema for a workflow.
+	// It is cheaper than GetWorkflow (single-column SELECT, no node/edge/config load)
+	// and is used by the run trigger for advisory schema validation.
+	// Returns ErrNotFound if the workflow does not exist.
+	GetWorkflowSchema(ctx context.Context, id string) (json.RawMessage, error)
 	ListWorkflows(ctx context.Context) ([]WorkflowSummary, error)
 	UpdateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error

@@ -66,6 +66,7 @@ export interface Workflow {
   timeout_seconds: number
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  initial_data_schema?: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }

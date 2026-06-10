@@ -125,6 +125,10 @@ func (v *ConfigVault) DeleteWorkflow(ctx context.Context, id string) error {
 	return v.inner.DeleteWorkflow(ctx, id)
 }
 
+func (v *ConfigVault) GetWorkflowSchema(ctx context.Context, id string) (json.RawMessage, error) {
+	return v.inner.GetWorkflowSchema(ctx, id)
+}
+
 // Run methods delegate directly — runs do not store sensitive config.
 
 func (v *ConfigVault) CreateRun(ctx context.Context, r store.Run) (store.Run, error) {

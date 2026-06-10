@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -32,6 +33,13 @@ func (m *mockEngineStore) GetWorkflow(_ context.Context, id string) (store.Workf
 		return store.Workflow{}, store.ErrNotFound
 	}
 	return wf, nil
+}
+func (m *mockEngineStore) GetWorkflowSchema(_ context.Context, id string) (json.RawMessage, error) {
+	wf, ok := m.workflows[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return wf.InitialDataSchema, nil
 }
 func (m *mockEngineStore) CreateRun(_ context.Context, r store.Run) (store.Run, error) {
 	if r.ID == "" {

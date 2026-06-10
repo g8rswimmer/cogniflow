@@ -15,14 +15,15 @@ import (
 // by WorkflowStore so any dialect mismatch surfaces here first.
 const testSchema = `
 CREATE TABLE IF NOT EXISTS workflows (
-    id              TEXT     NOT NULL PRIMARY KEY,
-    name            TEXT     NOT NULL,
-    description     TEXT     NOT NULL DEFAULT '',
-    trigger_kind    TEXT     NOT NULL DEFAULT 'manual',
-    trigger_config  TEXT,
-    timeout_seconds INTEGER  NOT NULL DEFAULT 300,
-    created_at      DATETIME NOT NULL,
-    updated_at      DATETIME NOT NULL
+    id                    TEXT     NOT NULL PRIMARY KEY,
+    name                  TEXT     NOT NULL,
+    description           TEXT     NOT NULL DEFAULT '',
+    trigger_kind          TEXT     NOT NULL DEFAULT 'manual',
+    trigger_config        TEXT,
+    initial_data_schema   TEXT,
+    timeout_seconds       INTEGER  NOT NULL DEFAULT 300,
+    created_at            DATETIME NOT NULL,
+    updated_at            DATETIME NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS workflow_nodes (

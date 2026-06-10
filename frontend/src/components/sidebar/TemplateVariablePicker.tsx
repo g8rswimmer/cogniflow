@@ -33,11 +33,13 @@ export function TemplateVariablePicker({ nodeId, templateFields }: Props) {
     }).filter(Boolean) as { id: string; label: string; fields: string[] }[]
   }, [nodeId, edges, nodes, outputParsers, byTypeId])
 
-  // Also offer ._initial fields (the run's initial_data).
+  // Offer ._initial fields derived from the workflow's declared initial data schema.
+  // Falls back to showing the bare {{._initial}} chip when no schema is defined.
+  const initialDataSchema = useWorkflowStore(s => s.initialDataSchema)
   const initialFields = useMemo(() => {
-    // We don't know the shape of initial_data, so just advertise the key itself.
-    return ['_initial']
-  }, [])
+    const props = (initialDataSchema?.properties as Record<string, unknown> | undefined) ?? {}
+    return Object.keys(props)
+  }, [initialDataSchema])
 
   if (templateFields.length === 0) return null
 
@@ -56,17 +58,33 @@ export function TemplateVariablePicker({ nodeId, templateFields }: Props) {
       <div className="mb-2">
         <div className="text-xs text-gray-500 mb-1">Initial data</div>
         <div className="flex flex-wrap gap-1">
-          <button
-            key="initial"
-            onMouseDown={e => handleClick('{{._initial}}', e)}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-indigo-300 rounded px-1.5 py-0.5 font-mono transition-colors"
-          >
-            {'{{._initial}}'}
-          </button>
+          {initialFields.length === 0 ? (
+            // No schema defined — show the bare ._initial chip (backward compatible)
+            <button
+              onMouseDown={e => handleClick('{{._initial}}', e)}
+              className="text-xs bg-gray-700 hover:bg-gray-600 text-indigo-300 rounded px-1.5 py-0.5 font-mono transition-colors"
+            >
+              {'{{._initial}}'}
+            </button>
+          ) : (
+            // Schema defined — show one chip per declared field
+            initialFields.map(field => {
+              const snippet = `{{._initial.${field}}}`
+              return (
+                <button
+                  key={field}
+                  onMouseDown={e => handleClick(snippet, e)}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-indigo-300 rounded px-1.5 py-0.5 font-mono transition-colors"
+                >
+                  {snippet}
+                </button>
+              )
+            })
+          )}
         </div>
       </div>
 
-      {initialFields.length > 0 && ancestorItems.length === 0 && (
+      {ancestorItems.length === 0 && (
         <p className="text-xs text-gray-500 italic">No upstream nodes connected</p>
       )}
 
