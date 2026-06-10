@@ -203,7 +203,8 @@ export function InitialDataModal({ schema, onRun, onCancel }: Props) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') onCancel()
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      hasSchema ? handleRunGuided() : handleRunRaw()
+      if (hasSchema) handleRunGuided()
+      else handleRunRaw()
     }
   }
 
