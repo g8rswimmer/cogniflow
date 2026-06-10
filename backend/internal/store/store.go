@@ -167,6 +167,11 @@ type Store interface {
 	// Workflow CRUD
 	CreateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	GetWorkflow(ctx context.Context, id string) (Workflow, error)
+	// GetWorkflowSchema returns only the initial_data_schema for a workflow.
+	// It is cheaper than GetWorkflow (single-column SELECT, no node/edge/config load)
+	// and is used by the run trigger for advisory schema validation.
+	// Returns ErrNotFound if the workflow does not exist.
+	GetWorkflowSchema(ctx context.Context, id string) (json.RawMessage, error)
 	ListWorkflows(ctx context.Context) ([]WorkflowSummary, error)
 	UpdateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error

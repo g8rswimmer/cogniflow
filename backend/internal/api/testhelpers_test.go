@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 
@@ -63,6 +64,19 @@ func (m *mockStore) GetWorkflow(_ context.Context, id string) (store.Workflow, e
 		return store.Workflow{}, store.ErrNotFound
 	}
 	return w, nil
+}
+
+func (m *mockStore) GetWorkflowSchema(_ context.Context, id string) (json.RawMessage, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	w, ok := m.workflows[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return w.InitialDataSchema, nil
 }
 
 func (m *mockStore) ListWorkflows(_ context.Context) ([]store.WorkflowSummary, error) {

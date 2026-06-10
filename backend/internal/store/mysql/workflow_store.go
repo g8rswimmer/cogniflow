@@ -91,6 +91,21 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 	return w, nil
 }
 
+func (s *WorkflowStore) GetWorkflowSchema(ctx context.Context, id string) (json.RawMessage, error) {
+	var row struct {
+		InitialDataSchema *string `db:"initial_data_schema"`
+	}
+	err := s.db.GetContext(ctx, &row,
+		`SELECT initial_data_schema FROM workflows WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("workflow store: get workflow schema: %w", err)
+	}
+	return ptrToRawMessage(row.InitialDataSchema), nil
+}
+
 func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workflow, error) {
 	var row dbWorkflow
 	err := s.db.GetContext(ctx, &row,
@@ -356,9 +371,10 @@ func unmarshalTriggerConfig(kind string, raw *string) store.TriggerConfig {
 }
 
 // rawMessageToPtr converts a json.RawMessage to a *string for nullable DB columns.
-// Returns nil when the message is empty, so the column stores NULL.
+// Returns nil (SQL NULL) when the message is empty or the JSON null literal,
+// so that "no schema defined" is always stored as SQL NULL rather than the string "null".
 func rawMessageToPtr(msg json.RawMessage) *string {
-	if len(msg) == 0 {
+	if len(msg) == 0 || string(msg) == "null" {
 		return nil
 	}
 	s := string(msg)

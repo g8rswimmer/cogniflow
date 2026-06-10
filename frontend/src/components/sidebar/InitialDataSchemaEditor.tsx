@@ -79,8 +79,8 @@ export function InitialDataSchemaEditor() {
       setNameError('Name is required')
       return
     }
-    if (/[\s.]/.test(trimmed)) {
-      setNameError('No spaces or dots allowed')
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmed)) {
+      setNameError('Must start with a letter or underscore; only letters, digits, and underscores allowed')
       return
     }
     if (fields.some(f => f.name === trimmed)) {

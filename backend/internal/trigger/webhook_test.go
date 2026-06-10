@@ -47,6 +47,9 @@ func (m *mockTriggerStore) UpdateWorkflow(_ context.Context, w store.Workflow) (
 	return w, nil
 }
 func (m *mockTriggerStore) DeleteWorkflow(_ context.Context, _ string) error { return nil }
+func (m *mockTriggerStore) GetWorkflowSchema(_ context.Context, _ string) (json.RawMessage, error) {
+	return nil, nil
+}
 func (m *mockTriggerStore) CreateRun(_ context.Context, r store.Run) (store.Run, error) {
 	return r, nil
 }

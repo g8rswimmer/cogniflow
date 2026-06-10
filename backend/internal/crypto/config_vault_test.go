@@ -30,6 +30,9 @@ func (s *vaultStubStore) UpdateWorkflow(_ context.Context, w store.Workflow) (st
 	return w, nil
 }
 func (s *vaultStubStore) DeleteWorkflow(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) GetWorkflowSchema(_ context.Context, _ string) (json.RawMessage, error) {
+	return s.workflow.InitialDataSchema, nil
+}
 
 func (s *vaultStubStore) CreateRun(_ context.Context, r store.Run) (store.Run, error) { return r, nil }
 func (s *vaultStubStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {

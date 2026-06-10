@@ -23,8 +23,10 @@ func (h *runHandler) triggerRun(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	workflowID := r.PathValue("id")
 
-	// Verify the workflow exists and capture it for schema validation.
-	wf, err := h.store.GetWorkflow(r.Context(), workflowID)
+	// Use a slim single-column query to verify existence and get the schema.
+	// The engine calls GetWorkflow again internally for execution; this avoids
+	// loading all nodes/edges/configs a second time just for advisory validation.
+	initialDataSchema, err := h.store.GetWorkflowSchema(r.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "workflow not found")
@@ -48,8 +50,8 @@ func (h *runHandler) triggerRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Advisory schema validation: log warnings but never block the run.
-	if len(wf.InitialDataSchema) > 0 {
-		if warnings := validateInitialData(wf.InitialDataSchema, body.InitialData); len(warnings) > 0 {
+	if len(initialDataSchema) > 0 {
+		if warnings := validateInitialData(initialDataSchema, body.InitialData); len(warnings) > 0 {
 			slog.Warn("run trigger: initial_data does not match declared schema",
 				"workflow_id", workflowID,
 				"warnings", warnings,
@@ -141,23 +143,37 @@ func (h *runHandler) listRuns(w http.ResponseWriter, r *http.Request) {
 // validateInitialData performs advisory validation of run initial data against the
 // workflow's declared schema. It returns warning strings for missing or mistyped
 // fields but never returns an error — callers must not block execution on warnings.
+//
+// Only fields listed in the JSON Schema "required" array are checked for presence;
+// fields present in "properties" but absent from "required" are optional per spec.
 func validateInitialData(schema json.RawMessage, data map[string]any) []string {
 	var s struct {
 		Properties map[string]struct {
 			Type string `json:"type"`
 		} `json:"properties"`
+		Required []string `json:"required"`
 	}
 	if err := json.Unmarshal(schema, &s); err != nil {
-		return nil
+		// Return a warning so the caller's slog.Warn fires instead of silently no-oping.
+		return []string{"initial_data_schema in DB could not be parsed; schema validation skipped"}
 	}
+
+	// Build a set of required field names for O(1) lookup.
+	required := make(map[string]bool, len(s.Required))
+	for _, name := range s.Required {
+		required[name] = true
+	}
+
 	var warnings []string
 	for fieldName, fieldSchema := range s.Properties {
 		val, present := data[fieldName]
 		if !present {
-			warnings = append(warnings, fmt.Sprintf("declared field %q is missing from initial_data", fieldName))
+			if required[fieldName] {
+				warnings = append(warnings, fmt.Sprintf("required field %q is missing from initial_data", fieldName))
+			}
 			continue
 		}
-		// Lightweight type check: only flag clear mismatches.
+		// Lightweight type check: flag clear mismatches for typed fields.
 		switch fieldSchema.Type {
 		case "number", "integer":
 			switch val.(type) {
@@ -168,6 +184,10 @@ func validateInitialData(schema json.RawMessage, data map[string]any) []string {
 			}
 		case "boolean":
 			if _, ok := val.(bool); !ok {
+				warnings = append(warnings, fmt.Sprintf("field %q declared as %q but got %T", fieldName, fieldSchema.Type, val))
+			}
+		case "string":
+			if _, ok := val.(string); !ok {
 				warnings = append(warnings, fmt.Sprintf("field %q declared as %q but got %T", fieldName, fieldSchema.Type, val))
 			}
 		}
