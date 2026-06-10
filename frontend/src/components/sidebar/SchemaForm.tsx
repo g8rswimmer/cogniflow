@@ -127,10 +127,16 @@ function TextareaTemplateWidget(props: WidgetProps) {
     props
   const nodeId = (registry.formContext as { nodeId?: string }).nodeId ?? ''
 
-  const edges         = useWorkflowStore(s => s.edges)
-  const nodes         = useWorkflowStore(s => s.nodes)
-  const outputParsers = useWorkflowStore(s => s.outputParsers)
-  const byTypeId      = useNodeTypeStore(s => s.byTypeId)
+  const edges             = useWorkflowStore(s => s.edges)
+  const nodes             = useWorkflowStore(s => s.nodes)
+  const outputParsers     = useWorkflowStore(s => s.outputParsers)
+  const initialDataSchema = useWorkflowStore(s => s.initialDataSchema)
+  const byTypeId          = useNodeTypeStore(s => s.byTypeId)
+
+  const initialSchemaFields = useMemo(() => {
+    const props = (initialDataSchema?.properties as Record<string, unknown> | undefined) ?? {}
+    return Object.keys(props)
+  }, [initialDataSchema])
 
   const ancestors = useMemo(() => {
     return getAncestors(nodeId, edges)
@@ -207,8 +213,20 @@ function TextareaTemplateWidget(props: WidgetProps) {
           ))}
         </select>
 
-        {/* Field selector / free-text for _initial */}
-        {pickerNodeId === '_initial' ? (
+        {/* Field selector: schema select for _initial when schema defined, else free-text; node select otherwise */}
+        {pickerNodeId === '_initial' && initialSchemaFields.length > 0 ? (
+          <select
+            value={pickerField}
+            onChange={e => setPickerField(e.target.value)}
+            className={`${selectCls} flex-1 min-w-0`}
+            aria-label="Initial data field"
+          >
+            <option value="">— field —</option>
+            {initialSchemaFields.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        ) : pickerNodeId === '_initial' ? (
           <input
             type="text"
             value={pickerField}

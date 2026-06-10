@@ -510,15 +510,16 @@ func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.Workflow
 // workflowResponse is the API representation of a workflow. It keeps
 // WebhookURL in the API layer rather than the store domain type.
 type workflowResponse struct {
-	ID             string               `json:"id"`
-	Name           string               `json:"name"`
-	Description    string               `json:"description,omitempty"`
-	Trigger        triggerResponse      `json:"trigger"`
-	TimeoutSeconds int                  `json:"timeout_seconds"`
-	Nodes          []store.WorkflowNode `json:"nodes"`
-	Edges          []store.WorkflowEdge `json:"edges"`
-	CreatedAt      time.Time            `json:"created_at"`
-	UpdatedAt      time.Time            `json:"updated_at"`
+	ID                string               `json:"id"`
+	Name              string               `json:"name"`
+	Description       string               `json:"description,omitempty"`
+	Trigger           triggerResponse      `json:"trigger"`
+	TimeoutSeconds    int                  `json:"timeout_seconds"`
+	Nodes             []store.WorkflowNode `json:"nodes"`
+	Edges             []store.WorkflowEdge `json:"edges"`
+	InitialDataSchema json.RawMessage      `json:"initial_data_schema,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
 }
 
 type triggerResponse struct {
@@ -538,10 +539,11 @@ func toWorkflowResponse(wf store.Workflow) workflowResponse {
 	}
 
 	resp := workflowResponse{
-		ID:             wf.ID,
-		Name:           wf.Name,
-		Description:    wf.Description,
-		TimeoutSeconds: wf.TimeoutSeconds,
+		ID:                wf.ID,
+		Name:              wf.Name,
+		Description:       wf.Description,
+		TimeoutSeconds:    wf.TimeoutSeconds,
+		InitialDataSchema: wf.InitialDataSchema,
 		Trigger: triggerResponse{
 			Kind:     wf.Trigger.Kind,
 			CronExpr: wf.Trigger.CronExpr,

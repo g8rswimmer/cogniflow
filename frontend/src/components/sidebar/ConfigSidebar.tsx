@@ -7,6 +7,7 @@ import { TemplateVariablePicker } from './TemplateVariablePicker'
 import { UpstreamNodeReferences } from './UpstreamNodeReferences'
 import { OutputParserPanel } from './OutputParserPanel'
 import { ConditionalRuleBuilder } from './ConditionalRuleBuilder'
+import { InitialDataSchemaEditor } from './InitialDataSchemaEditor'
 
 export function ConfigSidebar() {
   const selectedNodeId = useWorkflowStore(s => s.selectedNodeId)
@@ -22,7 +23,18 @@ export function ConfigSidebar() {
   // Shared ref for tracking the last-focused template input
   const templateInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
-  if (!selectedNodeId) return null
+  if (!selectedNodeId) {
+    return (
+      <aside className="w-72 flex-shrink-0 border-l border-gray-700 bg-gray-800 flex flex-col overflow-hidden">
+        <div className="px-3 py-2 border-b border-gray-700">
+          <div className="text-sm font-semibold text-gray-100">Workflow Settings</div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3">
+          <InitialDataSchemaEditor />
+        </div>
+      </aside>
+    )
+  }
 
   const rfNode = nodes.find(n => n.id === selectedNodeId)
   if (!rfNode) return null

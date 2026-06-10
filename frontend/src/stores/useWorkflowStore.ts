@@ -40,6 +40,10 @@ interface WorkflowStore {
   configs: Record<string, Record<string, unknown>>
   outputParsers: Record<string, Record<string, OutputParser>>
 
+  // Workflow-level initial data schema (advisory)
+  initialDataSchema: Record<string, unknown> | null
+  setInitialDataSchema: (schema: Record<string, unknown> | null) => void
+
   // React Flow handlers
   onNodesChange: (changes: NodeChange<WorkflowNode>[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
@@ -84,6 +88,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   configs: {},
   outputParsers: {},
+  initialDataSchema: null,
 
   nodeErrors: {},
   fieldErrors: {},
@@ -173,6 +178,8 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       isDirty: true,
     })),
 
+  setInitialDataSchema: (schema) => set({ initialDataSchema: schema, isDirty: true }),
+
   updateEdgeLabel: (edgeId, label) =>
     set(s => ({
       edges: s.edges.map(e =>
@@ -248,6 +255,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       edges,
       configs,
       outputParsers,
+      initialDataSchema: wf.initial_data_schema ?? null,
       selectedNodeId: null,
       isDirty: false,
     })
@@ -263,6 +271,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       edges: [],
       configs: {},
       outputParsers: {},
+      initialDataSchema: null,
       selectedNodeId: null,
       isDirty: false,
       nodeErrors: {},

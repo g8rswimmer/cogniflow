@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -22,8 +23,9 @@ func (h *runHandler) triggerRun(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	workflowID := r.PathValue("id")
 
-	// Verify the workflow exists.
-	if _, err := h.store.GetWorkflow(r.Context(), workflowID); err != nil {
+	// Verify the workflow exists and capture it for schema validation.
+	wf, err := h.store.GetWorkflow(r.Context(), workflowID)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "workflow not found")
 			return
@@ -43,6 +45,16 @@ func (h *runHandler) triggerRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.InitialData == nil {
 		body.InitialData = map[string]any{}
+	}
+
+	// Advisory schema validation: log warnings but never block the run.
+	if len(wf.InitialDataSchema) > 0 {
+		if warnings := validateInitialData(wf.InitialDataSchema, body.InitialData); len(warnings) > 0 {
+			slog.Warn("run trigger: initial_data does not match declared schema",
+				"workflow_id", workflowID,
+				"warnings", warnings,
+			)
+		}
 	}
 
 	runID, err := h.dispatcher.Dispatch(r.Context(), trigger.RunRequest{
@@ -124,4 +136,41 @@ func (h *runHandler) listRuns(w http.ResponseWriter, r *http.Request) {
 		runs = []store.Run{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+// validateInitialData performs advisory validation of run initial data against the
+// workflow's declared schema. It returns warning strings for missing or mistyped
+// fields but never returns an error — callers must not block execution on warnings.
+func validateInitialData(schema json.RawMessage, data map[string]any) []string {
+	var s struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil
+	}
+	var warnings []string
+	for fieldName, fieldSchema := range s.Properties {
+		val, present := data[fieldName]
+		if !present {
+			warnings = append(warnings, fmt.Sprintf("declared field %q is missing from initial_data", fieldName))
+			continue
+		}
+		// Lightweight type check: only flag clear mismatches.
+		switch fieldSchema.Type {
+		case "number", "integer":
+			switch val.(type) {
+			case float64, int, int64:
+				// ok
+			default:
+				warnings = append(warnings, fmt.Sprintf("field %q declared as %q but got %T", fieldName, fieldSchema.Type, val))
+			}
+		case "boolean":
+			if _, ok := val.(bool); !ok {
+				warnings = append(warnings, fmt.Sprintf("field %q declared as %q but got %T", fieldName, fieldSchema.Type, val))
+			}
+		}
+	}
+	return warnings
 }
