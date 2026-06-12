@@ -83,6 +83,57 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
     chunk_text  TEXT    NOT NULL DEFAULT '',
     embedding   BLOB    NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS eval_suites (
+    id               TEXT    NOT NULL PRIMARY KEY,
+    workflow_id      TEXT    NOT NULL,
+    name             TEXT    NOT NULL,
+    description      TEXT    NOT NULL DEFAULT '',
+    pass_threshold   REAL    NOT NULL DEFAULT 1.0,
+    max_concurrency  INTEGER NOT NULL DEFAULT 1,
+    workflow_deleted INTEGER NOT NULL DEFAULT 0,
+    created_at       DATETIME NOT NULL,
+    updated_at       DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eval_test_cases (
+    id           TEXT     NOT NULL PRIMARY KEY,
+    suite_id     TEXT     NOT NULL,
+    name         TEXT     NOT NULL,
+    description  TEXT     NOT NULL DEFAULT '',
+    position     INTEGER  NOT NULL DEFAULT 0,
+    initial_data TEXT     NOT NULL DEFAULT '{}',
+    mocks        TEXT     NOT NULL DEFAULT '[]',
+    graders      TEXT     NOT NULL DEFAULT '[]',
+    created_at   DATETIME NOT NULL,
+    updated_at   DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id           TEXT     NOT NULL PRIMARY KEY,
+    suite_id     TEXT     NOT NULL,
+    status       TEXT     NOT NULL DEFAULT 'pending',
+    total_cases  INTEGER  NOT NULL DEFAULT 0,
+    passed_count INTEGER  NOT NULL DEFAULT 0,
+    failed_count INTEGER  NOT NULL DEFAULT 0,
+    error_count  INTEGER  NOT NULL DEFAULT 0,
+    started_at   DATETIME,
+    finished_at  DATETIME,
+    created_at   DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eval_test_case_results (
+    id                  TEXT     NOT NULL PRIMARY KEY,
+    eval_run_id         TEXT     NOT NULL,
+    test_case_id        TEXT     NOT NULL,
+    test_case_name      TEXT     NOT NULL,
+    workflow_run_id     TEXT     NOT NULL,
+    workflow_run_status TEXT     NOT NULL,
+    node_outputs        TEXT     NOT NULL DEFAULT '{}',
+    grader_results      TEXT     NOT NULL DEFAULT '[]',
+    passed              INTEGER  NOT NULL DEFAULT 0,
+    created_at          DATETIME NOT NULL
+);
 `
 
 // openTestDB opens an in-memory SQLite database, applies the test schema, and

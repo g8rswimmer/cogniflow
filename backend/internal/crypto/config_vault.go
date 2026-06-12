@@ -185,6 +185,69 @@ func (v *ConfigVault) DeletePluginRegistration(ctx context.Context, typeID strin
 	return v.inner.DeletePluginRegistration(ctx, typeID)
 }
 
+// Eval methods — no sensitive fields; delegate directly.
+
+func (v *ConfigVault) CreateEvalSuite(ctx context.Context, s store.EvalSuite) (store.EvalSuite, error) {
+	return v.inner.CreateEvalSuite(ctx, s)
+}
+func (v *ConfigVault) GetEvalSuite(ctx context.Context, id string) (store.EvalSuite, error) {
+	return v.inner.GetEvalSuite(ctx, id)
+}
+func (v *ConfigVault) ListEvalSuites(ctx context.Context, workflowID string) ([]store.EvalSuiteSummary, error) {
+	return v.inner.ListEvalSuites(ctx, workflowID)
+}
+func (v *ConfigVault) UpdateEvalSuite(ctx context.Context, s store.EvalSuite) (store.EvalSuite, error) {
+	return v.inner.UpdateEvalSuite(ctx, s)
+}
+func (v *ConfigVault) DeleteEvalSuite(ctx context.Context, id string) error {
+	return v.inner.DeleteEvalSuite(ctx, id)
+}
+
+func (v *ConfigVault) CreateTestCase(ctx context.Context, tc store.TestCase) (store.TestCase, error) {
+	return v.inner.CreateTestCase(ctx, tc)
+}
+func (v *ConfigVault) GetTestCase(ctx context.Context, id string) (store.TestCase, error) {
+	return v.inner.GetTestCase(ctx, id)
+}
+func (v *ConfigVault) ListTestCases(ctx context.Context, suiteID string) ([]store.TestCase, error) {
+	return v.inner.ListTestCases(ctx, suiteID)
+}
+func (v *ConfigVault) UpdateTestCase(ctx context.Context, tc store.TestCase) (store.TestCase, error) {
+	return v.inner.UpdateTestCase(ctx, tc)
+}
+func (v *ConfigVault) DeleteTestCase(ctx context.Context, id string) error {
+	return v.inner.DeleteTestCase(ctx, id)
+}
+func (v *ConfigVault) ReorderTestCases(ctx context.Context, suiteID string, orderedIDs []string) error {
+	return v.inner.ReorderTestCases(ctx, suiteID, orderedIDs)
+}
+
+func (v *ConfigVault) CreateEvalRun(ctx context.Context, r store.EvalRun) (store.EvalRun, error) {
+	return v.inner.CreateEvalRun(ctx, r)
+}
+func (v *ConfigVault) GetEvalRun(ctx context.Context, id string) (store.EvalRun, error) {
+	return v.inner.GetEvalRun(ctx, id)
+}
+func (v *ConfigVault) ListEvalRuns(ctx context.Context, f store.EvalRunFilter) ([]store.EvalRun, error) {
+	return v.inner.ListEvalRuns(ctx, f)
+}
+func (v *ConfigVault) UpdateEvalRunStatus(ctx context.Context, runID string, status store.EvalRunStatus, counts store.EvalRunCounts) error {
+	return v.inner.UpdateEvalRunStatus(ctx, runID, status, counts)
+}
+func (v *ConfigVault) IncrementEvalRunCounts(ctx context.Context, runID string, delta store.EvalRunCounts) error {
+	return v.inner.IncrementEvalRunCounts(ctx, runID, delta)
+}
+
+func (v *ConfigVault) CreateTestCaseResult(ctx context.Context, r store.TestCaseResult) (store.TestCaseResult, error) {
+	return v.inner.CreateTestCaseResult(ctx, r)
+}
+func (v *ConfigVault) GetTestCaseResult(ctx context.Context, id string) (store.TestCaseResult, error) {
+	return v.inner.GetTestCaseResult(ctx, id)
+}
+func (v *ConfigVault) ListTestCaseResults(ctx context.Context, evalRunID string) ([]store.TestCaseResult, error) {
+	return v.inner.ListTestCaseResults(ctx, evalRunID)
+}
+
 // encryptNodes mutates nodes in place: sensitive values become ciphertext ([]byte)
 // and SensitiveKeys is populated. Unknown node types are stored unencrypted.
 func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) {
