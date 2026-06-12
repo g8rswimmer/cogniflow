@@ -54,7 +54,7 @@ WF=$(curl -s -X POST http://localhost:8080/v1/workflows \
         "config": {
           "model": "claude-haiku-4-5-20251001",
           "system_prompt": "You are a helpful customer support agent. Respond professionally and concisely.",
-          "prompt_template": "Customer issue: {{.initial.ticket}}"
+          "prompt": "Customer issue: {{.initial.ticket}}"
         }
       }
     ],
@@ -97,36 +97,36 @@ The grader is scoped to the `llm-1` node's output and evaluates the `completion`
 ```bash
 TC1=$(curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/test-cases \
   -H 'Content-Type: application/json' \
-  -d "{
-    \"name\": \"Judge — helpful billing response\",
-    \"initial_data\": {\"ticket\": \"My last invoice is wrong.\"},
-    \"mocks\": [
+  -d '{
+    "name": "Judge — helpful billing response",
+    "initial_data": {"ticket": "My last invoice is wrong."},
+    "mocks": [
       {
-        \"node_id\": \"llm-1\",
-        \"output\": {
-          \"completion\": \"I'm sorry to hear about the billing issue. I've reviewed your account and can see the discrepancy. I'll escalate this to our billing team immediately — you should receive a corrected invoice within 24 hours. Is there anything else I can help you with?\",
-          \"prompt_tokens\": 45,
-          \"completion_tokens\": 55
+        "node_id": "llm-1",
+        "output": {
+          "completion": "I am sorry to hear about the billing issue. I have reviewed your account and can see the discrepancy. I will escalate this to our billing team immediately — you should receive a corrected invoice within 24 hours. Is there anything else I can help you with?",
+          "prompt_tokens": 45,
+          "completion_tokens": 55
         }
       }
     ],
-    \"graders\": [
+    "graders": [
       {
-        \"id\": \"g-judge\",
-        \"name\": \"Response is professional and resolves the issue\",
-        \"type\": \"llm_judge\",
-        \"scope\": \"node\",
-        \"node_id\": \"llm-1\",
-        \"config\": {
-          \"provider\": \"anthropic\",
-          \"model\": \"claude-haiku-4-5-20251001\",
-          \"api_key\": \"$ANTHROPIC_KEY\",
-          \"rubric\": \"The response acknowledges the billing issue, states a concrete next step or resolution, and maintains a professional tone. It must not be dismissive or vague.\",
-          \"field_path\": \"completion\"
+        "id": "g-judge",
+        "name": "Response is professional and resolves the issue",
+        "type": "llm_judge",
+        "scope": "node",
+        "node_id": "llm-1",
+        "config": {
+          "provider": "anthropic",
+          "model": "claude-haiku-4-5-20251001",
+          "api_key": "'"$ANTHROPIC_KEY"'",
+          "rubric": "The response acknowledges the billing issue, states a concrete next step or resolution, and maintains a professional tone. It must not be dismissive or vague.",
+          "field_path": "completion"
         }
       }
     ]
-  }")
+  }')
 
 TC1_ID=$(echo $TC1 | jq -r '.id')
 echo "Test case 1: $TC1_ID"
@@ -145,36 +145,36 @@ A deliberately unhelpful response should not pass the rubric.
 ```bash
 TC2=$(curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/test-cases \
   -H 'Content-Type: application/json' \
-  -d "{
-    \"name\": \"Judge — unhelpful response should fail\",
-    \"initial_data\": {\"ticket\": \"My account is locked.\"},
-    \"mocks\": [
+  -d '{
+    "name": "Judge — unhelpful response should fail",
+    "initial_data": {"ticket": "My account is locked."},
+    "mocks": [
       {
-        \"node_id\": \"llm-1\",
-        \"output\": {
-          \"completion\": \"Please contact support.\",
-          \"prompt_tokens\": 20,
-          \"completion_tokens\": 5
+        "node_id": "llm-1",
+        "output": {
+          "completion": "Please contact support.",
+          "prompt_tokens": 20,
+          "completion_tokens": 5
         }
       }
     ],
-    \"graders\": [
+    "graders": [
       {
-        \"id\": \"g-judge-fail\",
-        \"name\": \"Response must provide specific next steps\",
-        \"type\": \"llm_judge\",
-        \"scope\": \"node\",
-        \"node_id\": \"llm-1\",
-        \"config\": {
-          \"provider\": \"anthropic\",
-          \"model\": \"claude-haiku-4-5-20251001\",
-          \"api_key\": \"$ANTHROPIC_KEY\",
-          \"rubric\": \"The response must provide at least one specific next step or action the customer can take. Generic redirects like 'contact support' without additional detail are not acceptable.\",
-          \"field_path\": \"completion\"
+        "id": "g-judge-fail",
+        "name": "Response must provide specific next steps",
+        "type": "llm_judge",
+        "scope": "node",
+        "node_id": "llm-1",
+        "config": {
+          "provider": "anthropic",
+          "model": "claude-haiku-4-5-20251001",
+          "api_key": "'"$ANTHROPIC_KEY"'",
+          "rubric": "The response must provide at least one specific next step or action the customer can take. Generic redirects like contact support without additional detail are not acceptable.",
+          "field_path": "completion"
         }
       }
     ]
-  }")
+  }')
 
 TC2_ID=$(echo $TC2 | jq -r '.id')
 echo "Test case 2: $TC2_ID"
@@ -191,43 +191,43 @@ The grader is scoped to the workflow's final output, evaluating the top-level `l
 ```bash
 TC3=$(curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/test-cases \
   -H 'Content-Type: application/json' \
-  -d "{
-    \"name\": \"Checklist — response quality (3 of 5 required)\",
-    \"initial_data\": {\"ticket\": \"I was double-charged this month.\"},
-    \"mocks\": [
+  -d '{
+    "name": "Checklist — response quality (3 of 5 required)",
+    "initial_data": {"ticket": "I was double-charged this month."},
+    "mocks": [
       {
-        \"node_id\": \"llm-1\",
-        \"output\": {
-          \"completion\": \"Thank you for reaching out about the double charge. I can see this on your account and I sincerely apologise for the inconvenience. Our billing team will process a full refund within 3–5 business days. You'll receive a confirmation email once complete. Please don't hesitate to contact us if you have any further questions.\",
-          \"prompt_tokens\": 50,
-          \"completion_tokens\": 70
+        "node_id": "llm-1",
+        "output": {
+          "completion": "Thank you for reaching out about the double charge. I can see this on your account and I sincerely apologise for the inconvenience. Our billing team will process a full refund within 3-5 business days. You will receive a confirmation email once complete. Please do not hesitate to contact us if you have any further questions.",
+          "prompt_tokens": 50,
+          "completion_tokens": 70
         }
       }
     ],
-    \"graders\": [
+    "graders": [
       {
-        \"id\": \"g-checklist\",
-        \"name\": \"Customer support quality checklist\",
-        \"type\": \"checklist\",
-        \"scope\": \"node\",
-        \"node_id\": \"llm-1\",
-        \"config\": {
-          \"provider\": \"anthropic\",
-          \"model\": \"claude-haiku-4-5-20251001\",
-          \"api_key\": \"$ANTHROPIC_KEY\",
-          \"criteria\": [
-            \"Acknowledges the specific issue (double charge)\",
-            \"Apologises for the inconvenience\",
-            \"States a concrete resolution or next step\",
-            \"Provides a timeline for resolution\",
-            \"Maintains a professional and empathetic tone\"
+        "id": "g-checklist",
+        "name": "Customer support quality checklist",
+        "type": "checklist",
+        "scope": "node",
+        "node_id": "llm-1",
+        "config": {
+          "provider": "anthropic",
+          "model": "claude-haiku-4-5-20251001",
+          "api_key": "'"$ANTHROPIC_KEY"'",
+          "criteria": [
+            "Acknowledges the specific issue (double charge)",
+            "Apologises for the inconvenience",
+            "States a concrete resolution or next step",
+            "Provides a timeline for resolution",
+            "Maintains a professional and empathetic tone"
           ],
-          \"pass_threshold\": 0.6,
-          \"field_path\": \"completion\"
+          "pass_threshold": 0.6,
+          "field_path": "completion"
         }
       }
     ]
-  }")
+  }')
 
 TC3_ID=$(echo $TC3 | jq -r '.id')
 echo "Test case 3: $TC3_ID"
