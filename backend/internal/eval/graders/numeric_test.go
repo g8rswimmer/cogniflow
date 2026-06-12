@@ -1,6 +1,7 @@
 package graders
 
 import (
+	"context"
 	"testing"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -17,7 +18,7 @@ func TestNumeric_Equal_Pass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := g.Grade(map[string]any{"value": float64(200)})
+	r := g.Grade(context.Background(),map[string]any{"value": float64(200)})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s: %s", r.Verdict, r.Explanation)
 	}
@@ -25,7 +26,7 @@ func TestNumeric_Equal_Pass(t *testing.T) {
 
 func TestNumeric_Equal_Fail(t *testing.T) {
 	g, _ := NewNumericThreshold(numericDef("==", 200))
-	r := g.Grade(map[string]any{"value": float64(404)})
+	r := g.Grade(context.Background(),map[string]any{"value": float64(404)})
 	if r.Verdict != store.VerdictFail {
 		t.Errorf("want fail, got %s", r.Verdict)
 	}
@@ -33,7 +34,7 @@ func TestNumeric_Equal_Fail(t *testing.T) {
 
 func TestNumeric_LessThan_Pass(t *testing.T) {
 	g, _ := NewNumericThreshold(numericDef("<", 500))
-	r := g.Grade(map[string]any{"value": float64(42)})
+	r := g.Grade(context.Background(),map[string]any{"value": float64(42)})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s", r.Verdict)
 	}
@@ -41,7 +42,7 @@ func TestNumeric_LessThan_Pass(t *testing.T) {
 
 func TestNumeric_GreaterThanEqual_Pass(t *testing.T) {
 	g, _ := NewNumericThreshold(numericDef(">=", 0.8))
-	r := g.Grade(map[string]any{"value": float64(1.0)})
+	r := g.Grade(context.Background(),map[string]any{"value": float64(1.0)})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s", r.Verdict)
 	}
@@ -49,7 +50,7 @@ func TestNumeric_GreaterThanEqual_Pass(t *testing.T) {
 
 func TestNumeric_FieldNotFound(t *testing.T) {
 	g, _ := NewNumericThreshold(numericDef("==", 1))
-	r := g.Grade(map[string]any{"other": float64(1)})
+	r := g.Grade(context.Background(),map[string]any{"other": float64(1)})
 	if r.Verdict != store.VerdictError {
 		t.Errorf("want error, got %s", r.Verdict)
 	}
@@ -57,7 +58,7 @@ func TestNumeric_FieldNotFound(t *testing.T) {
 
 func TestNumeric_NonNumericField(t *testing.T) {
 	g, _ := NewNumericThreshold(numericDef("==", 1))
-	r := g.Grade(map[string]any{"value": "not a number"})
+	r := g.Grade(context.Background(),map[string]any{"value": "not a number"})
 	if r.Verdict != store.VerdictError {
 		t.Errorf("want error, got %s", r.Verdict)
 	}
@@ -80,7 +81,7 @@ func TestNumeric_IntThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := g.Grade(map[string]any{"count": float64(100)})
+	r := g.Grade(context.Background(),map[string]any{"count": float64(100)})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s", r.Verdict)
 	}

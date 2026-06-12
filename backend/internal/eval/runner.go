@@ -23,16 +23,19 @@ type engineRunner interface {
 // EvalRunner orchestrates async execution of an EvalSuite: one workflow run per
 // test case, mock interception, grader evaluation, and result persistence.
 type EvalRunner struct {
-	store  store.Store
-	engine engineRunner
-	vault  *GraderVault
-	ctx    context.Context // server-lifetime context; cancelled on shutdown
+	store      store.Store
+	engine     engineRunner
+	vault      *GraderVault
+	llmFactory LLMFactory
+	ctx        context.Context // server-lifetime context; cancelled on shutdown
 }
 
 // NewEvalRunner creates an EvalRunner. ctx should be a server-lifetime context
 // so that background eval goroutines are cancelled when the server shuts down.
-func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault) *EvalRunner {
-	return &EvalRunner{store: st, engine: eng, vault: vault, ctx: ctx}
+// factory provides LLMClient instances for llm_judge and checklist graders; pass nil
+// to disable LLM graders (they will return an error verdict at evaluation time).
+func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault, factory LLMFactory) *EvalRunner {
+	return &EvalRunner{store: st, engine: eng, vault: vault, llmFactory: factory, ctx: ctx}
 }
 
 // Execute creates an EvalRun record, starts async execution, and returns the run ID immediately.
@@ -250,7 +253,7 @@ func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc s
 			data = finalOutput
 		}
 
-		grader, err := BuildGrader(g)
+		grader, err := BuildGrader(g, r.llmFactory)
 		if err != nil {
 			graderResults = append(graderResults, store.GraderResult{
 				GraderID:    g.ID,
@@ -262,7 +265,7 @@ func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc s
 			continue
 		}
 
-		gr := grader.Grade(data)
+		gr := grader.Grade(ctx, data)
 		gr.GraderID = g.ID
 		gr.GraderName = g.Name
 		gr.GraderType = g.Type

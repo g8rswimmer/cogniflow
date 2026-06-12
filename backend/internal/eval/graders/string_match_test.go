@@ -1,6 +1,7 @@
 package graders
 
 import (
+	"context"
 	"testing"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -17,7 +18,7 @@ func TestStringMatch_Exact_Pass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := g.Grade(map[string]any{"result": "hello"})
+	r := g.Grade(context.Background(),map[string]any{"result": "hello"})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s: %s", r.Verdict, r.Explanation)
 	}
@@ -27,7 +28,7 @@ func TestStringMatch_Exact_Fail(t *testing.T) {
 	g, _ := NewStringMatch(def("string_match", map[string]any{
 		"field_path": "result", "match_type": "exact", "expected_value": "hello",
 	}))
-	r := g.Grade(map[string]any{"result": "world"})
+	r := g.Grade(context.Background(),map[string]any{"result": "world"})
 	if r.Verdict != store.VerdictFail {
 		t.Errorf("want fail, got %s", r.Verdict)
 	}
@@ -37,7 +38,7 @@ func TestStringMatch_Contains_Pass(t *testing.T) {
 	g, _ := NewStringMatch(def("string_match", map[string]any{
 		"field_path": "text", "match_type": "contains", "expected_value": "world",
 	}))
-	r := g.Grade(map[string]any{"text": "hello world"})
+	r := g.Grade(context.Background(),map[string]any{"text": "hello world"})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s", r.Verdict)
 	}
@@ -50,7 +51,7 @@ func TestStringMatch_Regex_Pass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := g.Grade(map[string]any{"msg": "code 404"})
+	r := g.Grade(context.Background(),map[string]any{"msg": "code 404"})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass, got %s", r.Verdict)
 	}
@@ -60,7 +61,7 @@ func TestStringMatch_Regex_Fail(t *testing.T) {
 	g, _ := NewStringMatch(def("string_match", map[string]any{
 		"field_path": "msg", "match_type": "regex", "expected_value": `^\d+$`,
 	}))
-	r := g.Grade(map[string]any{"msg": "not a number"})
+	r := g.Grade(context.Background(),map[string]any{"msg": "not a number"})
 	if r.Verdict != store.VerdictFail {
 		t.Errorf("want fail, got %s", r.Verdict)
 	}
@@ -79,7 +80,7 @@ func TestStringMatch_FieldNotFound(t *testing.T) {
 	g, _ := NewStringMatch(def("string_match", map[string]any{
 		"field_path": "missing", "match_type": "exact", "expected_value": "x",
 	}))
-	r := g.Grade(map[string]any{"other": "value"})
+	r := g.Grade(context.Background(),map[string]any{"other": "value"})
 	if r.Verdict != store.VerdictError {
 		t.Errorf("want error verdict, got %s", r.Verdict)
 	}
@@ -89,7 +90,7 @@ func TestStringMatch_NestedFieldPath(t *testing.T) {
 	g, _ := NewStringMatch(def("string_match", map[string]any{
 		"field_path": "n1.completion", "match_type": "contains", "expected_value": "Hello",
 	}))
-	r := g.Grade(map[string]any{"n1": map[string]any{"completion": "Hello World"}})
+	r := g.Grade(context.Background(),map[string]any{"n1": map[string]any{"completion": "Hello World"}})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass for nested path, got %s", r.Verdict)
 	}
@@ -99,7 +100,7 @@ func TestStringMatch_NonStringCoercion(t *testing.T) {
 	g, _ := NewStringMatch(def("string_match", map[string]any{
 		"field_path": "count", "match_type": "exact", "expected_value": "42",
 	}))
-	r := g.Grade(map[string]any{"count": float64(42)})
+	r := g.Grade(context.Background(),map[string]any{"count": float64(42)})
 	if r.Verdict != store.VerdictPass {
 		t.Errorf("want pass after coercion, got %s (%s)", r.Verdict, r.Explanation)
 	}

@@ -1,20 +1,26 @@
 package eval
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
 	"github.com/g8rswimmer/cogniflow/internal/eval/graders"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
 // Grader evaluates one grader definition against a resolved data map and returns a result.
+// ctx is threaded through so LLM-backed graders can respect cancellation.
 type Grader interface {
-	Grade(data map[string]any) store.GraderResult
+	Grade(ctx context.Context, data map[string]any) store.GraderResult
 }
 
+// LLMFactory returns an LLMClient for the given provider name (e.g. "anthropic", "openai").
+type LLMFactory func(provider string) (aiprovider.LLMClient, error)
+
 // BuildGrader constructs the appropriate Grader for the given definition.
-// Returns an error for unknown types or types not yet available (llm_judge/checklist require ME3).
-func BuildGrader(def store.GraderDef) (Grader, error) {
+// factory is required for llm_judge and checklist; pass nil for deterministic graders.
+func BuildGrader(def store.GraderDef, factory LLMFactory) (Grader, error) {
 	switch def.Type {
 	case "string_match":
 		return graders.NewStringMatch(def)
@@ -22,8 +28,26 @@ func BuildGrader(def store.GraderDef) (Grader, error) {
 		return graders.NewNumericThreshold(def)
 	case "json_schema":
 		return graders.NewJSONSchema(def)
-	case "llm_judge", "checklist":
-		return nil, fmt.Errorf("grader type %q requires ME3 (LLM graders not yet available)", def.Type)
+	case "llm_judge":
+		if factory == nil {
+			return nil, fmt.Errorf("llm_judge grader requires an LLM factory")
+		}
+		provider, _ := def.Config["provider"].(string)
+		client, err := factory(provider)
+		if err != nil {
+			return nil, fmt.Errorf("llm_judge: %w", err)
+		}
+		return graders.NewLLMJudge(def, client)
+	case "checklist":
+		if factory == nil {
+			return nil, fmt.Errorf("checklist grader requires an LLM factory")
+		}
+		provider, _ := def.Config["provider"].(string)
+		client, err := factory(provider)
+		if err != nil {
+			return nil, fmt.Errorf("checklist: %w", err)
+		}
+		return graders.NewChecklist(def, client)
 	default:
 		return nil, fmt.Errorf("unknown grader type %q", def.Type)
 	}
