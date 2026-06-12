@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/anthropic"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/openai"
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/eval"
@@ -69,7 +73,7 @@ func NewRouter(
 
 	// Eval routes — suite CRUD, test case CRUD, and run execution.
 	vault := eval.NewGraderVault(cipher)
-	runner := eval.NewEvalRunner(srvCtx, st, eng, vault)
+	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory())
 	eh := eval.NewHandler(st, vault, registry, runner)
 
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}/eval-suites", eh.ListByWorkflow)
@@ -90,4 +94,21 @@ func NewRouter(
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/test-case-results/{result_id}", eh.GetTestCaseResult)
 
 	return cors(requestID(logRequests(mux)))
+}
+
+// newLLMFactory constructs an eval.LLMFactory backed by singleton OpenAI and Anthropic clients.
+// Both clients are created once at startup and reused across all eval runs.
+func newLLMFactory() eval.LLMFactory {
+	openaiClient := openai.New()
+	anthropicClient := anthropic.New()
+	return func(provider string) (aiprovider.LLMClient, error) {
+		switch provider {
+		case "openai":
+			return openaiClient, nil
+		case "anthropic":
+			return anthropicClient, nil
+		default:
+			return nil, fmt.Errorf("unknown LLM provider %q; supported: openai, anthropic", provider)
+		}
+	}
 }

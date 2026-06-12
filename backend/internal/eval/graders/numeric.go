@@ -1,6 +1,7 @@
 package graders
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -43,7 +44,7 @@ func NewNumericThreshold(def store.GraderDef) (*NumericThreshold, error) {
 }
 
 // Grade evaluates the grader against data.
-func (g *NumericThreshold) Grade(data map[string]any) store.GraderResult {
+func (g *NumericThreshold) Grade(_ context.Context, data map[string]any) store.GraderResult {
 	base := store.GraderResult{GraderType: "numeric_threshold"}
 
 	actual, ok := resolveField(data, g.fieldPath)

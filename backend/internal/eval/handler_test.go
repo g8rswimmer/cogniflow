@@ -595,6 +595,124 @@ func TestHandler_CreateCase_InvalidRegex(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateCase_LLMJudge_MissingRubric(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "S"})
+
+	body := `{
+		"name": "No rubric",
+		"initial_data": {},
+		"mocks": [],
+		"graders": [{
+			"id":"g1","name":"judge","type":"llm_judge","scope":"workflow",
+			"config":{"provider":"anthropic","model":"claude-haiku-4-5-20251001","api_key":"sk-ant-x"}
+		}]
+	}`
+	rr := callHandler(h.CreateCase, "POST", "/v1/eval-suites/es-1/test-cases", body,
+		map[string]string{"suite_id": "es-1"})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for missing rubric, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	errObj := resp["error"].(map[string]any)
+	if errObj["code"] != "VALIDATION_FAILED" {
+		t.Errorf("code: got %q", errObj["code"])
+	}
+}
+
+func TestHandler_CreateCase_LLMJudge_InvalidProvider(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "S"})
+
+	body := `{
+		"name": "Bad provider",
+		"initial_data": {},
+		"mocks": [],
+		"graders": [{
+			"id":"g1","name":"judge","type":"llm_judge","scope":"workflow",
+			"config":{"provider":"azure","model":"gpt-4o","api_key":"key","rubric":"Is it good?"}
+		}]
+	}`
+	rr := callHandler(h.CreateCase, "POST", "/v1/eval-suites/es-1/test-cases", body,
+		map[string]string{"suite_id": "es-1"})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for unknown provider, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	errObj := resp["error"].(map[string]any)
+	if errObj["code"] != "VALIDATION_FAILED" {
+		t.Errorf("code: got %q", errObj["code"])
+	}
+}
+
+func TestHandler_CreateCase_Checklist_MissingCriteria(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "S"})
+
+	body := `{
+		"name": "No criteria",
+		"initial_data": {},
+		"mocks": [],
+		"graders": [{
+			"id":"g1","name":"cl","type":"checklist","scope":"workflow",
+			"config":{"provider":"anthropic","model":"claude-haiku-4-5-20251001","api_key":"sk-ant-x"}
+		}]
+	}`
+	rr := callHandler(h.CreateCase, "POST", "/v1/eval-suites/es-1/test-cases", body,
+		map[string]string{"suite_id": "es-1"})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for missing criteria, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	errObj := resp["error"].(map[string]any)
+	if errObj["code"] != "VALIDATION_FAILED" {
+		t.Errorf("code: got %q", errObj["code"])
+	}
+}
+
+func TestHandler_CreateCase_Checklist_EmptyCriteria(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "S"})
+
+	body := `{
+		"name": "Empty criteria",
+		"initial_data": {},
+		"mocks": [],
+		"graders": [{
+			"id":"g1","name":"cl","type":"checklist","scope":"workflow",
+			"config":{"provider":"anthropic","model":"claude-haiku-4-5-20251001","api_key":"sk-ant-x","criteria":[]}
+		}]
+	}`
+	rr := callHandler(h.CreateCase, "POST", "/v1/eval-suites/es-1/test-cases", body,
+		map[string]string{"suite_id": "es-1"})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for empty criteria, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandler_CreateCase_LLMJudge_ValidPassesValidation(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "S"})
+
+	body := `{
+		"name": "Valid judge",
+		"initial_data": {},
+		"mocks": [],
+		"graders": [{
+			"id":"g1","name":"judge","type":"llm_judge","scope":"workflow",
+			"config":{"provider":"anthropic","model":"claude-haiku-4-5-20251001","api_key":"sk-ant-x","rubric":"Is it helpful?"}
+		}]
+	}`
+	rr := callHandler(h.CreateCase, "POST", "/v1/eval-suites/es-1/test-cases", body,
+		map[string]string{"suite_id": "es-1"})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("want 201 for valid llm_judge, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandler_GetCase(t *testing.T) {
 	h, st := newTestHandler(t)
 	st.seedCase(store.TestCase{

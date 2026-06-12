@@ -1,6 +1,7 @@
 package graders
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -39,7 +40,7 @@ func NewStringMatch(def store.GraderDef) (*StringMatch, error) {
 }
 
 // Grade evaluates the grader against data.
-func (g *StringMatch) Grade(data map[string]any) store.GraderResult {
+func (g *StringMatch) Grade(_ context.Context, data map[string]any) store.GraderResult {
 	base := store.GraderResult{GraderType: "string_match"}
 
 	actual, ok := resolveField(data, g.fieldPath)

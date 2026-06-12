@@ -2,6 +2,7 @@ package graders
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -46,7 +47,7 @@ func NewJSONSchema(def store.GraderDef) (*JSONSchemaGrader, error) {
 }
 
 // Grade validates either the full data map or a resolved field against the schema.
-func (g *JSONSchemaGrader) Grade(data map[string]any) store.GraderResult {
+func (g *JSONSchemaGrader) Grade(_ context.Context, data map[string]any) store.GraderResult {
 	base := store.GraderResult{GraderType: "json_schema"}
 
 	var target any = data
