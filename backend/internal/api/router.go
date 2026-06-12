@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -17,7 +18,10 @@ import (
 
 // NewRouter wires all HTTP routes and returns the handler wrapped with
 // CORS, request-ID, and access-log middleware.
+// srvCtx is a server-lifetime context cancelled on shutdown; it is passed to
+// the EvalRunner so background goroutines stop when the server goes down.
 func NewRouter(
+	srvCtx context.Context,
 	db *sqlx.DB,
 	st store.Store,
 	registry *node.NodeRegistry,
@@ -65,7 +69,7 @@ func NewRouter(
 
 	// Eval routes — suite CRUD, test case CRUD, and run execution.
 	vault := eval.NewGraderVault(cipher)
-	runner := eval.NewEvalRunner(st, eng, vault)
+	runner := eval.NewEvalRunner(srvCtx, st, eng, vault)
 	eh := eval.NewHandler(st, vault, registry, runner)
 
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}/eval-suites", eh.ListByWorkflow)

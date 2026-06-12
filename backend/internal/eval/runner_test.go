@@ -239,7 +239,7 @@ func newTestRunner(t *testing.T) (*EvalRunner, *runnerStore, *stubEngineRunner) 
 	vault := NewGraderVault(c)
 	st := newRunnerStore()
 	eng := &stubEngineRunner{runs: make(map[string]stubbedRun)}
-	r := &EvalRunner{store: st, engine: eng, vault: vault}
+	r := &EvalRunner{store: st, engine: eng, vault: vault, ctx: context.Background()}
 	return r, st, eng
 }
 

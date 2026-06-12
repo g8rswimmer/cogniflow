@@ -26,11 +26,13 @@ type EvalRunner struct {
 	store  store.Store
 	engine engineRunner
 	vault  *GraderVault
+	ctx    context.Context // server-lifetime context; cancelled on shutdown
 }
 
-// NewEvalRunner creates an EvalRunner.
-func NewEvalRunner(st store.Store, eng *engine.WorkflowEngine, vault *GraderVault) *EvalRunner {
-	return &EvalRunner{store: st, engine: eng, vault: vault}
+// NewEvalRunner creates an EvalRunner. ctx should be a server-lifetime context
+// so that background eval goroutines are cancelled when the server shuts down.
+func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault) *EvalRunner {
+	return &EvalRunner{store: st, engine: eng, vault: vault, ctx: ctx}
 }
 
 // Execute creates an EvalRun record, starts async execution, and returns the run ID immediately.
@@ -67,7 +69,7 @@ func (r *EvalRunner) Execute(ctx context.Context, suiteID string) (string, error
 		return "", fmt.Errorf("eval runner: create eval run: %w", err)
 	}
 
-	go r.runAsync(context.Background(), evalRun.ID, suite, testCases)
+	go r.runAsync(r.ctx, evalRun.ID, suite, testCases)
 
 	return evalRun.ID, nil
 }
@@ -187,13 +189,28 @@ func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc s
 
 	// Fetch the final run record (guaranteed updated before events channel closed).
 	wfRun, err := r.store.GetRun(ctx, handle.RunID)
-	workflowRunStatus := string(store.RunStatusFailed)
-	var finalOutput map[string]any
-	if err == nil {
-		workflowRunStatus = string(wfRun.Status)
-		finalOutput = wfRun.FinalOutput
+	if err != nil {
+		// Return immediately — do not assume the workflow failed; the run may have
+		// succeeded but the store fetch failed transiently. Reporting "workflow run
+		// failed" when the run actually succeeded would produce misleading verdicts.
+		explanation := fmt.Sprintf("could not fetch workflow run status: %v", err)
+		slog.Error("eval runner: get run after drain", "eval_run_id", evalRunID, "run_id", handle.RunID, "error", err)
+		return store.TestCaseResult{
+			ID:                uuid.New().String(),
+			EvalRunID:         evalRunID,
+			TestCaseID:        tc.ID,
+			TestCaseName:      tc.Name,
+			WorkflowRunID:     handle.RunID,
+			WorkflowRunStatus: string(store.RunStatusFailed),
+			NodeOutputs:       nodeOutputs,
+			GraderResults:     errorGraderResults(tc.Graders, explanation),
+			Passed:            false,
+			CreatedAt:         time.Now().UTC(),
+		}, false, true
 	}
 
+	workflowRunStatus := string(wfRun.Status)
+	finalOutput := wfRun.FinalOutput
 	runFailed := workflowRunStatus == string(store.RunStatusFailed)
 
 	// Evaluate graders.

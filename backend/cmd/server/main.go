@@ -144,7 +144,11 @@ func run(logLevel *slog.LevelVar) error {
 		port = "8080"
 	}
 
-	router := api.NewRouter(db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, logLevel)
+	// srvCtx is cancelled when a shutdown signal is received, allowing
+	// background goroutines (e.g. EvalRunner) to stop cleanly.
+	srvCtx, srvCancel := context.WithCancel(context.Background())
+
+	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, logLevel)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)
@@ -161,6 +165,7 @@ func run(logLevel *slog.LevelVar) error {
 	go func() {
 		<-quit
 		slog.Info("shutdown signal received")
+		srvCancel() // stop background goroutines
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)

@@ -709,6 +709,7 @@ func TestHandler_UpdateCase_PreservesEncryptedKey(t *testing.T) {
 
 func TestHandler_TriggerRun_SuiteNotFound(t *testing.T) {
 	h, _ := newTestHandler(t)
+	h.runner = &stubRunner{err: store.ErrNotFound}
 	rr := callHandler(h.TriggerRun, "POST", "/v1/eval-suites/missing/runs", "{}",
 		map[string]string{"suite_id": "missing"})
 	if rr.Code != http.StatusNotFound {

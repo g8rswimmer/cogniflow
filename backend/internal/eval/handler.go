@@ -481,15 +481,6 @@ func (h *Handler) ReorderCases(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	suiteID := r.PathValue("suite_id")
 
-	if _, err := h.store.GetEvalSuite(r.Context(), suiteID); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-		return
-	}
-
 	if h.runner == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval run execution is not yet available")
 		return
@@ -497,6 +488,10 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 
 	evalRunID, err := h.runner.Execute(r.Context(), suiteID)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
