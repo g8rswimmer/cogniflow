@@ -95,7 +95,7 @@ func TestRunDAG_SingleNode(t *testing.T) {
 	dag, _ := Build([]store.WorkflowNode{makeNode("n1", "fixed")}, nil)
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRunDAG_Sequential(t *testing.T) {
 	)
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestRunDAG_Parallel(t *testing.T) {
 	)
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRunDAG_FailurePropagates(t *testing.T) {
 	)
 
 	bus := NewEventBus()
-	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err == nil {
 		t.Fatal("expected error from failed node")
 	}
@@ -183,7 +183,7 @@ func TestRunDAG_EmptyWorkflow(t *testing.T) {
 		Predecessors: map[string][]string{},
 	}
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, node.NewRegistry(), bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, node.NewRegistry(), bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestRunDAG_InitialDataAvailable(t *testing.T) {
 
 	dag, _ := Build([]store.WorkflowNode{makeNode("n1", "capture")}, nil)
 	bus := NewEventBus()
-	_, err := runDAG(context.Background(), "run-1", dag, map[string]any{"msg": "hello"}, registry, bus)
+	_, err := runDAG(context.Background(), "run-1", dag, map[string]any{"msg": "hello"}, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestRunDAG_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	bus := NewEventBus()
-	_, err := runDAG(ctx, "run-1", dag, nil, registry, bus)
+	_, err := runDAG(ctx, "run-1", dag, nil, registry, bus, nil)
 	if err == nil {
 		t.Fatal("expected error from context cancellation")
 	}
@@ -263,7 +263,7 @@ func TestRetryPolicy(t *testing.T) {
 	dag, _ := Build([]store.WorkflowNode{n}, nil)
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestRunDAG_NodePanic_ReturnsError(t *testing.T) {
 	dag, _ := Build([]store.WorkflowNode{makeNode("n1", "panicky")}, nil)
 
 	bus := NewEventBus()
-	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err == nil {
 		t.Fatal("expected error from panicking node")
 	}
@@ -318,7 +318,7 @@ func TestRunDAG_GrandparentOutputVisible(t *testing.T) {
 	)
 
 	bus := NewEventBus()
-	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestRunDAG_ConditionalTrue(t *testing.T) {
 	}
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestRunDAG_ConditionalFalse(t *testing.T) {
 	dag, _ := Build(nodes, edges)
 
 	bus := NewEventBus()
-	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	_, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestRunDAG_ConditionalMerge(t *testing.T) {
 	dag, _ := Build(nodes, edges)
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestRunDAG_ConditionalMerge_MultiSource(t *testing.T) {
 	}
 
 	bus := NewEventBus()
-	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	out, err := runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestRunDAG_AllSinksSkipped(t *testing.T) {
 	}
 
 	bus := NewEventBus()
-	_, err = runDAG(context.Background(), "run-1", dag, nil, registry, bus)
+	_, err = runDAG(context.Background(), "run-1", dag, nil, registry, bus, nil)
 	if err == nil {
 		t.Fatal("expected error when all sink branches are suppressed, got nil")
 	}

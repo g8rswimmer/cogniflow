@@ -30,7 +30,7 @@ func newTestHandler(t *testing.T) (*Handler, *stubStore) {
 	}
 	v := NewGraderVault(c)
 	st := newStubStore()
-	h := NewHandler(st, v, node.NewRegistry())
+	h := NewHandler(st, v, node.NewRegistry(), nil)
 	return h, st
 }
 
@@ -707,11 +707,58 @@ func TestHandler_UpdateCase_PreservesEncryptedKey(t *testing.T) {
 	}
 }
 
-func TestHandler_TriggerRun_NotImplemented(t *testing.T) {
+func TestHandler_TriggerRun_SuiteNotFound(t *testing.T) {
 	h, _ := newTestHandler(t)
+	h.runner = &stubRunner{err: store.ErrNotFound}
+	rr := callHandler(h.TriggerRun, "POST", "/v1/eval-suites/missing/runs", "{}",
+		map[string]string{"suite_id": "missing"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", rr.Code)
+	}
+}
+
+func TestHandler_TriggerRun_Success(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.mu.Lock()
+	st.suites["es-1"] = store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "Suite"}
+	st.mu.Unlock()
+
+	stub := &stubRunner{runID: "er-abc123"}
+	h.runner = stub
+
 	rr := callHandler(h.TriggerRun, "POST", "/v1/eval-suites/es-1/runs", "{}",
 		map[string]string{"suite_id": "es-1"})
-	if rr.Code != http.StatusNotImplemented {
-		t.Fatalf("want 501, got %d", rr.Code)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("want 201, got %d: %s", rr.Code, rr.Body.String())
 	}
+	var resp map[string]string
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if resp["id"] != "er-abc123" {
+		t.Errorf("want id=er-abc123, got %q", resp["id"])
+	}
+}
+
+func TestHandler_TriggerRun_RunnerError(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.mu.Lock()
+	st.suites["es-1"] = store.EvalSuite{ID: "es-1", WorkflowID: "wf-1", Name: "Suite"}
+	st.mu.Unlock()
+
+	h.runner = &stubRunner{err: fmt.Errorf("runner failed")}
+
+	rr := callHandler(h.TriggerRun, "POST", "/v1/eval-suites/es-1/runs", "{}",
+		map[string]string{"suite_id": "es-1"})
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d", rr.Code)
+	}
+}
+
+// stubRunner is a test double for evalRunnerI.
+type stubRunner struct {
+	runID string
+	err   error
+}
+
+func (s *stubRunner) Execute(_ context.Context, _ string) (string, error) {
+	return s.runID, s.err
 }

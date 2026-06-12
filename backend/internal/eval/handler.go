@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,17 +15,24 @@ import (
 
 const maxBodyBytes = 1 << 20 // 1 MB
 
+// evalRunnerI is the minimal interface the handler needs from EvalRunner.
+// *EvalRunner satisfies it; a stub can be injected in tests.
+type evalRunnerI interface {
+	Execute(ctx context.Context, suiteID string) (string, error)
+}
+
 // Handler provides HTTP handlers for all eval endpoints.
 // It follows the same struct+methods pattern as the other handlers in api/.
 type Handler struct {
 	store    store.Store
 	vault    *GraderVault
 	registry *node.NodeRegistry
+	runner   evalRunnerI // nil when eval execution not yet wired (safe: TriggerRun guards nil)
 }
 
 // NewHandler creates a Handler.
-func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry) *Handler {
-	return &Handler{store: st, vault: vault, registry: registry}
+func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI) *Handler {
+	return &Handler{store: st, vault: vault, registry: registry, runner: runner}
 }
 
 // ---- Suite endpoints -------------------------------------------------------
@@ -466,11 +474,29 @@ func (h *Handler) ReorderCases(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---- Run endpoints (stubs — implemented in ME2) ----------------------------
+// ---- Run endpoints ---------------------------------------------------------
 
 // TriggerRun handles POST /v1/eval-suites/{suite_id}/runs.
+// Returns 201 with the new EvalRun ID immediately; execution is async.
 func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval run execution is not yet available")
+	suiteID := r.PathValue("suite_id")
+
+	if h.runner == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval run execution is not yet available")
+		return
+	}
+
+	evalRunID, err := h.runner.Execute(r.Context(), suiteID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"id": evalRunID})
 }
 
 // ListRuns handles GET /v1/eval-suites/{suite_id}/runs.

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -17,7 +18,10 @@ import (
 
 // NewRouter wires all HTTP routes and returns the handler wrapped with
 // CORS, request-ID, and access-log middleware.
+// srvCtx is a server-lifetime context cancelled on shutdown; it is passed to
+// the EvalRunner so background goroutines stop when the server goes down.
 func NewRouter(
+	srvCtx context.Context,
 	db *sqlx.DB,
 	st store.Store,
 	registry *node.NodeRegistry,
@@ -63,9 +67,10 @@ func NewRouter(
 	mux.HandleFunc("PUT /v1/admin/plugins/{type_id}", pah.update)
 	mux.HandleFunc("DELETE /v1/admin/plugins/{type_id}", pah.deregister)
 
-	// Eval routes — suite and test case CRUD (run execution added in ME2).
+	// Eval routes — suite CRUD, test case CRUD, and run execution.
 	vault := eval.NewGraderVault(cipher)
-	eh := eval.NewHandler(st, vault, registry)
+	runner := eval.NewEvalRunner(srvCtx, st, eng, vault)
+	eh := eval.NewHandler(st, vault, registry, runner)
 
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}/eval-suites", eh.ListByWorkflow)
 	mux.HandleFunc("POST /v1/workflows/{workflow_id}/eval-suites", eh.CreateSuite)
@@ -83,8 +88,6 @@ func NewRouter(
 	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/runs", eh.ListRuns)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}", eh.GetRun)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/test-case-results/{result_id}", eh.GetTestCaseResult)
-
-	_ = eng // used in ME2 for EvalRunner
 
 	return cors(requestID(logRequests(mux)))
 }

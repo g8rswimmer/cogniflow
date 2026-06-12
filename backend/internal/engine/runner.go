@@ -32,6 +32,7 @@ func runDAG(
 	initData map[string]any,
 	registry *node.NodeRegistry,
 	bus *EventBus,
+	nodeMocks map[string]map[string]any,
 ) (map[string]map[string]any, error) {
 	if len(dag.Nodes) == 0 {
 		return map[string]map[string]any{}, nil
@@ -73,7 +74,7 @@ func runDAG(
 		dispatched++
 		slog.Debug("node dispatched", "run_id", runID, "node_id", nodeID, "type_id", dag.Nodes[nodeID].TypeID)
 		bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodePending, Timestamp: time.Now().UTC()})
-		go executeNode(innerCtx, nodeID, dag, execCtx, registry, bus, runID, resultCh)
+		go executeNode(innerCtx, nodeID, dag, execCtx, registry, bus, runID, resultCh, nodeMocks)
 	}
 
 	// propagateSkip decrements pending for nodeID without dispatching it.
@@ -185,6 +186,7 @@ func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
 }
 
 // executeNode runs a single node inside a goroutine, respecting retry policy.
+// If nodeMocks[nodeID] exists the real Execute() is bypassed and the mock output is used instead.
 func executeNode(
 	ctx context.Context,
 	nodeID string,
@@ -194,6 +196,7 @@ func executeNode(
 	bus *EventBus,
 	runID string,
 	resultCh chan<- nodeResult,
+	nodeMocks map[string]map[string]any,
 ) {
 	// Recover from panics in NodeHandler.Execute so the supervisor loop is
 	// always unblocked and the run terminates with a failure instead of hanging.
@@ -205,6 +208,22 @@ func executeNode(
 			resultCh <- nodeResult{nodeID: nodeID, err: fmt.Errorf("node %s panicked: %v", nodeID, r)}
 		}
 	}()
+
+	// Mock interception: if a canned output was provided for this node, skip Execute()
+	// and emit the mock output. Output parsers are intentionally NOT applied to mock outputs
+	// (MK-03: mocks are used exactly as supplied for deterministic eval behaviour).
+	if mockOut, ok := nodeMocks[nodeID]; ok {
+		slog.Debug("node mocked", "run_id", runID, "node_id", nodeID)
+		bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeRunning, Timestamp: time.Now().UTC()})
+		out := make(map[string]any, len(mockOut)+1)
+		for k, v := range mockOut {
+			out[k] = v
+		}
+		out["mocked"] = true
+		bus.Publish(NodeEvent{RunID: runID, NodeID: nodeID, Type: EventNodeSucceeded, Output: out, Timestamp: time.Now().UTC()})
+		resultCh <- nodeResult{nodeID: nodeID, output: out, routingOutput: out}
+		return
+	}
 
 	n := dag.Nodes[nodeID]
 
