@@ -118,17 +118,22 @@ func TestGraderVault_MaskGraders(t *testing.T) {
 
 func TestGraderVault_Encrypt_PreservesAlreadyEncrypted(t *testing.T) {
 	v := newTestVault(t)
-	alreadyEnc := encPrefix + "dGVzdA=="
-	graders := []store.GraderDef{
-		{ID: "g1", Type: "llm_judge", Config: map[string]any{"api_key": alreadyEnc}},
-	}
-	enc, err := v.EncryptGraders(graders)
+	// Produce a real ciphertext by encrypting once, then confirm a second
+	// EncryptGraders call does not double-encrypt it.
+	first, err := v.EncryptGraders([]store.GraderDef{
+		{ID: "g1", Type: "llm_judge", Config: map[string]any{"api_key": "sk-original"}},
+	})
 	if err != nil {
-		t.Fatalf("EncryptGraders: %v", err)
+		t.Fatalf("first EncryptGraders: %v", err)
 	}
-	// Should not double-encrypt
-	if enc[0].Config["api_key"] != alreadyEnc {
-		t.Errorf("already-encrypted value should be unchanged, got %q", enc[0].Config["api_key"])
+	alreadyEnc, _ := first[0].Config["api_key"].(string)
+
+	second, err := v.EncryptGraders(first)
+	if err != nil {
+		t.Fatalf("second EncryptGraders: %v", err)
+	}
+	if second[0].Config["api_key"] != alreadyEnc {
+		t.Errorf("already-encrypted value should be unchanged, got %q", second[0].Config["api_key"])
 	}
 }
 

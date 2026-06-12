@@ -126,7 +126,7 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		Name           string  `json:"name"`
-		Description    string  `json:"description"`
+		Description    *string `json:"description"` // pointer so omitted ≠ explicit empty string
 		PassThreshold  float64 `json:"pass_threshold"`
 		MaxConcurrency int     `json:"max_concurrency"`
 	}
@@ -145,7 +145,9 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	existing.Name = body.Name
-	existing.Description = body.Description
+	if body.Description != nil {
+		existing.Description = *body.Description
+	}
 	existing.PassThreshold = body.PassThreshold
 	existing.MaxConcurrency = body.MaxConcurrency
 
@@ -266,6 +268,7 @@ func (h *Handler) CreateCase(w http.ResponseWriter, r *http.Request) {
 
 // GetCase handles GET /v1/eval-suites/{suite_id}/test-cases/{case_id}.
 func (h *Handler) GetCase(w http.ResponseWriter, r *http.Request) {
+	suiteID := r.PathValue("suite_id")
 	caseID := r.PathValue("case_id")
 	tc, err := h.store.GetTestCase(r.Context(), caseID)
 	if err != nil {
@@ -274,6 +277,10 @@ func (h *Handler) GetCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if tc.SuiteID != suiteID {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "test case not found")
 		return
 	}
 	tc.Graders = h.vault.MaskGraders(tc.Graders)
@@ -305,6 +312,11 @@ func (h *Handler) UpdateCase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+	// Ownership check — prevents cross-suite IDOR.
+	if existing.SuiteID != suiteID {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "test case not found")
+		return
+	}
 
 	var incoming store.TestCase
 	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
@@ -317,10 +329,13 @@ func (h *Handler) UpdateCase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Preserve encrypted api_key for graders where the client sent "***".
+	// If "***" is sent for a grader whose ID does not match any stored grader,
+	// the key cannot be recovered — reject rather than silently lose it.
 	existingByID := make(map[string]store.GraderDef, len(existing.Graders))
 	for _, g := range existing.Graders {
 		existingByID[g.ID] = g
 	}
+	var sentinelErrs []fieldValidationError
 	for i, g := range incoming.Graders {
 		if !sensitiveGraderTypes[g.Type] {
 			continue
@@ -336,8 +351,17 @@ func (h *Handler) UpdateCase(w http.ResponseWriter, r *http.Request) {
 					cfg["api_key"] = prevKey
 					incoming.Graders[i].Config = cfg
 				}
+			} else {
+				sentinelErrs = append(sentinelErrs, fieldValidationError{
+					Field:   fmt.Sprintf("graders[%d].config.api_key", i),
+					Message: `api_key must be a real value; "***" can only be used when updating a grader with the same id as a stored grader`,
+				})
 			}
 		}
+	}
+	if len(sentinelErrs) > 0 {
+		writeValidationErrors(w, sentinelErrs)
+		return
 	}
 
 	wfNodes, err := h.workflowNodes(r, suite.WorkflowID)
@@ -385,9 +409,25 @@ func (h *Handler) UpdateCase(w http.ResponseWriter, r *http.Request) {
 
 // DeleteCase handles DELETE /v1/eval-suites/{suite_id}/test-cases/{case_id}.
 func (h *Handler) DeleteCase(w http.ResponseWriter, r *http.Request) {
+	suiteID := r.PathValue("suite_id")
 	caseID := r.PathValue("case_id")
-	err := h.store.DeleteTestCase(r.Context(), caseID)
+
+	// Verify ownership before deleting — prevents cross-suite IDOR.
+	tc, err := h.store.GetTestCase(r.Context(), caseID)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "test case not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if tc.SuiteID != suiteID {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "test case not found")
+		return
+	}
+
+	if err := h.store.DeleteTestCase(r.Context(), caseID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "test case not found")
 			return

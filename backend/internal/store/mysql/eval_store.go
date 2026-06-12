@@ -79,7 +79,7 @@ func (s *WorkflowStore) ListEvalSuites(ctx context.Context, workflowID string) (
 			&row.ID, &row.WorkflowID, &row.Name, &row.Description,
 			&row.PassThreshold, &row.MaxConcurrency, &row.WorkflowDeleted,
 			&row.CreatedAt, &row.UpdatedAt, &row.TestCaseCount,
-			&row.LastRunStatus, &row.LastRunAt,
+			&row.LastRunStatus, &row.LastRunAt, // LastRunAt uses dbNullTime scanner
 		); err != nil {
 			return nil, fmt.Errorf("eval store: scan suite summary: %w", err)
 		}
@@ -164,10 +164,17 @@ func (s *WorkflowStore) CreateTestCase(ctx context.Context, tc store.TestCase) (
 		return store.TestCase{}, fmt.Errorf("eval store: marshal graders: %w", err)
 	}
 
-	// position defaults to end of list
+	// Compute position inside a transaction to prevent a TOCTOU race where two
+	// concurrent inserts both read the same MAX(position) and produce duplicate positions.
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	if tc.Position == 0 {
 		var maxPos sql.NullInt64
-		_ = s.db.QueryRowContext(ctx,
+		_ = tx.QueryRowContext(ctx,
 			`SELECT MAX(position) FROM eval_test_cases WHERE suite_id=?`, tc.SuiteID,
 		).Scan(&maxPos)
 		if maxPos.Valid {
@@ -175,7 +182,7 @@ func (s *WorkflowStore) CreateTestCase(ctx context.Context, tc store.TestCase) (
 		}
 	}
 
-	_, err = s.db.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO eval_test_cases (id, suite_id, name, description, position, initial_data, mocks, graders, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tc.ID, tc.SuiteID, tc.Name, tc.Description, tc.Position,
@@ -183,6 +190,9 @@ func (s *WorkflowStore) CreateTestCase(ctx context.Context, tc store.TestCase) (
 	)
 	if err != nil {
 		return store.TestCase{}, fmt.Errorf("eval store: create test case: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: commit create test case: %w", err)
 	}
 	return tc, nil
 }
@@ -260,7 +270,20 @@ func (s *WorkflowStore) UpdateTestCase(ctx context.Context, tc store.TestCase) (
 }
 
 func (s *WorkflowStore) DeleteTestCase(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM eval_test_cases WHERE id=?`, id)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("eval store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Cascade: delete results that reference this test case before deleting the case.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM eval_test_case_results WHERE test_case_id=?`, id,
+	); err != nil {
+		return fmt.Errorf("eval store: delete test case results: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM eval_test_cases WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("eval store: delete test case: %w", err)
 	}
@@ -268,7 +291,7 @@ func (s *WorkflowStore) DeleteTestCase(ctx context.Context, id string) error {
 	if n == 0 {
 		return store.ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *WorkflowStore) ReorderTestCases(ctx context.Context, suiteID string, orderedIDs []string) error {
@@ -369,36 +392,44 @@ func (s *WorkflowStore) ListEvalRuns(ctx context.Context, f store.EvalRunFilter)
 
 func (s *WorkflowStore) UpdateEvalRunStatus(ctx context.Context, runID string, status store.EvalRunStatus, counts store.EvalRunCounts) error {
 	now := time.Now().UTC()
-	var startedAt, finishedAt *time.Time
+	var result sql.Result
+	var err error
 
 	switch status {
 	case store.EvalRunRunning:
-		startedAt = &now
-	case store.EvalRunCompleted, store.EvalRunFailed:
-		finishedAt = &now
+		// Only set status + started_at; never touch counts on the running transition
+		// to avoid zeroing increments already committed by IncrementEvalRunCounts.
+		result, err = s.db.ExecContext(ctx,
+			`UPDATE eval_runs SET status=?, started_at=COALESCE(started_at, ?) WHERE id=?`,
+			string(status), &now, runID,
+		)
+	default:
+		// completed / failed: set final counts + finished_at together.
+		result, err = s.db.ExecContext(ctx,
+			`UPDATE eval_runs
+			 SET status=?,
+			     passed_count=?,
+			     failed_count=?,
+			     error_count=?,
+			     finished_at=COALESCE(?, finished_at)
+			 WHERE id=?`,
+			string(status),
+			counts.PassedCount, counts.FailedCount, counts.ErrorCount,
+			&now, runID,
+		)
 	}
-
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE eval_runs
-		 SET status=?,
-		     passed_count=?,
-		     failed_count=?,
-		     error_count=?,
-		     started_at=COALESCE(started_at, ?),
-		     finished_at=COALESCE(?, finished_at)
-		 WHERE id=?`,
-		string(status),
-		counts.PassedCount, counts.FailedCount, counts.ErrorCount,
-		startedAt, finishedAt, runID,
-	)
 	if err != nil {
 		return fmt.Errorf("eval store: update eval run status: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("eval store: eval run %q: %w", runID, store.ErrNotFound)
 	}
 	return nil
 }
 
 func (s *WorkflowStore) IncrementEvalRunCounts(ctx context.Context, runID string, delta store.EvalRunCounts) error {
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE eval_runs
 		 SET passed_count = passed_count + ?,
 		     failed_count = failed_count + ?,
@@ -408,6 +439,10 @@ func (s *WorkflowStore) IncrementEvalRunCounts(ctx context.Context, runID string
 	)
 	if err != nil {
 		return fmt.Errorf("eval store: increment eval run counts: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("eval store: eval run %q: %w", runID, store.ErrNotFound)
 	}
 	return nil
 }
@@ -504,9 +539,38 @@ type dbEvalSuite struct {
 
 type dbEvalSuiteSummary struct {
 	dbEvalSuite
-	TestCaseCount int     `db:"test_case_count"`
-	LastRunStatus *string `db:"last_run_status"`
-	LastRunAt     *string `db:"last_run_at"` // scanned as string, parsed to *time.Time
+	TestCaseCount int        `db:"test_case_count"`
+	LastRunStatus *string    `db:"last_run_status"`
+	LastRunAt     dbNullTime `db:"last_run_at"`
+}
+
+// dbNullTime is a nullable time scanner compatible with both MySQL (which returns
+// time.Time when parseTime=true) and SQLite (which returns datetime strings).
+type dbNullTime struct {
+	Time  time.Time
+	Valid bool
+}
+
+func (t *dbNullTime) Scan(value any) error {
+	if value == nil {
+		t.Valid = false
+		return nil
+	}
+	switch v := value.(type) {
+	case time.Time:
+		t.Time, t.Valid = v, true
+	case string:
+		parsed := parseDateTime(v)
+		if parsed.IsZero() {
+			return fmt.Errorf("eval store: cannot parse time %q", v)
+		}
+		t.Time, t.Valid = parsed, true
+	case []byte:
+		return t.Scan(string(v))
+	default:
+		return fmt.Errorf("eval store: unsupported type %T for time scan", value)
+	}
+	return nil
 }
 
 type dbTestCase struct {
@@ -570,11 +634,9 @@ func rowToEvalSuiteSummary(row dbEvalSuiteSummary) store.EvalSuiteSummary {
 		TestCaseCount: row.TestCaseCount,
 		LastRunStatus: row.LastRunStatus,
 	}
-	if row.LastRunAt != nil {
-		t := parseDateTime(*row.LastRunAt)
-		if !t.IsZero() {
-			s.LastRunAt = &t
-		}
+	if row.LastRunAt.Valid {
+		t := row.LastRunAt.Time
+		s.LastRunAt = &t
 	}
 	return s
 }

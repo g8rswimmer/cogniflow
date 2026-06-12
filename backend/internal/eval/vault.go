@@ -13,6 +13,10 @@ import (
 // Encrypted values are stored as "enc:<base64(ciphertext)>" in the DB.
 const encPrefix = "enc:"
 
+// minCiphertextLen is the minimum valid AES-256-GCM ciphertext length:
+// 12-byte nonce + 1-byte plaintext minimum + 16-byte GCM tag.
+const minCiphertextLen = 29
+
 // sensitiveGraderTypes is the set of grader types that carry an api_key.
 var sensitiveGraderTypes = map[string]bool{
 	"llm_judge": true,
@@ -45,8 +49,19 @@ func (v *GraderVault) EncryptGraders(graders []store.GraderDef) ([]store.GraderD
 			continue
 		}
 		strKey, ok := raw.(string)
-		if !ok || strKey == "" || strKey == "***" || strings.HasPrefix(strKey, encPrefix) {
+		if !ok || strKey == "" || strKey == "***" {
 			continue
+		}
+		// Treat as already-encrypted only when the prefix is present AND the payload
+		// decodes to a byte slice large enough to be a valid AES-GCM ciphertext.
+		// This prevents a real API key that starts with "enc:" from being skipped
+		// and stored in plaintext.
+		if strings.HasPrefix(strKey, encPrefix) {
+			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(strKey, encPrefix))
+			if err == nil && len(decoded) >= minCiphertextLen {
+				continue // genuinely already encrypted
+			}
+			// Falls through to encrypt: the "enc:" prefix was a coincidence.
 		}
 		ciphertext, err := v.cipher.Encrypt([]byte(strKey))
 		if err != nil {
