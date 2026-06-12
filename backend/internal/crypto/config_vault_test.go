@@ -65,6 +65,59 @@ func (s *vaultStubStore) ListPluginRegistrations(_ context.Context) ([]store.Plu
 	return nil, nil
 }
 func (s *vaultStubStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) CreateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
+	return v, nil
+}
+func (s *vaultStubStore) GetEvalSuite(_ context.Context, _ string) (store.EvalSuite, error) {
+	return store.EvalSuite{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) UpdateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
+	return v, nil
+}
+func (s *vaultStubStore) DeleteEvalSuite(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) CreateTestCase(_ context.Context, v store.TestCase) (store.TestCase, error) {
+	return v, nil
+}
+func (s *vaultStubStore) GetTestCase(_ context.Context, _ string) (store.TestCase, error) {
+	return store.TestCase{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListTestCases(_ context.Context, _ string) ([]store.TestCase, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) UpdateTestCase(_ context.Context, v store.TestCase) (store.TestCase, error) {
+	return v, nil
+}
+func (s *vaultStubStore) DeleteTestCase(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) ReorderTestCases(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (s *vaultStubStore) CreateEvalRun(_ context.Context, v store.EvalRun) (store.EvalRun, error) {
+	return v, nil
+}
+func (s *vaultStubStore) GetEvalRun(_ context.Context, _ string) (store.EvalRun, error) {
+	return store.EvalRun{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListEvalRuns(_ context.Context, _ store.EvalRunFilter) ([]store.EvalRun, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) UpdateEvalRunStatus(_ context.Context, _ string, _ store.EvalRunStatus, _ store.EvalRunCounts) error {
+	return nil
+}
+func (s *vaultStubStore) IncrementEvalRunCounts(_ context.Context, _ string, _ store.EvalRunCounts) error {
+	return nil
+}
+func (s *vaultStubStore) CreateTestCaseResult(_ context.Context, v store.TestCaseResult) (store.TestCaseResult, error) {
+	return v, nil
+}
+func (s *vaultStubStore) GetTestCaseResult(_ context.Context, _ string) (store.TestCaseResult, error) {
+	return store.TestCaseResult{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
+	return nil, nil
+}
 
 // stubNode has one sensitive field "api_key".
 type stubNode struct{}

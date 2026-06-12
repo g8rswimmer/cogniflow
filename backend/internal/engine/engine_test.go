@@ -101,6 +101,59 @@ func (m *mockEngineStore) ListPluginRegistrations(_ context.Context) ([]store.Pl
 	return nil, nil
 }
 func (m *mockEngineStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (m *mockEngineStore) CreateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
+	return v, nil
+}
+func (m *mockEngineStore) GetEvalSuite(_ context.Context, _ string) (store.EvalSuite, error) {
+	return store.EvalSuite{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) UpdateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
+	return v, nil
+}
+func (m *mockEngineStore) DeleteEvalSuite(_ context.Context, _ string) error { return nil }
+func (m *mockEngineStore) CreateTestCase(_ context.Context, v store.TestCase) (store.TestCase, error) {
+	return v, nil
+}
+func (m *mockEngineStore) GetTestCase(_ context.Context, _ string) (store.TestCase, error) {
+	return store.TestCase{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListTestCases(_ context.Context, _ string) ([]store.TestCase, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) UpdateTestCase(_ context.Context, v store.TestCase) (store.TestCase, error) {
+	return v, nil
+}
+func (m *mockEngineStore) DeleteTestCase(_ context.Context, _ string) error { return nil }
+func (m *mockEngineStore) ReorderTestCases(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (m *mockEngineStore) CreateEvalRun(_ context.Context, v store.EvalRun) (store.EvalRun, error) {
+	return v, nil
+}
+func (m *mockEngineStore) GetEvalRun(_ context.Context, _ string) (store.EvalRun, error) {
+	return store.EvalRun{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListEvalRuns(_ context.Context, _ store.EvalRunFilter) ([]store.EvalRun, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) UpdateEvalRunStatus(_ context.Context, _ string, _ store.EvalRunStatus, _ store.EvalRunCounts) error {
+	return nil
+}
+func (m *mockEngineStore) IncrementEvalRunCounts(_ context.Context, _ string, _ store.EvalRunCounts) error {
+	return nil
+}
+func (m *mockEngineStore) CreateTestCaseResult(_ context.Context, v store.TestCaseResult) (store.TestCaseResult, error) {
+	return v, nil
+}
+func (m *mockEngineStore) GetTestCaseResult(_ context.Context, _ string) (store.TestCaseResult, error) {
+	return store.TestCaseResult{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
+	return nil, nil
+}
 
 // ---- helpers -------------------------------------------------------------
 

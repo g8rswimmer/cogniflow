@@ -1,0 +1,700 @@
+package mysql
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/g8rswimmer/cogniflow/internal/store"
+)
+
+// ---- EvalSuite CRUD -------------------------------------------------------
+
+func (s *WorkflowStore) CreateEvalSuite(ctx context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
+	if suite.ID == "" {
+		suite.ID = newUUID()
+	}
+	if suite.PassThreshold == 0 {
+		suite.PassThreshold = 1.0
+	}
+	if suite.MaxConcurrency == 0 {
+		suite.MaxConcurrency = 1
+	}
+	if suite.Description == "" {
+		suite.Description = ""
+	}
+	now := time.Now().UTC()
+	suite.CreatedAt = now
+	suite.UpdatedAt = now
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO eval_suites (id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		suite.ID, suite.WorkflowID, suite.Name, suite.Description,
+		suite.PassThreshold, suite.MaxConcurrency, boolToInt(suite.WorkflowDeleted),
+		suite.CreatedAt, suite.UpdatedAt,
+	)
+	if err != nil {
+		return store.EvalSuite{}, fmt.Errorf("eval store: create suite: %w", err)
+	}
+	return suite, nil
+}
+
+func (s *WorkflowStore) GetEvalSuite(ctx context.Context, id string) (store.EvalSuite, error) {
+	var row dbEvalSuite
+	err := s.db.GetContext(ctx, &row,
+		`SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, created_at, updated_at
+		 FROM eval_suites WHERE id=?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.EvalSuite{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.EvalSuite{}, fmt.Errorf("eval store: get suite: %w", err)
+	}
+	return rowToEvalSuite(row), nil
+}
+
+func (s *WorkflowStore) ListEvalSuites(ctx context.Context, workflowID string) ([]store.EvalSuiteSummary, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT es.id, es.workflow_id, es.name, es.description, es.pass_threshold,
+		        es.max_concurrency, es.workflow_deleted, es.created_at, es.updated_at,
+		        (SELECT COUNT(*) FROM eval_test_cases WHERE suite_id = es.id) AS test_case_count,
+		        (SELECT status FROM eval_runs WHERE suite_id = es.id ORDER BY created_at DESC LIMIT 1) AS last_run_status,
+		        (SELECT created_at FROM eval_runs WHERE suite_id = es.id ORDER BY created_at DESC LIMIT 1) AS last_run_at
+		 FROM eval_suites es
+		 WHERE es.workflow_id = ?
+		 ORDER BY es.created_at DESC`, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("eval store: list suites: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []store.EvalSuiteSummary
+	for rows.Next() {
+		var row dbEvalSuiteSummary
+		if err := rows.Scan(
+			&row.ID, &row.WorkflowID, &row.Name, &row.Description,
+			&row.PassThreshold, &row.MaxConcurrency, &row.WorkflowDeleted,
+			&row.CreatedAt, &row.UpdatedAt, &row.TestCaseCount,
+			&row.LastRunStatus, &row.LastRunAt,
+		); err != nil {
+			return nil, fmt.Errorf("eval store: scan suite summary: %w", err)
+		}
+		summaries = append(summaries, rowToEvalSuiteSummary(row))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("eval store: list suites rows: %w", err)
+	}
+	return summaries, nil
+}
+
+func (s *WorkflowStore) UpdateEvalSuite(ctx context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
+	suite.UpdatedAt = time.Now().UTC()
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE eval_suites SET name=?, description=?, pass_threshold=?, max_concurrency=?, updated_at=?
+		 WHERE id=?`,
+		suite.Name, suite.Description, suite.PassThreshold, suite.MaxConcurrency,
+		suite.UpdatedAt, suite.ID,
+	)
+	if err != nil {
+		return store.EvalSuite{}, fmt.Errorf("eval store: update suite: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return store.EvalSuite{}, store.ErrNotFound
+	}
+	return s.GetEvalSuite(ctx, suite.ID)
+}
+
+// DeleteEvalSuite cascades at the application layer:
+// eval_test_case_results → eval_runs → eval_test_cases → eval_suites.
+func (s *WorkflowStore) DeleteEvalSuite(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("eval store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM eval_test_case_results WHERE eval_run_id IN (SELECT id FROM eval_runs WHERE suite_id=?)`, id,
+	); err != nil {
+		return fmt.Errorf("eval store: delete test case results: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM eval_runs WHERE suite_id=?`, id); err != nil {
+		return fmt.Errorf("eval store: delete eval runs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM eval_test_cases WHERE suite_id=?`, id); err != nil {
+		return fmt.Errorf("eval store: delete test cases: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM eval_suites WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("eval store: delete suite: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return store.ErrNotFound
+	}
+
+	return tx.Commit()
+}
+
+// ---- TestCase CRUD --------------------------------------------------------
+
+func (s *WorkflowStore) CreateTestCase(ctx context.Context, tc store.TestCase) (store.TestCase, error) {
+	if tc.ID == "" {
+		tc.ID = newUUID()
+	}
+	now := time.Now().UTC()
+	tc.CreatedAt = now
+	tc.UpdatedAt = now
+
+	initialDataJSON, err := marshalJSON(tc.InitialData)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: marshal initial_data: %w", err)
+	}
+	mocksJSON, err := marshalJSON(tc.Mocks)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: marshal mocks: %w", err)
+	}
+	gradersJSON, err := marshalJSON(tc.Graders)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: marshal graders: %w", err)
+	}
+
+	// position defaults to end of list
+	if tc.Position == 0 {
+		var maxPos sql.NullInt64
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT MAX(position) FROM eval_test_cases WHERE suite_id=?`, tc.SuiteID,
+		).Scan(&maxPos)
+		if maxPos.Valid {
+			tc.Position = int(maxPos.Int64) + 1
+		}
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO eval_test_cases (id, suite_id, name, description, position, initial_data, mocks, graders, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tc.ID, tc.SuiteID, tc.Name, tc.Description, tc.Position,
+		initialDataJSON, mocksJSON, gradersJSON, tc.CreatedAt, tc.UpdatedAt,
+	)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: create test case: %w", err)
+	}
+	return tc, nil
+}
+
+func (s *WorkflowStore) GetTestCase(ctx context.Context, id string) (store.TestCase, error) {
+	var row dbTestCase
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, suite_id, name, description, position, initial_data, mocks, graders, created_at, updated_at
+		 FROM eval_test_cases WHERE id=?`, id,
+	).Scan(&row.ID, &row.SuiteID, &row.Name, &row.Description, &row.Position,
+		&row.InitialData, &row.Mocks, &row.Graders, &row.CreatedAt, &row.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.TestCase{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: get test case: %w", err)
+	}
+	return rowToTestCase(row)
+}
+
+func (s *WorkflowStore) ListTestCases(ctx context.Context, suiteID string) ([]store.TestCase, error) {
+	dbRows, err := s.db.QueryContext(ctx,
+		`SELECT id, suite_id, name, description, position, initial_data, mocks, graders, created_at, updated_at
+		 FROM eval_test_cases WHERE suite_id=? ORDER BY position ASC, created_at ASC`, suiteID)
+	if err != nil {
+		return nil, fmt.Errorf("eval store: list test cases: %w", err)
+	}
+	defer dbRows.Close()
+
+	var cases []store.TestCase
+	for dbRows.Next() {
+		var row dbTestCase
+		if err := dbRows.Scan(&row.ID, &row.SuiteID, &row.Name, &row.Description, &row.Position,
+			&row.InitialData, &row.Mocks, &row.Graders, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("eval store: scan test case: %w", err)
+		}
+		tc, err := rowToTestCase(row)
+		if err != nil {
+			return nil, err
+		}
+		cases = append(cases, tc)
+	}
+	return cases, dbRows.Err()
+}
+
+func (s *WorkflowStore) UpdateTestCase(ctx context.Context, tc store.TestCase) (store.TestCase, error) {
+	tc.UpdatedAt = time.Now().UTC()
+
+	initialDataJSON, err := marshalJSON(tc.InitialData)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: marshal initial_data: %w", err)
+	}
+	mocksJSON, err := marshalJSON(tc.Mocks)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: marshal mocks: %w", err)
+	}
+	gradersJSON, err := marshalJSON(tc.Graders)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: marshal graders: %w", err)
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE eval_test_cases SET name=?, description=?, initial_data=?, mocks=?, graders=?, updated_at=?
+		 WHERE id=?`,
+		tc.Name, tc.Description, initialDataJSON, mocksJSON, gradersJSON, tc.UpdatedAt, tc.ID,
+	)
+	if err != nil {
+		return store.TestCase{}, fmt.Errorf("eval store: update test case: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return store.TestCase{}, store.ErrNotFound
+	}
+	return s.GetTestCase(ctx, tc.ID)
+}
+
+func (s *WorkflowStore) DeleteTestCase(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM eval_test_cases WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("eval store: delete test case: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *WorkflowStore) ReorderTestCases(ctx context.Context, suiteID string, orderedIDs []string) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("eval store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for i, id := range orderedIDs {
+		result, err := tx.ExecContext(ctx,
+			`UPDATE eval_test_cases SET position=? WHERE id=? AND suite_id=?`, i, id, suiteID)
+		if err != nil {
+			return fmt.Errorf("eval store: reorder: %w", err)
+		}
+		n, _ := result.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("eval store: test case %q not in suite %q: %w", id, suiteID, store.ErrNotFound)
+		}
+	}
+	return tx.Commit()
+}
+
+// ---- EvalRun CRUD ---------------------------------------------------------
+
+func (s *WorkflowStore) CreateEvalRun(ctx context.Context, r store.EvalRun) (store.EvalRun, error) {
+	if r.ID == "" {
+		r.ID = newUUID()
+	}
+	r.CreatedAt = time.Now().UTC()
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO eval_runs (id, suite_id, status, total_cases, passed_count, failed_count, error_count, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.SuiteID, string(r.Status), r.TotalCases,
+		r.PassedCount, r.FailedCount, r.ErrorCount, r.CreatedAt,
+	)
+	if err != nil {
+		return store.EvalRun{}, fmt.Errorf("eval store: create eval run: %w", err)
+	}
+	return r, nil
+}
+
+func (s *WorkflowStore) GetEvalRun(ctx context.Context, id string) (store.EvalRun, error) {
+	var row dbEvalRun
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, suite_id, status, total_cases, passed_count, failed_count, error_count,
+		        started_at, finished_at, created_at
+		 FROM eval_runs WHERE id=?`, id,
+	).Scan(&row.ID, &row.SuiteID, &row.Status, &row.TotalCases,
+		&row.PassedCount, &row.FailedCount, &row.ErrorCount,
+		&row.StartedAt, &row.FinishedAt, &row.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.EvalRun{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.EvalRun{}, fmt.Errorf("eval store: get eval run: %w", err)
+	}
+	return rowToEvalRun(row), nil
+}
+
+func (s *WorkflowStore) ListEvalRuns(ctx context.Context, f store.EvalRunFilter) ([]store.EvalRun, error) {
+	q := `SELECT id, suite_id, status, total_cases, passed_count, failed_count, error_count,
+	             started_at, finished_at, created_at
+	      FROM eval_runs WHERE suite_id=?`
+	args := []any{f.SuiteID}
+
+	if f.Status != "" {
+		q += " AND status=?"
+		args = append(args, string(f.Status))
+	}
+	q += " ORDER BY created_at DESC"
+	if f.Limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", f.Limit)
+	}
+	if f.Offset > 0 {
+		q += fmt.Sprintf(" OFFSET %d", f.Offset)
+	}
+
+	dbRows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("eval store: list eval runs: %w", err)
+	}
+	defer dbRows.Close()
+
+	var runs []store.EvalRun
+	for dbRows.Next() {
+		var row dbEvalRun
+		if err := dbRows.Scan(&row.ID, &row.SuiteID, &row.Status,
+			&row.TotalCases, &row.PassedCount, &row.FailedCount, &row.ErrorCount,
+			&row.StartedAt, &row.FinishedAt, &row.CreatedAt); err != nil {
+			return nil, fmt.Errorf("eval store: scan eval run: %w", err)
+		}
+		runs = append(runs, rowToEvalRun(row))
+	}
+	return runs, dbRows.Err()
+}
+
+func (s *WorkflowStore) UpdateEvalRunStatus(ctx context.Context, runID string, status store.EvalRunStatus, counts store.EvalRunCounts) error {
+	now := time.Now().UTC()
+	var startedAt, finishedAt *time.Time
+
+	switch status {
+	case store.EvalRunRunning:
+		startedAt = &now
+	case store.EvalRunCompleted, store.EvalRunFailed:
+		finishedAt = &now
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE eval_runs
+		 SET status=?,
+		     passed_count=?,
+		     failed_count=?,
+		     error_count=?,
+		     started_at=COALESCE(started_at, ?),
+		     finished_at=COALESCE(?, finished_at)
+		 WHERE id=?`,
+		string(status),
+		counts.PassedCount, counts.FailedCount, counts.ErrorCount,
+		startedAt, finishedAt, runID,
+	)
+	if err != nil {
+		return fmt.Errorf("eval store: update eval run status: %w", err)
+	}
+	return nil
+}
+
+func (s *WorkflowStore) IncrementEvalRunCounts(ctx context.Context, runID string, delta store.EvalRunCounts) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE eval_runs
+		 SET passed_count = passed_count + ?,
+		     failed_count = failed_count + ?,
+		     error_count  = error_count  + ?
+		 WHERE id=?`,
+		delta.PassedCount, delta.FailedCount, delta.ErrorCount, runID,
+	)
+	if err != nil {
+		return fmt.Errorf("eval store: increment eval run counts: %w", err)
+	}
+	return nil
+}
+
+// ---- TestCaseResult CRUD -------------------------------------------------
+
+func (s *WorkflowStore) CreateTestCaseResult(ctx context.Context, r store.TestCaseResult) (store.TestCaseResult, error) {
+	if r.ID == "" {
+		r.ID = newUUID()
+	}
+	r.CreatedAt = time.Now().UTC()
+
+	nodeOutputsJSON, err := marshalJSON(r.NodeOutputs)
+	if err != nil {
+		return store.TestCaseResult{}, fmt.Errorf("eval store: marshal node_outputs: %w", err)
+	}
+	graderResultsJSON, err := marshalJSON(r.GraderResults)
+	if err != nil {
+		return store.TestCaseResult{}, fmt.Errorf("eval store: marshal grader_results: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO eval_test_case_results
+		 (id, eval_run_id, test_case_id, test_case_name, workflow_run_id, workflow_run_status, node_outputs, grader_results, passed, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.EvalRunID, r.TestCaseID, r.TestCaseName,
+		r.WorkflowRunID, r.WorkflowRunStatus,
+		nodeOutputsJSON, graderResultsJSON, boolToInt(r.Passed), r.CreatedAt,
+	)
+	if err != nil {
+		return store.TestCaseResult{}, fmt.Errorf("eval store: create test case result: %w", err)
+	}
+	return r, nil
+}
+
+func (s *WorkflowStore) GetTestCaseResult(ctx context.Context, id string) (store.TestCaseResult, error) {
+	var row dbTestCaseResult
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, eval_run_id, test_case_id, test_case_name, workflow_run_id, workflow_run_status,
+		        node_outputs, grader_results, passed, created_at
+		 FROM eval_test_case_results WHERE id=?`, id,
+	).Scan(&row.ID, &row.EvalRunID, &row.TestCaseID, &row.TestCaseName,
+		&row.WorkflowRunID, &row.WorkflowRunStatus,
+		&row.NodeOutputs, &row.GraderResults, &row.Passed, &row.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.TestCaseResult{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.TestCaseResult{}, fmt.Errorf("eval store: get test case result: %w", err)
+	}
+	return rowToTestCaseResult(row)
+}
+
+func (s *WorkflowStore) ListTestCaseResults(ctx context.Context, evalRunID string) ([]store.TestCaseResult, error) {
+	dbRows, err := s.db.QueryContext(ctx,
+		`SELECT id, eval_run_id, test_case_id, test_case_name, workflow_run_id, workflow_run_status,
+		        node_outputs, grader_results, passed, created_at
+		 FROM eval_test_case_results WHERE eval_run_id=? ORDER BY created_at ASC`, evalRunID)
+	if err != nil {
+		return nil, fmt.Errorf("eval store: list test case results: %w", err)
+	}
+	defer dbRows.Close()
+
+	var results []store.TestCaseResult
+	for dbRows.Next() {
+		var row dbTestCaseResult
+		if err := dbRows.Scan(&row.ID, &row.EvalRunID, &row.TestCaseID, &row.TestCaseName,
+			&row.WorkflowRunID, &row.WorkflowRunStatus,
+			&row.NodeOutputs, &row.GraderResults, &row.Passed, &row.CreatedAt); err != nil {
+			return nil, fmt.Errorf("eval store: scan test case result: %w", err)
+		}
+		r, err := rowToTestCaseResult(row)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, dbRows.Err()
+}
+
+// ---- DB row types ---------------------------------------------------------
+
+type dbEvalSuite struct {
+	ID              string    `db:"id"`
+	WorkflowID      string    `db:"workflow_id"`
+	Name            string    `db:"name"`
+	Description     string    `db:"description"`
+	PassThreshold   float64   `db:"pass_threshold"`
+	MaxConcurrency  int       `db:"max_concurrency"`
+	WorkflowDeleted int       `db:"workflow_deleted"`
+	CreatedAt       time.Time `db:"created_at"`
+	UpdatedAt       time.Time `db:"updated_at"`
+}
+
+type dbEvalSuiteSummary struct {
+	dbEvalSuite
+	TestCaseCount int     `db:"test_case_count"`
+	LastRunStatus *string `db:"last_run_status"`
+	LastRunAt     *string `db:"last_run_at"` // scanned as string, parsed to *time.Time
+}
+
+type dbTestCase struct {
+	ID          string    `db:"id"`
+	SuiteID     string    `db:"suite_id"`
+	Name        string    `db:"name"`
+	Description string    `db:"description"`
+	Position    int       `db:"position"`
+	InitialData []byte    `db:"initial_data"`
+	Mocks       []byte    `db:"mocks"`
+	Graders     []byte    `db:"graders"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
+}
+
+type dbEvalRun struct {
+	ID          string     `db:"id"`
+	SuiteID     string     `db:"suite_id"`
+	Status      string     `db:"status"`
+	TotalCases  int        `db:"total_cases"`
+	PassedCount int        `db:"passed_count"`
+	FailedCount int        `db:"failed_count"`
+	ErrorCount  int        `db:"error_count"`
+	StartedAt   *time.Time `db:"started_at"`
+	FinishedAt  *time.Time `db:"finished_at"`
+	CreatedAt   time.Time  `db:"created_at"`
+}
+
+type dbTestCaseResult struct {
+	ID                string    `db:"id"`
+	EvalRunID         string    `db:"eval_run_id"`
+	TestCaseID        string    `db:"test_case_id"`
+	TestCaseName      string    `db:"test_case_name"`
+	WorkflowRunID     string    `db:"workflow_run_id"`
+	WorkflowRunStatus string    `db:"workflow_run_status"`
+	NodeOutputs       []byte    `db:"node_outputs"`
+	GraderResults     []byte    `db:"grader_results"`
+	Passed            int       `db:"passed"`
+	CreatedAt         time.Time `db:"created_at"`
+}
+
+// ---- row converters -------------------------------------------------------
+
+func rowToEvalSuite(row dbEvalSuite) store.EvalSuite {
+	return store.EvalSuite{
+		ID:              row.ID,
+		WorkflowID:      row.WorkflowID,
+		Name:            row.Name,
+		Description:     row.Description,
+		PassThreshold:   row.PassThreshold,
+		MaxConcurrency:  row.MaxConcurrency,
+		WorkflowDeleted: row.WorkflowDeleted != 0,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+	}
+}
+
+func rowToEvalSuiteSummary(row dbEvalSuiteSummary) store.EvalSuiteSummary {
+	s := store.EvalSuiteSummary{
+		EvalSuite:     rowToEvalSuite(row.dbEvalSuite),
+		TestCaseCount: row.TestCaseCount,
+		LastRunStatus: row.LastRunStatus,
+	}
+	if row.LastRunAt != nil {
+		t := parseDateTime(*row.LastRunAt)
+		if !t.IsZero() {
+			s.LastRunAt = &t
+		}
+	}
+	return s
+}
+
+func rowToTestCase(row dbTestCase) (store.TestCase, error) {
+	tc := store.TestCase{
+		ID:          row.ID,
+		SuiteID:     row.SuiteID,
+		Name:        row.Name,
+		Description: row.Description,
+		Position:    row.Position,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}
+	if len(row.InitialData) > 0 {
+		if err := json.Unmarshal(row.InitialData, &tc.InitialData); err != nil {
+			return store.TestCase{}, fmt.Errorf("eval store: unmarshal initial_data: %w", err)
+		}
+	}
+	if tc.InitialData == nil {
+		tc.InitialData = map[string]any{}
+	}
+	if len(row.Mocks) > 0 {
+		if err := json.Unmarshal(row.Mocks, &tc.Mocks); err != nil {
+			return store.TestCase{}, fmt.Errorf("eval store: unmarshal mocks: %w", err)
+		}
+	}
+	if tc.Mocks == nil {
+		tc.Mocks = []store.NodeMock{}
+	}
+	if len(row.Graders) > 0 {
+		if err := json.Unmarshal(row.Graders, &tc.Graders); err != nil {
+			return store.TestCase{}, fmt.Errorf("eval store: unmarshal graders: %w", err)
+		}
+	}
+	if tc.Graders == nil {
+		tc.Graders = []store.GraderDef{}
+	}
+	return tc, nil
+}
+
+func rowToEvalRun(row dbEvalRun) store.EvalRun {
+	return store.EvalRun{
+		ID:          row.ID,
+		SuiteID:     row.SuiteID,
+		Status:      store.EvalRunStatus(row.Status),
+		TotalCases:  row.TotalCases,
+		PassedCount: row.PassedCount,
+		FailedCount: row.FailedCount,
+		ErrorCount:  row.ErrorCount,
+		StartedAt:   row.StartedAt,
+		FinishedAt:  row.FinishedAt,
+		CreatedAt:   row.CreatedAt,
+	}
+}
+
+func rowToTestCaseResult(row dbTestCaseResult) (store.TestCaseResult, error) {
+	r := store.TestCaseResult{
+		ID:                row.ID,
+		EvalRunID:         row.EvalRunID,
+		TestCaseID:        row.TestCaseID,
+		TestCaseName:      row.TestCaseName,
+		WorkflowRunID:     row.WorkflowRunID,
+		WorkflowRunStatus: row.WorkflowRunStatus,
+		Passed:            row.Passed != 0,
+		CreatedAt:         row.CreatedAt,
+	}
+	if len(row.NodeOutputs) > 0 {
+		if err := json.Unmarshal(row.NodeOutputs, &r.NodeOutputs); err != nil {
+			return store.TestCaseResult{}, fmt.Errorf("eval store: unmarshal node_outputs: %w", err)
+		}
+	}
+	if r.NodeOutputs == nil {
+		r.NodeOutputs = map[string]map[string]any{}
+	}
+	if len(row.GraderResults) > 0 {
+		if err := json.Unmarshal(row.GraderResults, &r.GraderResults); err != nil {
+			return store.TestCaseResult{}, fmt.Errorf("eval store: unmarshal grader_results: %w", err)
+		}
+	}
+	if r.GraderResults == nil {
+		r.GraderResults = []store.GraderResult{}
+	}
+	return r, nil
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+func marshalJSON(v any) (string, error) {
+	if v == nil {
+		return "{}", nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// parseDateTime parses datetime strings as stored by SQLite in tests.
+// MySQL uses time.Time natively so this is only needed for null datetime columns
+// that come back as strings from the subquery in ListEvalSuites.
+func parseDateTime(s string) time.Time {
+	formats := []string{
+		"2006-01-02T15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999",
+		"2006-01-02 15:04:05",
+		time.RFC3339,
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}

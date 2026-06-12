@@ -196,4 +196,167 @@ type Store interface {
 	GetPluginRegistration(ctx context.Context, typeID string) (PluginRegistration, error)
 	ListPluginRegistrations(ctx context.Context) ([]PluginRegistration, error)
 	DeletePluginRegistration(ctx context.Context, typeID string) error
+
+	// Eval Suites
+	CreateEvalSuite(ctx context.Context, s EvalSuite) (EvalSuite, error)
+	GetEvalSuite(ctx context.Context, id string) (EvalSuite, error)
+	ListEvalSuites(ctx context.Context, workflowID string) ([]EvalSuiteSummary, error)
+	UpdateEvalSuite(ctx context.Context, s EvalSuite) (EvalSuite, error)
+	DeleteEvalSuite(ctx context.Context, id string) error
+
+	// Test Cases
+	CreateTestCase(ctx context.Context, tc TestCase) (TestCase, error)
+	GetTestCase(ctx context.Context, id string) (TestCase, error)
+	ListTestCases(ctx context.Context, suiteID string) ([]TestCase, error)
+	UpdateTestCase(ctx context.Context, tc TestCase) (TestCase, error)
+	DeleteTestCase(ctx context.Context, id string) error
+	ReorderTestCases(ctx context.Context, suiteID string, orderedIDs []string) error
+
+	// Eval Runs
+	CreateEvalRun(ctx context.Context, r EvalRun) (EvalRun, error)
+	GetEvalRun(ctx context.Context, id string) (EvalRun, error)
+	ListEvalRuns(ctx context.Context, f EvalRunFilter) ([]EvalRun, error)
+	UpdateEvalRunStatus(ctx context.Context, runID string, status EvalRunStatus, counts EvalRunCounts) error
+	IncrementEvalRunCounts(ctx context.Context, runID string, delta EvalRunCounts) error
+
+	// Test Case Results
+	CreateTestCaseResult(ctx context.Context, r TestCaseResult) (TestCaseResult, error)
+	GetTestCaseResult(ctx context.Context, id string) (TestCaseResult, error)
+	ListTestCaseResults(ctx context.Context, evalRunID string) ([]TestCaseResult, error)
+}
+
+// ---- Eval types ----------------------------------------------------------
+
+// GraderVerdict is the outcome of a single grader evaluation.
+type GraderVerdict string
+
+const (
+	VerdictPass  GraderVerdict = "pass"
+	VerdictFail  GraderVerdict = "fail"
+	VerdictError GraderVerdict = "error"
+)
+
+// CriterionResult is the per-item outcome for the Checklist grader (GR-05).
+type CriterionResult struct {
+	Criterion   string `json:"criterion"`
+	Met         bool   `json:"met"`
+	Explanation string `json:"explanation"`
+}
+
+// GraderResult is the outcome of one Grader evaluation within a TestCase.
+type GraderResult struct {
+	GraderID        string            `json:"grader_id"`
+	GraderName      string            `json:"grader_name"`
+	GraderType      string            `json:"grader_type"`
+	Verdict         GraderVerdict     `json:"verdict"`
+	Score           *float64          `json:"score,omitempty"`
+	Explanation     string            `json:"explanation"`
+	ActualValue     any               `json:"actual_value,omitempty"`
+	CriteriaResults []CriterionResult `json:"criteria_results,omitempty"`
+}
+
+// GraderDef is the persisted grader definition stored in eval_test_cases.graders.
+// Sensitive api_key values are encrypted at rest; MaskGraders replaces them
+// with "***" before including in API responses.
+type GraderDef struct {
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Type   string         `json:"type"`   // "string_match"|"numeric_threshold"|"llm_judge"|"json_schema"|"checklist"
+	Scope  string         `json:"scope"`  // "workflow"|"node"
+	NodeID string         `json:"node_id,omitempty"`
+	Config map[string]any `json:"config"`
+}
+
+// NodeMock overrides a node's Execute() call during eval runs.
+type NodeMock struct {
+	NodeID string         `json:"node_id"`
+	Output map[string]any `json:"output"`
+}
+
+// EvalSuite is a named collection of test cases linked to one workflow.
+type EvalSuite struct {
+	ID              string    `json:"id"               db:"id"`
+	WorkflowID      string    `json:"workflow_id"      db:"workflow_id"`
+	Name            string    `json:"name"             db:"name"`
+	Description     string    `json:"description"      db:"description"`
+	PassThreshold   float64   `json:"pass_threshold"   db:"pass_threshold"`
+	MaxConcurrency  int       `json:"max_concurrency"  db:"max_concurrency"`
+	WorkflowDeleted bool      `json:"workflow_deleted" db:"workflow_deleted"`
+	CreatedAt       time.Time `json:"created_at"       db:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"       db:"updated_at"`
+}
+
+// EvalSuiteSummary is EvalSuite enriched with aggregate fields for list responses.
+type EvalSuiteSummary struct {
+	EvalSuite
+	TestCaseCount int        `json:"test_case_count" db:"test_case_count"`
+	LastRunStatus *string    `json:"last_run_status" db:"last_run_status"`
+	LastRunAt     *time.Time `json:"last_run_at"     db:"last_run_at"`
+}
+
+// TestCase is one scenario within an EvalSuite.
+type TestCase struct {
+	ID          string         `json:"id"          db:"id"`
+	SuiteID     string         `json:"suite_id"    db:"suite_id"`
+	Name        string         `json:"name"        db:"name"`
+	Description string         `json:"description" db:"description"`
+	Position    int            `json:"position"    db:"position"`
+	InitialData map[string]any `json:"initial_data"`
+	Mocks       []NodeMock     `json:"mocks"`
+	Graders     []GraderDef    `json:"graders"`
+	CreatedAt   time.Time      `json:"created_at"  db:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"  db:"updated_at"`
+}
+
+// EvalRunStatus is the lifecycle state of an EvalRun.
+type EvalRunStatus string
+
+const (
+	EvalRunPending   EvalRunStatus = "pending"
+	EvalRunRunning   EvalRunStatus = "running"
+	EvalRunCompleted EvalRunStatus = "completed"
+	EvalRunFailed    EvalRunStatus = "failed"
+)
+
+// EvalRun is one async execution of an EvalSuite.
+type EvalRun struct {
+	ID          string        `json:"id"           db:"id"`
+	SuiteID     string        `json:"suite_id"     db:"suite_id"`
+	Status      EvalRunStatus `json:"status"       db:"status"`
+	TotalCases  int           `json:"total_cases"  db:"total_cases"`
+	PassedCount int           `json:"passed_count" db:"passed_count"`
+	FailedCount int           `json:"failed_count" db:"failed_count"`
+	ErrorCount  int           `json:"error_count"  db:"error_count"`
+	StartedAt   *time.Time    `json:"started_at"   db:"started_at"`
+	FinishedAt  *time.Time    `json:"finished_at"  db:"finished_at"`
+	CreatedAt   time.Time     `json:"created_at"   db:"created_at"`
+}
+
+// EvalRunFilter constrains ListEvalRuns queries.
+type EvalRunFilter struct {
+	SuiteID string
+	Status  EvalRunStatus
+	Limit   int
+	Offset  int
+}
+
+// EvalRunCounts holds pass/fail/error deltas or totals for EvalRun updates.
+type EvalRunCounts struct {
+	PassedCount int
+	FailedCount int
+	ErrorCount  int
+}
+
+// TestCaseResult is the outcome of one TestCase within an EvalRun.
+type TestCaseResult struct {
+	ID                string                    `json:"id"                  db:"id"`
+	EvalRunID         string                    `json:"eval_run_id"         db:"eval_run_id"`
+	TestCaseID        string                    `json:"test_case_id"        db:"test_case_id"`
+	TestCaseName      string                    `json:"test_case_name"      db:"test_case_name"`
+	WorkflowRunID     string                    `json:"workflow_run_id"     db:"workflow_run_id"`
+	WorkflowRunStatus string                    `json:"workflow_run_status" db:"workflow_run_status"`
+	NodeOutputs       map[string]map[string]any `json:"node_outputs"`
+	GraderResults     []GraderResult            `json:"grader_results"`
+	Passed            bool                      `json:"passed"              db:"passed"`
+	CreatedAt         time.Time                 `json:"created_at"          db:"created_at"`
 }

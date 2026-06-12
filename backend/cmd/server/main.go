@@ -144,7 +144,7 @@ func run(logLevel *slog.LevelVar) error {
 		port = "8080"
 	}
 
-	router := api.NewRouter(db, vault, registry, wfEngine, bus, triggerMgr, logLevel)
+	router := api.NewRouter(db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, logLevel)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)

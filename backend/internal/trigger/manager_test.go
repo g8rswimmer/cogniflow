@@ -36,6 +36,59 @@ func (m *fullMockStore) ListPluginRegistrations(_ context.Context) ([]store.Plug
 	return nil, nil
 }
 func (m *fullMockStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) CreateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
+	return v, nil
+}
+func (m *fullMockStore) GetEvalSuite(_ context.Context, _ string) (store.EvalSuite, error) {
+	return store.EvalSuite{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
+	return nil, nil
+}
+func (m *fullMockStore) UpdateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
+	return v, nil
+}
+func (m *fullMockStore) DeleteEvalSuite(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) CreateTestCase(_ context.Context, v store.TestCase) (store.TestCase, error) {
+	return v, nil
+}
+func (m *fullMockStore) GetTestCase(_ context.Context, _ string) (store.TestCase, error) {
+	return store.TestCase{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListTestCases(_ context.Context, _ string) ([]store.TestCase, error) {
+	return nil, nil
+}
+func (m *fullMockStore) UpdateTestCase(_ context.Context, v store.TestCase) (store.TestCase, error) {
+	return v, nil
+}
+func (m *fullMockStore) DeleteTestCase(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) ReorderTestCases(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (m *fullMockStore) CreateEvalRun(_ context.Context, v store.EvalRun) (store.EvalRun, error) {
+	return v, nil
+}
+func (m *fullMockStore) GetEvalRun(_ context.Context, _ string) (store.EvalRun, error) {
+	return store.EvalRun{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListEvalRuns(_ context.Context, _ store.EvalRunFilter) ([]store.EvalRun, error) {
+	return nil, nil
+}
+func (m *fullMockStore) UpdateEvalRunStatus(_ context.Context, _ string, _ store.EvalRunStatus, _ store.EvalRunCounts) error {
+	return nil
+}
+func (m *fullMockStore) IncrementEvalRunCounts(_ context.Context, _ string, _ store.EvalRunCounts) error {
+	return nil
+}
+func (m *fullMockStore) CreateTestCaseResult(_ context.Context, v store.TestCaseResult) (store.TestCaseResult, error) {
+	return v, nil
+}
+func (m *fullMockStore) GetTestCaseResult(_ context.Context, _ string) (store.TestCaseResult, error) {
+	return store.TestCaseResult{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
+	return nil, nil
+}
 
 // ---- LoadAll tests ----------------------------------------------------------
 

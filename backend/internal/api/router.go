@@ -6,7 +6,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
+	"github.com/g8rswimmer/cogniflow/internal/eval"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -15,7 +17,17 @@ import (
 
 // NewRouter wires all HTTP routes and returns the handler wrapped with
 // CORS, request-ID, and access-log middleware.
-func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatcher trigger.Dispatcher, bus *engine.EventBus, tm *trigger.Manager, level *slog.LevelVar) http.Handler {
+func NewRouter(
+	db *sqlx.DB,
+	st store.Store,
+	registry *node.NodeRegistry,
+	dispatcher trigger.Dispatcher,
+	bus *engine.EventBus,
+	eng *engine.WorkflowEngine,
+	cipher *crypto.Cipher,
+	tm *trigger.Manager,
+	level *slog.LevelVar,
+) http.Handler {
 	mux := http.NewServeMux()
 
 	// Infrastructure endpoints — unversioned.
@@ -50,6 +62,29 @@ func NewRouter(db *sqlx.DB, st store.Store, registry *node.NodeRegistry, dispatc
 	mux.HandleFunc("POST /v1/admin/plugins", pah.register)
 	mux.HandleFunc("PUT /v1/admin/plugins/{type_id}", pah.update)
 	mux.HandleFunc("DELETE /v1/admin/plugins/{type_id}", pah.deregister)
+
+	// Eval routes — suite and test case CRUD (run execution added in ME2).
+	vault := eval.NewGraderVault(cipher)
+	eh := eval.NewHandler(st, vault, registry)
+
+	mux.HandleFunc("GET /v1/workflows/{workflow_id}/eval-suites", eh.ListByWorkflow)
+	mux.HandleFunc("POST /v1/workflows/{workflow_id}/eval-suites", eh.CreateSuite)
+	mux.HandleFunc("GET /v1/eval-suites/{suite_id}", eh.GetSuite)
+	mux.HandleFunc("PUT /v1/eval-suites/{suite_id}", eh.UpdateSuite)
+	mux.HandleFunc("DELETE /v1/eval-suites/{suite_id}", eh.DeleteSuite)
+	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/test-cases", eh.ListCases)
+	mux.HandleFunc("POST /v1/eval-suites/{suite_id}/test-cases", eh.CreateCase)
+	// /order must be registered before /{case_id} so it is matched first.
+	mux.HandleFunc("PUT /v1/eval-suites/{suite_id}/test-cases/order", eh.ReorderCases)
+	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/test-cases/{case_id}", eh.GetCase)
+	mux.HandleFunc("PUT /v1/eval-suites/{suite_id}/test-cases/{case_id}", eh.UpdateCase)
+	mux.HandleFunc("DELETE /v1/eval-suites/{suite_id}/test-cases/{case_id}", eh.DeleteCase)
+	mux.HandleFunc("POST /v1/eval-suites/{suite_id}/runs", eh.TriggerRun)
+	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/runs", eh.ListRuns)
+	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}", eh.GetRun)
+	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/test-case-results/{result_id}", eh.GetTestCaseResult)
+
+	_ = eng // used in ME2 for EvalRunner
 
 	return cors(requestID(logRequests(mux)))
 }
