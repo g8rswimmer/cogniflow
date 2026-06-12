@@ -521,6 +521,120 @@ func TestEvalRunner_Execute_NodeMock_CapturesOutput(t *testing.T) {
 	}
 }
 
+func TestEvalRunner_Execute_AllGradersError_CountsAsError(t *testing.T) {
+	// When the workflow run succeeds but every grader produces VerdictError
+	// (e.g. llm_judge with nil factory → BuildGrader error), the test case
+	// must be classified as error_count, not failed_count.
+	r, st, eng := newTestRunner(t)
+
+	suite := store.EvalSuite{
+		ID: "es-1", WorkflowID: "wf-1", Name: "Suite", PassThreshold: 1.0, MaxConcurrency: 1,
+	}
+	tc := store.TestCase{
+		ID:      "tc-1",
+		SuiteID: "es-1",
+		Name:    "All graders error",
+		Graders: []store.GraderDef{{
+			ID: "g1", Type: "llm_judge", Scope: "workflow",
+			Config: map[string]any{"provider": "anthropic", "rubric": "Is it good?"},
+		}},
+	}
+
+	st.mu.Lock()
+	st.suites["es-1"] = suite
+	st.testCases["es-1"] = []store.TestCase{tc}
+	st.wfRuns["wf-run-1"] = store.Run{
+		ID:          "wf-run-1",
+		Status:      store.RunStatusSucceeded,
+		FinalOutput: map[string]any{"result": "ok"},
+	}
+	st.mu.Unlock()
+
+	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
+
+	runID, err := r.Execute(context.Background(), "es-1")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		run, ok := st.evalRuns[runID]
+		return ok && run.Status == store.EvalRunCompleted
+	})
+
+	st.mu.Lock()
+	run := st.evalRuns[runID]
+	st.mu.Unlock()
+
+	if run.ErrorCount != 1 {
+		t.Errorf("want error_count=1, got error=%d failed=%d passed=%d", run.ErrorCount, run.FailedCount, run.PassedCount)
+	}
+	if run.FailedCount != 0 {
+		t.Errorf("want failed_count=0, got %d", run.FailedCount)
+	}
+}
+
+func TestEvalRunner_Execute_GraderErrorExcludedFromPassRate(t *testing.T) {
+	// A grader that errors must not count as a failing vote in the pass rate.
+	// 2 graders: 1 passes, 1 errors → passRate = 1/1 = 1.0 → test case passes.
+	r, st, eng := newTestRunner(t)
+
+	suite := store.EvalSuite{
+		ID: "es-1", WorkflowID: "wf-1", Name: "Suite", PassThreshold: 1.0, MaxConcurrency: 1,
+	}
+	tc := store.TestCase{
+		ID:      "tc-1",
+		SuiteID: "es-1",
+		Name:    "Mixed graders",
+		Graders: []store.GraderDef{
+			{
+				ID: "g1", Type: "string_match", Scope: "workflow",
+				Config: map[string]any{"field_path": "result", "match_type": "exact", "expected_value": "ok"},
+			},
+			{
+				// This grader errors because nil factory can't build llm_judge.
+				ID: "g2", Type: "llm_judge", Scope: "workflow",
+				Config: map[string]any{"provider": "anthropic", "rubric": "Is it good?"},
+			},
+		},
+	}
+
+	st.mu.Lock()
+	st.suites["es-1"] = suite
+	st.testCases["es-1"] = []store.TestCase{tc}
+	st.wfRuns["wf-run-1"] = store.Run{
+		ID:          "wf-run-1",
+		Status:      store.RunStatusSucceeded,
+		FinalOutput: map[string]any{"result": "ok"},
+	}
+	st.mu.Unlock()
+
+	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
+
+	runID, err := r.Execute(context.Background(), "es-1")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		run, ok := st.evalRuns[runID]
+		return ok && run.Status == store.EvalRunCompleted
+	})
+
+	st.mu.Lock()
+	run := st.evalRuns[runID]
+	st.mu.Unlock()
+
+	if run.PassedCount != 1 {
+		t.Errorf("want passed_count=1 (errored grader excluded from denominator), got passed=%d failed=%d error=%d",
+			run.PassedCount, run.FailedCount, run.ErrorCount)
+	}
+}
+
 func TestEvalRunner_Execute_ZeroGraders_SmokeTest(t *testing.T) {
 	r, st, eng := newTestRunner(t)
 

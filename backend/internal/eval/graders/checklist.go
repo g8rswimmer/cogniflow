@@ -37,13 +37,19 @@ func NewChecklist(def store.GraderDef, client aiprovider.LLMClient) (*Checklist,
 		return nil, fmt.Errorf("checklist: criteria must be a non-empty array of strings")
 	}
 
+	// Treat 0.0 as "not configured" (same convention as the suite-level pass_threshold)
+	// so that the JSON zero-value cannot silently make a checklist always pass.
 	passThreshold := 1.0
 	if v, ok := def.Config["pass_threshold"]; ok {
 		switch n := v.(type) {
 		case float64:
-			passThreshold = n
+			if n > 0 {
+				passThreshold = n
+			}
 		case int:
-			passThreshold = float64(n)
+			if n > 0 {
+				passThreshold = float64(n)
+			}
 		}
 	}
 
@@ -113,6 +119,11 @@ Respond with ONLY a JSON array â€” one object per criterion, in the same order â
 		base.Explanation = "checklist response could not be parsed"
 		return base
 	}
+	if len(items) == 0 {
+		base.Verdict = store.VerdictError
+		base.Explanation = "checklist: LLM returned no criteria results"
+		return base
+	}
 
 	criteriaResults := make([]store.CriterionResult, len(items))
 	met := 0
@@ -143,12 +154,25 @@ Respond with ONLY a JSON array â€” one object per criterion, in the same order â
 	return base
 }
 
-// extractJSONArray pulls a JSON array out of s, tolerating preamble or trailing text.
+// extractJSONArray finds the last complete JSON array in s by walking backward from the
+// last ']' to its matching '['. This correctly handles preamble text that contains
+// stray '[' characters before the real JSON array (e.g. bracketed notes or counts).
 func extractJSONArray(s string) string {
-	start := strings.Index(s, "[")
 	end := strings.LastIndex(s, "]")
-	if start >= 0 && end > start {
-		return s[start : end+1]
+	if end < 0 {
+		return s
+	}
+	depth := 0
+	for i := end; i >= 0; i-- {
+		switch s[i] {
+		case ']':
+			depth++
+		case '[':
+			depth--
+			if depth == 0 {
+				return s[i : end+1]
+			}
+		}
 	}
 	return s
 }

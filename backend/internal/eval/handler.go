@@ -662,9 +662,49 @@ func validateGraderConfigs(graders []store.GraderDef) []fieldValidationError {
 					Message: "schema must be a JSON object",
 				})
 			}
+		case "llm_judge":
+			rubric, _ := g.Config["rubric"].(string)
+			if rubric == "" {
+				errs = append(errs, fieldValidationError{
+					Field:   prefix + ".config.rubric",
+					Message: "rubric is required for llm_judge grader",
+				})
+			}
+			errs = append(errs, validateLLMProvider(g.Config, prefix)...)
+		case "checklist":
+			if !hasNonEmptyCriteria(g.Config) {
+				errs = append(errs, fieldValidationError{
+					Field:   prefix + ".config.criteria",
+					Message: "criteria must be a non-empty array of strings",
+				})
+			}
+			errs = append(errs, validateLLMProvider(g.Config, prefix)...)
 		}
 	}
 	return errs
+}
+
+// validateLLMProvider checks that provider is one of the supported values.
+func validateLLMProvider(config map[string]any, prefix string) []fieldValidationError {
+	provider, _ := config["provider"].(string)
+	if provider != "openai" && provider != "anthropic" {
+		return []fieldValidationError{{
+			Field:   prefix + ".config.provider",
+			Message: `provider must be "openai" or "anthropic"`,
+		}}
+	}
+	return nil
+}
+
+// hasNonEmptyCriteria returns true when config["criteria"] is a non-empty array.
+func hasNonEmptyCriteria(config map[string]any) bool {
+	switch v := config["criteria"].(type) {
+	case []any:
+		return len(v) > 0
+	case []string:
+		return len(v) > 0
+	}
+	return false
 }
 
 // ---- Helpers ---------------------------------------------------------------

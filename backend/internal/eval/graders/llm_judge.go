@@ -112,12 +112,25 @@ func (g *LLMJudge) Grade(ctx context.Context, data map[string]any) store.GraderR
 	return base
 }
 
-// extractJSON pulls a JSON object out of s, tolerating preamble or trailing text.
+// extractJSON finds the last complete JSON object in s by walking backward from the
+// last '}' to its matching '{'. This correctly handles preamble text that contains
+// stray '{' characters before the real JSON answer (e.g. thinking blocks or notes).
 func extractJSON(s string) string {
-	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")
-	if start >= 0 && end > start {
-		return s[start : end+1]
+	if end < 0 {
+		return s
+	}
+	depth := 0
+	for i := end; i >= 0; i-- {
+		switch s[i] {
+		case '}':
+			depth++
+		case '{':
+			depth--
+			if depth == 0 {
+				return s[i : end+1]
+			}
+		}
 	}
 	return s
 }

@@ -167,3 +167,45 @@ func TestChecklist_JSONPreambleTolerated(t *testing.T) {
 		t.Errorf("want pass after preamble stripping, got %s: %s", r.Verdict, r.Explanation)
 	}
 }
+
+func TestChecklist_PreambleWithStrayBracket(t *testing.T) {
+	// A stray '[note]' before the real array must not confuse extractJSONArray.
+	client := &mockLLMClient{
+		resp: aiprovider.LLMResponse{
+			Completion: `Results [see 2 items]: [{"criterion":"c1","met":true,"explanation":"ok"},{"criterion":"c2","met":true,"explanation":"ok"}]`,
+		},
+	}
+	g, _ := NewChecklist(checklistDef([]any{"c1", "c2"}, 1.0), client)
+	r := g.Grade(context.Background(), map[string]any{"x": 1})
+	if r.Verdict != store.VerdictPass {
+		t.Errorf("want pass after extracting last JSON array, got %s: %s", r.Verdict, r.Explanation)
+	}
+}
+
+func TestChecklist_EmptyItemsGivesError(t *testing.T) {
+	// LLM returning an empty array is a grader error, not a pass or fail.
+	client := &mockLLMClient{
+		resp: aiprovider.LLMResponse{Completion: `[]`},
+	}
+	g, _ := NewChecklist(checklistDef([]any{"c1"}, 1.0), client)
+	r := g.Grade(context.Background(), map[string]any{"x": 1})
+	if r.Verdict != store.VerdictError {
+		t.Errorf("want error when LLM returns empty array, got %s", r.Verdict)
+	}
+}
+
+func TestChecklist_ZeroThresholdTreatedAsDefault(t *testing.T) {
+	// pass_threshold: 0.0 must be treated as "not configured" (defaults to 1.0),
+	// so a checklist where all criteria fail still returns VerdictFail.
+	client := &mockLLMClient{
+		resp: aiprovider.LLMResponse{Completion: `[{"criterion":"c1","met":false,"explanation":"no"},{"criterion":"c2","met":false,"explanation":"no"}]`},
+	}
+	g, err := NewChecklist(checklistDef([]any{"c1", "c2"}, 0.0), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := g.Grade(context.Background(), map[string]any{"x": 1})
+	if r.Verdict != store.VerdictFail {
+		t.Errorf("want fail when all criteria fail and threshold defaults to 1.0, got %s", r.Verdict)
+	}
+}

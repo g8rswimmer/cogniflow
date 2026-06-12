@@ -276,13 +276,23 @@ func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc s
 	}
 
 	// Compute pass/fail status.
-	isErr := runFailed
+	// VerdictError graders are excluded from the pass-rate denominator so they do not
+	// silently count as failing votes. If every grader errored (evaluableCount == 0),
+	// the test case is classified as an error rather than a failure.
+	errorGraderCount := 0
+	for _, gr := range graderResults {
+		if gr.Verdict == store.VerdictError {
+			errorGraderCount++
+		}
+	}
+	evaluableCount := len(graderResults) - errorGraderCount
+	isErr := runFailed || (len(tc.Graders) > 0 && evaluableCount == 0)
 	passed := false
 	if !isErr {
 		if len(tc.Graders) == 0 {
 			passed = true // smoke test: workflow completed without error
 		} else {
-			passRate := float64(passCount) / float64(len(tc.Graders))
+			passRate := float64(passCount) / float64(evaluableCount)
 			passed = passRate >= suite.PassThreshold
 		}
 	}

@@ -148,3 +148,31 @@ func TestLLMJudge_JSONPreambleTolerated(t *testing.T) {
 		t.Errorf("want pass after preamble stripping, got %s: %s", r.Verdict, r.Explanation)
 	}
 }
+
+func TestLLMJudge_PreambleWithStrayBrace(t *testing.T) {
+	// A stray '{note}' before the real JSON object must not confuse extractJSON.
+	client := &mockLLMClient{
+		resp: aiprovider.LLMResponse{
+			Completion: `Thinking: {consider context} {"verdict":"fail","explanation":"Too vague."}`,
+		},
+	}
+	g, _ := NewLLMJudge(judgeGraderDef("rubric", ""), client)
+	r := g.Grade(context.Background(), map[string]any{"x": 1})
+	if r.Verdict != store.VerdictFail {
+		t.Errorf("want fail after extracting last JSON object, got %s: %s", r.Verdict, r.Explanation)
+	}
+}
+
+func TestLLMJudge_NestedObjectInExplanation(t *testing.T) {
+	// A nested object inside the explanation field must not trip up extractJSON.
+	client := &mockLLMClient{
+		resp: aiprovider.LLMResponse{
+			Completion: `{"verdict":"pass","explanation":"Score: {\"rubric\":1}"}`,
+		},
+	}
+	g, _ := NewLLMJudge(judgeGraderDef("rubric", ""), client)
+	r := g.Grade(context.Background(), map[string]any{"x": 1})
+	if r.Verdict != store.VerdictPass {
+		t.Errorf("want pass with nested object in explanation, got %s: %s", r.Verdict, r.Explanation)
+	}
+}
