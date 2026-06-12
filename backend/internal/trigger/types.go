@@ -7,7 +7,8 @@ import "context"
 type RunRequest struct {
 	WorkflowID  string
 	InitialData map[string]any
-	TriggeredBy string // "manual" | "webhook" | "cron"
+	TriggeredBy string                     // "manual" | "webhook" | "cron" | "eval"
+	NodeMocks   map[string]map[string]any  // optional; eval engine sets this to stub nodes
 }
 
 // Dispatcher is the shared sink for all trigger types. engine.WorkflowEngine implements it.

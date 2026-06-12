@@ -87,7 +87,7 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 		defer cleanup()
 
 		start := time.Now()
-		finalOutput, runErr := runDAG(runCtx, run.ID, dag, req.InitialData, e.registry, e.bus)
+		finalOutput, runErr := runDAG(runCtx, run.ID, dag, req.InitialData, e.registry, e.bus, req.NodeMocks)
 		durationMs := time.Since(start).Milliseconds()
 
 		var statusUpdate store.RunStatus
