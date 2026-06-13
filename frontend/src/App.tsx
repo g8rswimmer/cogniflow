@@ -4,6 +4,9 @@ import { WorkflowListPage } from './pages/WorkflowListPage'
 import { WorkflowEditorPage } from './pages/WorkflowEditorPage'
 import { RunHistoryPage } from './pages/RunHistoryPage'
 import { RunDetailPage } from './pages/RunDetailPage'
+import { EvalSuiteListPage } from './pages/EvalSuiteListPage'
+import { EvalSuiteDetailPage } from './pages/EvalSuiteDetailPage'
+import { EvalRunDetailPage } from './pages/EvalRunDetailPage'
 import { ToastContainer } from './components/shared/ToastContainer'
 
 export default function App() {
@@ -40,6 +43,30 @@ export default function App() {
           element={
             <ErrorBoundary label="run detail">
               <RunDetailPage />
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/workflows/:id/eval-suites"
+          element={
+            <ErrorBoundary label="eval suites">
+              <EvalSuiteListPage />
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/eval-suites/:suite_id"
+          element={
+            <ErrorBoundary label="eval suite detail">
+              <EvalSuiteDetailPage />
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/eval-runs/:run_id"
+          element={
+            <ErrorBoundary label="eval run detail">
+              <EvalRunDetailPage />
             </ErrorBoundary>
           }
         />

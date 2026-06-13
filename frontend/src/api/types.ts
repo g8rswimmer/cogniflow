@@ -156,3 +156,115 @@ export interface TriggerRunResponse {
   triggered_by: string
   started_at: string
 }
+
+// ---------------------------------------------------------------------------
+// Eval types
+// ---------------------------------------------------------------------------
+
+export type GraderType = 'string_match' | 'numeric_threshold' | 'llm_judge' | 'json_schema' | 'checklist'
+export type GraderScope = 'workflow' | 'node'
+export type EvalRunStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type VerdictType = 'pass' | 'fail' | 'error'
+
+export interface GraderDef {
+  id: string
+  name: string
+  type: GraderType
+  scope: GraderScope
+  node_id?: string
+  config: Record<string, unknown>
+}
+
+export interface NodeMock {
+  node_id: string
+  output: Record<string, unknown>
+}
+
+export interface TestCase {
+  id: string
+  suite_id: string
+  name: string
+  description?: string
+  position: number
+  initial_data: Record<string, unknown>
+  mocks: NodeMock[]
+  graders: GraderDef[]
+  created_at: string
+  updated_at: string
+}
+
+export interface EvalSuite {
+  id: string
+  workflow_id: string
+  name: string
+  description?: string
+  pass_threshold: number
+  max_concurrency?: number
+  workflow_deleted?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface EvalSuiteListResponse {
+  eval_suites: EvalSuite[]
+}
+
+export interface TestCaseListResponse {
+  test_cases: TestCase[]
+}
+
+export interface CriterionResult {
+  criterion: string
+  met: boolean
+  explanation: string
+}
+
+export interface GraderResult {
+  grader_id: string
+  grader_name: string
+  grader_type: GraderType
+  verdict: VerdictType
+  explanation?: string
+  actual_value?: unknown
+  score?: number
+  criteria_results?: CriterionResult[]
+}
+
+export interface TestCaseResult {
+  id: string
+  eval_run_id: string
+  test_case_id: string
+  test_case_name: string
+  workflow_run_id: string
+  workflow_run_status: RunStatus
+  passed: boolean
+  grader_results: GraderResult[]
+  node_outputs?: Record<string, Record<string, unknown>>
+  created_at: string
+}
+
+export interface EvalRun {
+  id: string
+  suite_id: string
+  status: EvalRunStatus
+  total_cases: number
+  passed_count: number
+  failed_count: number
+  error_count: number
+  started_at?: string
+  finished_at?: string
+  created_at: string
+  test_case_results?: TestCaseResult[]
+}
+
+export interface EvalRunListResponse {
+  eval_runs: EvalRun[]
+}
+
+export interface TriggerEvalRunResponse {
+  id: string
+  suite_id: string
+  status: EvalRunStatus
+  total_cases: number
+  created_at: string
+}
