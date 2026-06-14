@@ -99,6 +99,7 @@ export function EvalSuiteDetailPage() {
   const upsertSuite = useEvalStore(s => s.upsertSuite)
 
   const [workflowNodes, setWorkflowNodes] = useState<NodeOption[]>([])
+  const [workflowReady, setWorkflowReady] = useState(false)
   const [initialDataSchema, setInitialDataSchema] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -116,17 +117,29 @@ export function EvalSuiteDetailPage() {
 
   const loadData = useCallback(async () => {
     if (!suiteId) return
+    console.log('[eval] loadData start for suiteId:', suiteId)
+
+    // Clear stale store state immediately so the page doesn't render with
+    // data from a previous suite while this fetch is in progress.
+    setActiveSuite(null)
+    setTestCases([])
+    setWorkflowNodes([])
+    setWorkflowReady(false)
     setLoading(true)
     setLoadError(null)
+
     try {
       const [suite, tcResp] = await Promise.all([
         api.getEvalSuite(suiteId),
         api.listTestCases(suiteId),
       ])
+      console.log('[eval] suite loaded:', suite.id, 'workflow_id:', suite.workflow_id)
       setActiveSuite(suite)
       const sorted = (tcResp.test_cases ?? []).sort((a, b) => a.position - b.position)
       setTestCases(sorted)
-      // Fetch the workflow for nodes and schema
+
+      // Fetch the workflow for nodes and initial-data schema.
+      // This is non-fatal: if the workflow was deleted, we continue with no nodes.
       try {
         const wf = await api.getWorkflow(suite.workflow_id)
         console.log('[eval] raw wf.nodes from API:', JSON.stringify(wf.nodes))
@@ -136,11 +149,14 @@ export function EvalSuiteDetailPage() {
             id: String(n.id ?? ''),
             label: String(n.label ?? n.id ?? '(unlabelled)'),
           }))
-        console.log('[eval] mapped nodeOptions:', JSON.stringify(nodeOptions))
+        console.log('[eval] nodeOptions ready:', JSON.stringify(nodeOptions))
         setWorkflowNodes(nodeOptions)
         setInitialDataSchema(wf.initial_data_schema ?? null)
       } catch (wfErr) {
-        console.warn('[eval] failed to load workflow (nodes will be empty):', wfErr)
+        console.warn('[eval] workflow fetch failed — node dropdown will be empty:', wfErr)
+      } finally {
+        // Always mark workflow as ready so the UI unblocks even on failure.
+        setWorkflowReady(true)
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load suite')
@@ -176,6 +192,11 @@ export function EvalSuiteDetailPage() {
   }
 
   const openEditor = (tc?: TestCase) => {
+    if (!workflowReady) {
+      console.warn('[eval] openEditor called before workflow nodes resolved — skipping')
+      return
+    }
+    console.log('[eval] opening editor, workflowNodes:', JSON.stringify(workflowNodes))
     setEditingCase(tc ?? null)
     setEditorErrors([])
     setEditorOpen(true)
@@ -374,9 +395,11 @@ export function EvalSuiteDetailPage() {
             <button
               type="button"
               onClick={() => openEditor()}
-              className="rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 transition-colors"
+              disabled={!workflowReady}
+              title={!workflowReady ? 'Loading workflow nodes…' : 'Add a new test case'}
+              className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-semibold px-3 py-1.5 transition-colors"
             >
-              + Add Test Case
+              {workflowReady ? '+ Add Test Case' : 'Loading…'}
             </button>
           </div>
 
