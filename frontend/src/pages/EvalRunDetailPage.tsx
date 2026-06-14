@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import type { EvalRun } from '../api/types'
+import { EvalRunResultsTable } from '../components/eval/EvalRunResultsTable'
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -63,10 +64,19 @@ export function EvalRunDetailPage() {
   }
 
   const isTerminal = run.status === 'completed' || run.status === 'failed'
+  const results = run.test_case_results ?? []
+
+  const duration = (() => {
+    if (!run.started_at || !run.finished_at) return null
+    const ms = new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
+    const s = Math.round(ms / 1000)
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+  })()
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-4xl mx-auto px-4 py-8">
+        {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <Link
             to={`/eval-suites/${run.suite_id}`}
@@ -104,68 +114,19 @@ export function EvalRunDetailPage() {
           {run.started_at && (
             <p className="text-xs text-gray-600 text-center mt-3">
               Started {new Date(run.started_at).toLocaleString()}
-              {run.finished_at && (
-                <> · {Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s</>
-              )}
+              {duration && <> · {duration}</>}
             </p>
           )}
         </div>
 
-        {/* Test case results (ME5 will expand this) */}
-        {run.test_case_results && run.test_case_results.length > 0 ? (
-          <div className="space-y-2">
-            {run.test_case_results.map(tcr => (
-              <div
-                key={tcr.id}
-                className={`rounded-lg border px-4 py-3 ${
-                  tcr.passed
-                    ? 'border-green-800 bg-green-900/20'
-                    : 'border-red-800 bg-red-900/20'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-100">{tcr.test_case_name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs font-semibold ${tcr.passed ? 'text-green-400' : 'text-red-400'}`}>
-                      {tcr.passed ? '✓ passed' : '✗ failed'}
-                    </span>
-                    <Link
-                      to={`/runs/${tcr.workflow_run_id}`}
-                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-                      onClick={e => e.stopPropagation()}
-                    >
-                      View Run →
-                    </Link>
-                  </div>
-                </div>
-                {tcr.grader_results.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {tcr.grader_results.map((gr, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-gray-400">
-                        <span className={`font-semibold flex-shrink-0 ${
-                          gr.verdict === 'pass' ? 'text-green-400' :
-                          gr.verdict === 'fail' ? 'text-red-400' : 'text-amber-400'
-                        }`}>
-                          {gr.verdict === 'pass' ? '✓' : gr.verdict === 'fail' ? '✗' : '!'}
-                        </span>
-                        <span className="text-gray-300">{gr.grader_name}</span>
-                        {gr.explanation && (
-                          <span className="text-gray-500 truncate">— {gr.explanation}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          !isTerminal && (
-            <p className="text-center text-gray-500 text-sm py-8">
-              Test cases are running… results will appear here.
-            </p>
-          )
-        )}
+        {/* Test case results */}
+        {results.length > 0 ? (
+          <EvalRunResultsTable results={results} />
+        ) : !isTerminal ? (
+          <p className="text-center text-gray-500 text-sm py-8">
+            Test cases are running… results will appear here.
+          </p>
+        ) : null}
       </div>
     </div>
   )

@@ -5,86 +5,10 @@ import { useEvalStore } from '../stores/useEvalStore'
 import { EvalSuiteForm } from '../components/eval/EvalSuiteForm'
 import { TestCaseList } from '../components/eval/TestCaseList'
 import { TestCaseEditor } from '../components/eval/TestCaseEditor'
+import { EvalRunHistory } from '../components/eval/EvalRunHistory'
 import { ApiError } from '../api/client'
-import type { EvalSuite, TestCase, EvalRun } from '../api/types'
+import type { EvalSuite, TestCase } from '../api/types'
 import type { NodeOption } from '../components/eval/MockEditor'
-
-function EvalRunHistoryPanel({ suiteId }: { suiteId: string }) {
-  const [runs, setRuns] = useState<EvalRun[]>([])
-  const [loading, setLoading] = useState(true)
-  const [open, setOpen] = useState(false)
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    if (!open) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true)
-    api.listEvalRuns(suiteId)
-      .then(r => setRuns(r.eval_runs ?? []))
-      .catch(() => setRuns([]))
-      .finally(() => setLoading(false))
-  }, [suiteId, open])
-
-  return (
-    <div className="border border-gray-700 rounded-lg overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-750 transition-colors text-left"
-      >
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Run History</span>
-        <span className="text-gray-500 text-xs">{open ? '▾' : '▸'}</span>
-      </button>
-
-      {open && (
-        <div className="border-t border-gray-700 bg-gray-900">
-          {loading ? (
-            <p className="text-xs text-gray-500 px-4 py-3">Loading…</p>
-          ) : runs.length === 0 ? (
-            <p className="text-xs text-gray-600 italic px-4 py-3">No runs yet.</p>
-          ) : (
-            <div className="divide-y divide-gray-800">
-              {runs.map(run => (
-                <div
-                  key={run.id}
-                  className="flex items-center justify-between px-4 py-2.5 hover:bg-gray-800 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/eval-runs/${run.id}`)}
-                >
-                  <div>
-                    <span className="text-xs font-mono text-gray-400">{run.id.slice(0, 8)}…</span>
-                    <span className="text-xs text-gray-600 ml-2">
-                      {run.started_at ? new Date(run.started_at).toLocaleString() : new Date(run.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">
-                      {run.passed_count}/{run.total_cases} passed
-                    </span>
-                    <RunStatusBadge status={run.status} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function RunStatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-gray-600 text-gray-300',
-    running: 'bg-amber-700 text-amber-200',
-    completed: 'bg-green-700 text-green-200',
-    failed: 'bg-red-700 text-red-200',
-  }
-  return (
-    <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${colors[status] ?? 'bg-gray-600 text-gray-300'}`}>
-      {status}
-    </span>
-  )
-}
 
 export function EvalSuiteDetailPage() {
   const { suite_id: suiteId } = useParams<{ suite_id: string }>()
@@ -114,6 +38,7 @@ export function EvalSuiteDetailPage() {
   const [editorErrors, setEditorErrors] = useState<{ field?: string; message: string }[]>([])
   const [deleting, setDeleting] = useState<string | null>(null)
   const [triggeringRun, setTriggeringRun] = useState(false)
+  const [latestRunId, setLatestRunId] = useState<string | undefined>()
 
   const loadData = useCallback(async () => {
     if (!suiteId) return
@@ -269,6 +194,7 @@ export function EvalSuiteDetailPage() {
     setTriggeringRun(true)
     try {
       const run = await api.triggerEvalRun(suiteId)
+      setLatestRunId(run.id)
       navigate(`/eval-runs/${run.id}`)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to start run')
@@ -407,7 +333,7 @@ export function EvalSuiteDetailPage() {
         </div>
 
         {/* Run history */}
-        <EvalRunHistoryPanel suiteId={activeSuite.id} />
+        <EvalRunHistory suiteId={activeSuite.id} latestRunId={latestRunId} />
       </div>
 
       {/* Suite edit form */}
