@@ -181,7 +181,19 @@ export function TestCaseEditor({
     parseFieldErrors(serverErrors)
 
   const handleSave = async () => {
-    await onSave({ name, description: description || undefined, initial_data: initialData, mocks, graders })
+    // Normalize LLM grader configs: the provider select displays 'anthropic'
+    // as a visual default but may not have written it into config if the user
+    // never touched the dropdown. Fill it in before sending to the backend.
+    const normalizedGraders = graders.map(g => {
+      if (g.type === 'llm_judge' || g.type === 'checklist') {
+        return {
+          ...g,
+          config: { provider: 'anthropic', ...g.config },
+        }
+      }
+      return g
+    })
+    await onSave({ name, description: description || undefined, initial_data: initialData, mocks, graders: normalizedGraders })
   }
 
   const updateGrader = (i: number, g: GraderDef) =>

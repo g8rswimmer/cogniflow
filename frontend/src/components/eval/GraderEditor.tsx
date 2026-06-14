@@ -81,7 +81,15 @@ export function GraderEditor({ grader, nodes, onChange, onRemove, fieldErrors }:
             <select
               className={selectCls}
               value={grader.type}
-              onChange={e => set('type', e.target.value as GraderType)}
+              onChange={e => {
+                const newType = e.target.value as GraderType
+                const isLLM = newType === 'llm_judge' || newType === 'checklist'
+                // Seed LLM defaults so config.provider is always set before save.
+                const config = isLLM && !grader.config.provider
+                  ? { ...grader.config, provider: 'anthropic', model: (grader.config.model as string) ?? '' }
+                  : grader.config
+                onChange({ ...grader, type: newType, config })
+              }}
             >
               {GRADER_TYPES.map(t => (
                 <option key={t.value} value={t.value}>{t.label}</option>

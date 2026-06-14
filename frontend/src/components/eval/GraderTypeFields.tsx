@@ -125,7 +125,7 @@ function LLMJudgeFields({ config, onChange, errors }: LLMJudgeProps) {
         <Field label="Provider" error={errors?.provider}>
           <select
             className={selectCls}
-            value={(config.provider as string) ?? 'anthropic'}
+            value={(config.provider as string) || 'anthropic'}
             onChange={e => set('provider', e.target.value)}
           >
             <option value="anthropic">Anthropic</option>
@@ -252,7 +252,7 @@ function ChecklistFields({ config, onChange, errors }: ChecklistProps) {
         <Field label="Provider" error={errors?.provider}>
           <select
             className={selectCls}
-            value={(config.provider as string) ?? 'anthropic'}
+            value={(config.provider as string) || 'anthropic'}
             onChange={e => set('provider', e.target.value)}
           >
             <option value="anthropic">Anthropic</option>
