@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { NodeMock } from '../../api/types'
-import type { WorkflowNode } from '../../stores/useWorkflowStore'
 
 const selectCls =
   'w-full rounded-md bg-gray-900 border border-gray-600 px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500'
@@ -8,9 +7,14 @@ const selectCls =
 const textareaCls =
   'w-full rounded-md bg-gray-900 border border-gray-600 px-3 py-1.5 text-sm text-gray-100 font-mono placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-y'
 
+export interface NodeOption {
+  id: string
+  label: string
+}
+
 interface Props {
   mock: NodeMock
-  nodes: WorkflowNode[]
+  nodes: NodeOption[]
   onChange: (mock: NodeMock) => void
   onRemove: () => void
   nodeError?: string
@@ -18,8 +22,9 @@ interface Props {
 }
 
 export function MockEditor({ mock, nodes, onChange, onRemove, nodeError, outputError }: Props) {
+  console.debug('[MockEditor] render nodes:', nodes)
   const [outputText, setOutputText] = useState(() =>
-    Object.keys(mock.output).length ? JSON.stringify(mock.output, null, 2) : ''
+    Object.keys(mock.output ?? {}).length ? JSON.stringify(mock.output, null, 2) : ''
   )
   const [jsonError, setJsonError] = useState<string | null>(null)
 
@@ -56,7 +61,7 @@ export function MockEditor({ mock, nodes, onChange, onRemove, nodeError, outputE
           >
             <option value="">— select a node —</option>
             {nodes.map(n => (
-              <option key={n.id} value={n.id}>{n.data.label} ({n.id})</option>
+              <option key={n.id} value={n.id}>{n.label} ({n.id})</option>
             ))}
           </select>
         </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { GraderDef, GraderScope, GraderType } from '../../api/types'
-import type { WorkflowNode } from '../../stores/useWorkflowStore'
+import type { NodeOption } from './MockEditor'
 import { GraderTypeFields } from './GraderTypeFields'
 
 const GRADER_TYPES: { value: GraderType; label: string }[] = [
@@ -19,7 +19,7 @@ const inputCls =
 
 interface Props {
   grader: GraderDef
-  nodes: WorkflowNode[]
+  nodes: NodeOption[]
   onChange: (grader: GraderDef) => void
   onRemove: () => void
   fieldErrors?: Record<string, string>
@@ -120,7 +120,7 @@ export function GraderEditor({ grader, nodes, onChange, onRemove, fieldErrors }:
               >
                 <option value="">— select a node —</option>
                 {nodes.map(n => (
-                  <option key={n.id} value={n.id}>{n.data.label} ({n.id})</option>
+                  <option key={n.id} value={n.id}>{n.label} ({n.id})</option>
                 ))}
               </select>
             </div>

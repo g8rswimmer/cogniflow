@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { TestCase, GraderDef, NodeMock, GraderType, GraderScope } from '../../api/types'
-import type { WorkflowNode } from '../../stores/useWorkflowStore'
 import { MockEditor } from './MockEditor'
+import type { NodeOption } from './MockEditor'
 import { GraderEditor } from './GraderEditor'
 
 const inputCls =
@@ -152,7 +152,7 @@ function InitialDataSection({ schema, value, onChange }: InitialDataProps) {
 
 interface Props {
   testCase?: TestCase
-  nodes: WorkflowNode[]
+  nodes: NodeOption[]
   initialDataSchema: Record<string, unknown> | null
   onSave: (data: Omit<TestCase, 'id' | 'suite_id' | 'position' | 'created_at' | 'updated_at'>) => Promise<void>
   onClose: () => void

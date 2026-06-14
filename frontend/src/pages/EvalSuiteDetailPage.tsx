@@ -7,7 +7,7 @@ import { TestCaseList } from '../components/eval/TestCaseList'
 import { TestCaseEditor } from '../components/eval/TestCaseEditor'
 import { ApiError } from '../api/client'
 import type { EvalSuite, TestCase, EvalRun } from '../api/types'
-import type { WorkflowNode } from '../stores/useWorkflowStore'
+import type { NodeOption } from '../components/eval/MockEditor'
 
 function EvalRunHistoryPanel({ suiteId }: { suiteId: string }) {
   const [runs, setRuns] = useState<EvalRun[]>([])
@@ -98,7 +98,7 @@ export function EvalSuiteDetailPage() {
   const removeTestCase = useEvalStore(s => s.removeTestCase)
   const upsertSuite = useEvalStore(s => s.upsertSuite)
 
-  const [workflowNodes, setWorkflowNodes] = useState<WorkflowNode[]>([])
+  const [workflowNodes, setWorkflowNodes] = useState<NodeOption[]>([])
   const [initialDataSchema, setInitialDataSchema] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -129,15 +129,12 @@ export function EvalSuiteDetailPage() {
       // Fetch the workflow for nodes and schema
       try {
         const wf = await api.getWorkflow(suite.workflow_id)
-        // Transform API nodes to the React Flow WorkflowNode shape that
-        // MockEditor and GraderEditor expect (data.label, not top-level label).
-        const rfNodes: WorkflowNode[] = wf.nodes.map(n => ({
+        const nodeOptions: NodeOption[] = (wf.nodes ?? []).map(n => ({
           id: n.id,
-          type: 'workflowNode',
-          position: n.position,
-          data: { type_id: n.type_id, label: n.label },
+          label: n.label,
         }))
-        setWorkflowNodes(rfNodes)
+        console.debug('[EvalSuiteDetailPage] workflow nodes loaded:', nodeOptions)
+        setWorkflowNodes(nodeOptions)
         setInitialDataSchema(wf.initial_data_schema ?? null)
       } catch {
         // Non-fatal: workflow may have been deleted
