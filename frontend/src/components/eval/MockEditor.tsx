@@ -22,7 +22,6 @@ interface Props {
 }
 
 export function MockEditor({ mock, nodes, onChange, onRemove, nodeError, outputError }: Props) {
-  console.log('[MockEditor] nodes received:', JSON.stringify(nodes))
   const safeNodes = (nodes ?? []).filter(
     (n): n is NodeOption => n != null && typeof n === 'object' && typeof n.id === 'string',
   )

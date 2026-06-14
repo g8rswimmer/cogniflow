@@ -36,13 +36,14 @@ export function EvalRunDetailPage() {
   // Poll while running
   useEffect(() => {
     if (!run || run.status === 'completed' || run.status === 'failed') return
+    let alive = true
     const id = setTimeout(() => {
       if (!runId) return
       api.getEvalRun(runId)
-        .then(r => setRun(r))
+        .then(r => { if (alive) setRun(r) })
         .catch(() => undefined)
     }, 2000)
-    return () => clearTimeout(id)
+    return () => { alive = false; clearTimeout(id) }
   }, [run, runId])
 
   if (loading) {

@@ -20,8 +20,10 @@ function newGrader(): GraderDef {
   }
 }
 
-function newMock(): NodeMock {
-  return { node_id: '', output: {} }
+type MockEntry = NodeMock & { _key: string }
+
+function newMock(): MockEntry {
+  return { node_id: '', output: {}, _key: crypto.randomUUID() }
 }
 
 // Parse server-side field errors from paths like "graders.0.config.rubric"
@@ -51,6 +53,41 @@ function parseFieldErrors(errs: { field?: string; message: string }[]) {
     general.push(f ? `${f}: ${e.message}` : e.message)
   }
   return { graders, mocks, general }
+}
+
+function JsonFieldInput({
+  val,
+  placeholder,
+  onChange: onParsedChange,
+}: {
+  val: unknown
+  placeholder: string
+  onChange: (v: unknown) => void
+}) {
+  const [text, setText] = useState(() =>
+    val != null ? JSON.stringify(val, null, 2) : ''
+  )
+  const [err, setErr] = useState<string | null>(null)
+  return (
+    <div className="space-y-1">
+      <textarea
+        rows={3}
+        className={textareaCls}
+        value={text}
+        placeholder={placeholder}
+        onChange={e => {
+          setText(e.target.value)
+          try {
+            onParsedChange(JSON.parse(e.target.value))
+            setErr(null)
+          } catch {
+            setErr('Invalid JSON')
+          }
+        }}
+      />
+      {err && <p className="text-xs text-red-400">{err}</p>}
+    </div>
+  )
 }
 
 interface SchemaProperty {
@@ -109,6 +146,12 @@ function InitialDataSection({ schema, value, onChange }: InitialDataProps) {
                   className={inputCls}
                   value={val !== undefined ? String(val) : ''}
                   onChange={e => setField(e.target.value === '' ? undefined : Number(e.target.value))}
+                />
+              ) : (type === 'object' || type === 'array') ? (
+                <JsonFieldInput
+                  val={val}
+                  placeholder={type === 'array' ? '[]' : '{}'}
+                  onChange={setField}
                 />
               ) : (
                 <input
@@ -174,7 +217,9 @@ export function TestCaseEditor({
   const [initialData, setInitialData] = useState<Record<string, unknown>>(
     testCase?.initial_data ?? {}
   )
-  const [mocks, setMocks] = useState<NodeMock[]>(testCase?.mocks ?? [])
+  const [mocks, setMocks] = useState<MockEntry[]>(
+    () => (testCase?.mocks ?? []).map(m => ({ ...m, _key: crypto.randomUUID() }))
+  )
   const [graders, setGraders] = useState<GraderDef[]>(testCase?.graders ?? [])
 
   const { graders: graderErrors, mocks: mockErrors, general: generalErrors } =
@@ -193,7 +238,7 @@ export function TestCaseEditor({
       }
       return g
     })
-    await onSave({ name, description: description || undefined, initial_data: initialData, mocks, graders: normalizedGraders })
+    await onSave({ name, description: description || undefined, initial_data: initialData, mocks: mocks.map(m => ({ node_id: m.node_id, output: m.output })), graders: normalizedGraders })
   }
 
   const updateGrader = (i: number, g: GraderDef) =>
@@ -203,7 +248,7 @@ export function TestCaseEditor({
     setGraders(prev => prev.filter((_, idx) => idx !== i))
 
   const updateMock = (i: number, m: NodeMock) =>
-    setMocks(prev => prev.map((x, idx) => idx === i ? m : x))
+    setMocks(prev => prev.map((x, idx) => idx === i ? { ...m, _key: x._key } : x))
 
   const removeMock = (i: number) =>
     setMocks(prev => prev.filter((_, idx) => idx !== i))
@@ -292,7 +337,7 @@ export function TestCaseEditor({
             <div className="space-y-2">
               {mocks.map((m, i) => (
                 <MockEditor
-                  key={i}
+                  key={m._key}
                   mock={m}
                   nodes={nodes}
                   onChange={updated => updateMock(i, updated)}

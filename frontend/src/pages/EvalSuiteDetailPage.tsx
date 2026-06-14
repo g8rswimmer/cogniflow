@@ -117,7 +117,6 @@ export function EvalSuiteDetailPage() {
 
   const loadData = useCallback(async () => {
     if (!suiteId) return
-    console.log('[eval] loadData start for suiteId:', suiteId)
 
     // Clear stale store state immediately so the page doesn't render with
     // data from a previous suite while this fetch is in progress.
@@ -133,7 +132,6 @@ export function EvalSuiteDetailPage() {
         api.getEvalSuite(suiteId),
         api.listTestCases(suiteId),
       ])
-      console.log('[eval] suite loaded:', suite.id, 'workflow_id:', suite.workflow_id)
       setActiveSuite(suite)
       const sorted = (tcResp.test_cases ?? []).sort((a, b) => a.position - b.position)
       setTestCases(sorted)
@@ -142,18 +140,16 @@ export function EvalSuiteDetailPage() {
       // This is non-fatal: if the workflow was deleted, we continue with no nodes.
       try {
         const wf = await api.getWorkflow(suite.workflow_id)
-        console.log('[eval] raw wf.nodes from API:', JSON.stringify(wf.nodes))
         const nodeOptions: NodeOption[] = (wf.nodes ?? [])
           .filter(n => n != null && typeof n === 'object')
           .map(n => ({
             id: String(n.id ?? ''),
             label: String(n.label ?? n.id ?? '(unlabelled)'),
           }))
-        console.log('[eval] nodeOptions ready:', JSON.stringify(nodeOptions))
         setWorkflowNodes(nodeOptions)
         setInitialDataSchema(wf.initial_data_schema ?? null)
-      } catch (wfErr) {
-        console.warn('[eval] workflow fetch failed — node dropdown will be empty:', wfErr)
+      } catch {
+        // workflow fetch failed — continue with empty node list
       } finally {
         // Always mark workflow as ready so the UI unblocks even on failure.
         setWorkflowReady(true)
@@ -192,11 +188,7 @@ export function EvalSuiteDetailPage() {
   }
 
   const openEditor = (tc?: TestCase) => {
-    if (!workflowReady) {
-      console.warn('[eval] openEditor called before workflow nodes resolved — skipping')
-      return
-    }
-    console.log('[eval] opening editor, workflowNodes:', JSON.stringify(workflowNodes))
+    if (!workflowReady) return
     setEditingCase(tc ?? null)
     setEditorErrors([])
     setEditorOpen(true)
@@ -280,6 +272,7 @@ export function EvalSuiteDetailPage() {
       navigate(`/eval-runs/${run.id}`)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to start run')
+    } finally {
       setTriggeringRun(false)
     }
   }

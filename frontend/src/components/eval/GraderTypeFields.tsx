@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { GraderType } from '../../api/types'
 
 const inputCls =
@@ -184,15 +185,23 @@ interface JSONSchemaProps {
 
 function JSONSchemaFields({ config, onChange, errors }: JSONSchemaProps) {
   const set = (k: string, v: unknown) => onChange({ ...config, [k]: v })
-  const schemaText = config._schema_text as string | undefined
-    ?? (config.schema ? JSON.stringify(config.schema, null, 2) : '')
+  // _schema_text is a legacy field that older saves may have written into config.
+  // We still use it to seed the textarea on load (preserving user formatting) but
+  // we never write it back to config, so it stops leaking into persisted records.
+  const [schemaText, setSchemaText] = useState<string>(
+    () => (config._schema_text as string | undefined)
+      ?? (config.schema ? JSON.stringify(config.schema, null, 2) : '')
+  )
+  const [schemaParseError, setSchemaParseError] = useState<string | null>(null)
 
   const handleSchemaChange = (text: string) => {
+    setSchemaText(text)
     try {
       const parsed = JSON.parse(text)
-      onChange({ ...config, schema: parsed, _schema_text: text })
+      setSchemaParseError(null)
+      onChange({ ...config, schema: parsed })
     } catch {
-      onChange({ ...config, _schema_text: text })
+      setSchemaParseError('Invalid JSON — schema will not be saved until corrected')
     }
   }
 
@@ -206,7 +215,7 @@ function JSONSchemaFields({ config, onChange, errors }: JSONSchemaProps) {
           onChange={e => set('field_path', e.target.value)}
         />
       </Field>
-      <Field label="JSON Schema" error={errors?.schema}>
+      <Field label="JSON Schema" error={errors?.schema ?? (schemaParseError ?? undefined)}>
         <textarea
           rows={6}
           className={`${inputCls} resize-y font-mono`}
