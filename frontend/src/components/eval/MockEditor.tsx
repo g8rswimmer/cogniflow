@@ -22,7 +22,10 @@ interface Props {
 }
 
 export function MockEditor({ mock, nodes, onChange, onRemove, nodeError, outputError }: Props) {
-  console.debug('[MockEditor] render nodes:', nodes)
+  console.log('[MockEditor] nodes received:', JSON.stringify(nodes))
+  const safeNodes = (nodes ?? []).filter(
+    (n): n is NodeOption => n != null && typeof n === 'object' && typeof n.id === 'string',
+  )
   const [outputText, setOutputText] = useState(() =>
     Object.keys(mock.output ?? {}).length ? JSON.stringify(mock.output, null, 2) : ''
   )
@@ -60,8 +63,8 @@ export function MockEditor({ mock, nodes, onChange, onRemove, nodeError, outputE
             onChange={e => onChange({ ...mock, node_id: e.target.value })}
           >
             <option value="">— select a node —</option>
-            {nodes.map(n => (
-              <option key={n.id} value={n.id}>{n.label} ({n.id})</option>
+            {safeNodes.map(n => (
+              <option key={n.id} value={n.id}>{n.label || n.id} ({n.id})</option>
             ))}
           </select>
         </div>

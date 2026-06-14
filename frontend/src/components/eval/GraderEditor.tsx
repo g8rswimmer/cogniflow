@@ -33,6 +33,10 @@ export function GraderEditor({ grader, nodes, onChange, onRemove, fieldErrors }:
 
   const scopeLabel = grader.scope === 'node' ? 'Node' : 'Workflow'
 
+  const safeNodes = (nodes ?? []).filter(
+    (n): n is NodeOption => n != null && typeof n === 'object' && typeof n.id === 'string',
+  )
+
   return (
     <div className="border border-gray-700 rounded-lg overflow-hidden">
       {/* Header row */}
@@ -119,8 +123,8 @@ export function GraderEditor({ grader, nodes, onChange, onRemove, fieldErrors }:
                 onChange={e => set('node_id', e.target.value || undefined)}
               >
                 <option value="">— select a node —</option>
-                {nodes.map(n => (
-                  <option key={n.id} value={n.id}>{n.label} ({n.id})</option>
+                {safeNodes.map(n => (
+                  <option key={n.id} value={n.id}>{n.label || n.id} ({n.id})</option>
                 ))}
               </select>
             </div>

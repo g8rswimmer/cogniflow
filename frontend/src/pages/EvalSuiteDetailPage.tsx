@@ -129,15 +129,18 @@ export function EvalSuiteDetailPage() {
       // Fetch the workflow for nodes and schema
       try {
         const wf = await api.getWorkflow(suite.workflow_id)
-        const nodeOptions: NodeOption[] = (wf.nodes ?? []).map(n => ({
-          id: n.id,
-          label: n.label,
-        }))
-        console.debug('[EvalSuiteDetailPage] workflow nodes loaded:', nodeOptions)
+        console.log('[eval] raw wf.nodes from API:', JSON.stringify(wf.nodes))
+        const nodeOptions: NodeOption[] = (wf.nodes ?? [])
+          .filter(n => n != null && typeof n === 'object')
+          .map(n => ({
+            id: String(n.id ?? ''),
+            label: String(n.label ?? n.id ?? '(unlabelled)'),
+          }))
+        console.log('[eval] mapped nodeOptions:', JSON.stringify(nodeOptions))
         setWorkflowNodes(nodeOptions)
         setInitialDataSchema(wf.initial_data_schema ?? null)
-      } catch {
-        // Non-fatal: workflow may have been deleted
+      } catch (wfErr) {
+        console.warn('[eval] failed to load workflow (nodes will be empty):', wfErr)
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load suite')
