@@ -97,6 +97,22 @@ export function Navbar({ onSave, onRun, saving, running }: Props) {
           <span className="capitalize">{trigger.kind}</span>
         </button>
 
+        {/* Eval Suites link — shown only for saved workflows */}
+        {workflowId && (
+          <Link
+            to={`/workflows/${workflowId}/eval-suites`}
+            className="
+              flex items-center gap-1.5 rounded-md border border-gray-600
+              bg-gray-700 hover:bg-gray-600 text-gray-200 px-2.5 py-1.5
+              text-xs font-medium transition-colors flex-shrink-0
+            "
+            title="Eval suites for this workflow"
+          >
+            <span>⚗</span>
+            <span>Evals</span>
+          </Link>
+        )}
+
         {/* Run button — enabled only when workflow is saved */}
         <button
           onClick={onRun}
