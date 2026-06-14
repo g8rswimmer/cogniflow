@@ -129,7 +129,15 @@ export function EvalSuiteDetailPage() {
       // Fetch the workflow for nodes and schema
       try {
         const wf = await api.getWorkflow(suite.workflow_id)
-        setWorkflowNodes(wf.nodes as unknown as WorkflowNode[])
+        // Transform API nodes to the React Flow WorkflowNode shape that
+        // MockEditor and GraderEditor expect (data.label, not top-level label).
+        const rfNodes: WorkflowNode[] = wf.nodes.map(n => ({
+          id: n.id,
+          type: 'workflowNode',
+          position: n.position,
+          data: { type_id: n.type_id, label: n.label },
+        }))
+        setWorkflowNodes(rfNodes)
         setInitialDataSchema(wf.initial_data_schema ?? null)
       } catch {
         // Non-fatal: workflow may have been deleted
