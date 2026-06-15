@@ -29,7 +29,7 @@ export function NodeStatusList({ entries }: Props) {
           >
             <button
               onClick={() => hasDetail && toggle(nodeId)}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${hasDetail ? 'hover:bg-gray-750 cursor-pointer' : 'cursor-default'}`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${hasDetail ? 'hover:bg-gray-700 cursor-pointer' : 'cursor-default'}`}
             >
               <span
                 className={`w-2 h-2 rounded-full flex-shrink-0 ${status ? (nodeStatusDot[status.status] ?? 'bg-gray-500') : 'bg-gray-600'}`}
