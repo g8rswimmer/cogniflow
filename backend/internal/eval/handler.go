@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -535,6 +537,64 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"id": evalRunID})
+}
+
+// WebhookTrigger handles POST /v1/eval-webhooks/{suite_id}.
+// Validates the Authorization: Bearer <token> header against the suite's
+// stored webhook secret and triggers an async eval run on success.
+func (h *Handler) WebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	suiteID := r.PathValue("suite_id")
+
+	suite, err := h.store.GetEvalSuite(r.Context(), suiteID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if suite.WorkflowDeleted {
+		writeError(w, http.StatusBadRequest, "WORKFLOW_DELETED", "linked workflow has been deleted")
+		return
+	}
+	if suite.TriggerKind != "webhook" {
+		writeError(w, http.StatusBadRequest, "INVALID_TRIGGER", "suite is not configured for webhook trigger")
+		return
+	}
+
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || token == "" {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization: Bearer <token> header required")
+		return
+	}
+
+	plainSecret, err := h.vault.DecryptValue(suite.WebhookSecret)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not verify webhook secret")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(plainSecret)) != 1 {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid webhook token")
+		return
+	}
+
+	if h.runner == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval run execution is not yet available")
+		return
+	}
+
+	evalRunID, err := h.runner.Execute(r.Context(), suiteID, "webhook")
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"eval_run_id": evalRunID})
 }
 
 // ListRuns handles GET /v1/eval-suites/{suite_id}/runs.
