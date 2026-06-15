@@ -2,57 +2,39 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../hooks/useApi'
 import type { EvalRun } from '../../api/types'
-
-function RunStatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-gray-600 text-gray-300',
-    running: 'bg-amber-700 text-amber-200',
-    completed: 'bg-green-700 text-green-200',
-    failed: 'bg-red-700 text-red-200',
-  }
-  return (
-    <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${colors[status] ?? 'bg-gray-600 text-gray-300'}`}>
-      {status}
-    </span>
-  )
-}
-
-function duration(run: EvalRun): string {
-  if (!run.started_at || !run.finished_at) return ''
-  const ms = new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  return `${Math.floor(s / 60)}m ${s % 60}s`
-}
+import { EvalRunStatusBadge } from './EvalRunStatusBadge'
+import { formatDuration } from '../../utils/formatDuration'
 
 interface Props {
   suiteId: string
-  /** If provided, a newly triggered run ID to highlight/refresh on. */
-  latestRunId?: string
 }
 
-export function EvalRunHistory({ suiteId, latestRunId }: Props) {
+export function EvalRunHistory({ suiteId }: Props) {
   const navigate = useNavigate()
   const [runs, setRuns] = useState<EvalRun[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [fetchError, setFetchError] = useState(false)
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
+    let alive = true
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
+    setFetchError(false)
     api.listEvalRuns(suiteId)
-      .then(r => setRuns(r.eval_runs ?? []))
-      .catch(() => setRuns([]))
-      .finally(() => setLoading(false))
-  }, [suiteId, open, latestRunId])
+      .then(r => { if (alive) setRuns(r.eval_runs ?? []) })
+      .catch(() => { if (alive) setFetchError(true) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [suiteId, open])
 
   return (
     <div className="border border-gray-700 rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-750 transition-colors text-left"
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-700 transition-colors text-left"
       >
         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Run History</span>
         <span className="text-gray-500 text-xs">{open ? '▾' : '▸'}</span>
@@ -62,12 +44,14 @@ export function EvalRunHistory({ suiteId, latestRunId }: Props) {
         <div className="border-t border-gray-700 bg-gray-900">
           {loading ? (
             <p className="text-xs text-gray-500 px-4 py-3">Loading…</p>
+          ) : fetchError ? (
+            <p className="text-xs text-red-400 px-4 py-3">Failed to load run history.</p>
           ) : runs.length === 0 ? (
             <p className="text-xs text-gray-600 italic px-4 py-3">No runs yet.</p>
           ) : (
             <div className="divide-y divide-gray-800">
               {runs.map(run => {
-                const dur = duration(run)
+                const dur = formatDuration(run.started_at, run.finished_at)
                 return (
                   <div
                     key={run.id}
@@ -89,7 +73,7 @@ export function EvalRunHistory({ suiteId, latestRunId }: Props) {
                       <span className="text-xs text-gray-400">
                         {run.passed_count}/{run.total_cases} passed
                       </span>
-                      <RunStatusBadge status={run.status} />
+                      <EvalRunStatusBadge status={run.status} size="sm" />
                     </div>
                   </div>
                 )

@@ -74,8 +74,8 @@ function TestCaseResultRow({ result }: { result: TestCaseResult }) {
             </p>
           ) : (
             <div className="space-y-3">
-              {result.grader_results.map((gr, i) => (
-                <GraderResultRow key={i} result={gr} />
+              {result.grader_results.map(gr => (
+                <GraderResultRow key={gr.grader_id} result={gr} />
               ))}
             </div>
           )}

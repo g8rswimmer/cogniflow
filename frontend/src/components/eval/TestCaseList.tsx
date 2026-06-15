@@ -23,7 +23,7 @@ export function TestCaseList({ testCases, onEdit, onDelete, onMoveUp, onMoveDown
       {testCases.map((tc, i) => (
         <div
           key={tc.id}
-          className="flex items-center gap-3 rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-750 transition-colors group"
+          className="flex items-center gap-3 rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-700 transition-colors group"
           style={{ background: deleting === tc.id ? '#1f1f1f' : undefined }}
         >
           {/* Reorder buttons */}

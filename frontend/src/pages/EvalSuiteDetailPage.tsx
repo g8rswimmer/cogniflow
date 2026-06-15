@@ -38,7 +38,6 @@ export function EvalSuiteDetailPage() {
   const [editorErrors, setEditorErrors] = useState<{ field?: string; message: string }[]>([])
   const [deleting, setDeleting] = useState<string | null>(null)
   const [triggeringRun, setTriggeringRun] = useState(false)
-  const [latestRunId, setLatestRunId] = useState<string | undefined>()
 
   const loadData = useCallback(async () => {
     if (!suiteId) return
@@ -194,7 +193,6 @@ export function EvalSuiteDetailPage() {
     setTriggeringRun(true)
     try {
       const run = await api.triggerEvalRun(suiteId)
-      setLatestRunId(run.id)
       navigate(`/eval-runs/${run.id}`)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to start run')
@@ -333,7 +331,7 @@ export function EvalSuiteDetailPage() {
         </div>
 
         {/* Run history */}
-        <EvalRunHistory suiteId={activeSuite.id} latestRunId={latestRunId} />
+        <EvalRunHistory suiteId={activeSuite.id} />
       </div>
 
       {/* Suite edit form */}

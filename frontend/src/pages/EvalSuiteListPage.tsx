@@ -129,7 +129,7 @@ export function EvalSuiteListPage() {
           {suites.map(suite => (
             <div
               key={suite.id}
-              className="rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-750 transition-colors group cursor-pointer"
+              className="rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-700 transition-colors group cursor-pointer"
               onClick={() => navigate(`/eval-suites/${suite.id}`)}
             >
               <div className="flex items-start justify-between gap-4">

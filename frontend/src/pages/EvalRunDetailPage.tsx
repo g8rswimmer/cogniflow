@@ -3,26 +3,15 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import type { EvalRun } from '../api/types'
 import { EvalRunResultsTable } from '../components/eval/EvalRunResultsTable'
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-gray-600 text-gray-300',
-    running: 'bg-amber-700 text-amber-200',
-    completed: 'bg-green-700 text-green-200',
-    failed: 'bg-red-700 text-red-200',
-  }
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${colors[status] ?? 'bg-gray-600 text-gray-300'}`}>
-      {status}
-    </span>
-  )
-}
+import { EvalRunStatusBadge } from '../components/eval/EvalRunStatusBadge'
+import { formatDuration } from '../utils/formatDuration'
 
 export function EvalRunDetailPage() {
   const { run_id: runId } = useParams<{ run_id: string }>()
   const [run, setRun] = useState<EvalRun | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [pollTick, setPollTick] = useState(0)
 
   useEffect(() => {
     if (!runId) return
@@ -34,7 +23,8 @@ export function EvalRunDetailPage() {
       .finally(() => setLoading(false))
   }, [runId])
 
-  // Poll while running
+  // Poll while running — increment pollTick on error so the effect re-triggers
+  // even when run hasn't changed, keeping the polling chain alive.
   useEffect(() => {
     if (!run || run.status === 'completed' || run.status === 'failed') return
     let alive = true
@@ -42,10 +32,10 @@ export function EvalRunDetailPage() {
       if (!runId) return
       api.getEvalRun(runId)
         .then(r => { if (alive) setRun(r) })
-        .catch(() => undefined)
+        .catch(() => { if (alive) setPollTick(t => t + 1) })
     }, 2000)
     return () => { alive = false; clearTimeout(id) }
-  }, [run, runId])
+  }, [run, runId, pollTick])
 
   if (loading) {
     return (
@@ -65,13 +55,7 @@ export function EvalRunDetailPage() {
 
   const isTerminal = run.status === 'completed' || run.status === 'failed'
   const results = run.test_case_results ?? []
-
-  const duration = (() => {
-    if (!run.started_at || !run.finished_at) return null
-    const ms = new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
-    const s = Math.round(ms / 1000)
-    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
-  })()
+  const duration = formatDuration(run.started_at, run.finished_at)
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -85,7 +69,7 @@ export function EvalRunDetailPage() {
             ← Back to Suite
           </Link>
           <h1 className="text-xl font-bold text-gray-100">Eval Run</h1>
-          <StatusBadge status={run.status} />
+          <EvalRunStatusBadge status={run.status} />
           {!isTerminal && (
             <span className="text-xs text-amber-400 animate-pulse">Polling every 2s…</span>
           )}
