@@ -98,8 +98,8 @@ export function EvalSuiteDetailPage() {
       setActiveSuite(updated)
       upsertSuite(updated)
       setShowSuiteForm(false)
-      if (updated.webhook_secret && updated.webhook_secret !== '***') {
-        setPendingSecret({ webhookUrl: updated.webhook_url!, secret: updated.webhook_secret })
+      if (updated.webhook_secret && updated.webhook_secret !== '***' && updated.webhook_url) {
+        setPendingSecret({ webhookUrl: updated.webhook_url, secret: updated.webhook_secret })
       }
     } catch (err) {
       setSuiteFormError(err instanceof Error ? err.message : 'Failed to update suite')
@@ -115,8 +115,8 @@ export function EvalSuiteDetailPage() {
       const updated = await api.updateEvalSuite(suiteId, { rotate_webhook_secret: true })
       setActiveSuite(updated)
       upsertSuite(updated)
-      if (updated.webhook_secret && updated.webhook_secret !== '***') {
-        setPendingSecret({ webhookUrl: updated.webhook_url!, secret: updated.webhook_secret })
+      if (updated.webhook_secret && updated.webhook_secret !== '***' && updated.webhook_url) {
+        setPendingSecret({ webhookUrl: updated.webhook_url, secret: updated.webhook_secret })
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Rotate failed')

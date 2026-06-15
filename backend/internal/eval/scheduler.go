@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -77,6 +78,10 @@ func (s *EvalScheduler) Arm(suiteID, cronExpr string) error {
 		if _, err := s.runner.Execute(s.ctx, suiteID, "cron"); err != nil {
 			slog.Error("eval scheduler: cron fire failed",
 				"suite_id", suiteID, "error", err)
+			if errors.Is(err, ErrWorkflowDeleted) {
+				slog.Info("eval scheduler: disarming suite with deleted workflow", "suite_id", suiteID)
+				s.Disarm(suiteID)
+			}
 		}
 	})
 	if err != nil {

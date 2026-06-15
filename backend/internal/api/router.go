@@ -76,7 +76,7 @@ func NewRouter(
 	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory())
 
 	evalSched := eval.NewEvalScheduler(srvCtx, runner)
-	if cronSuites, err := st.ListEvalSuitesByCronTrigger(context.Background()); err != nil {
+	if cronSuites, err := st.ListEvalSuitesByCronTrigger(srvCtx); err != nil {
 		slog.Warn("eval scheduler: could not load cron suites at startup", "error", err)
 	} else {
 		evalSched.LoadAll(cronSuites)

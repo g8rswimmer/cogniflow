@@ -57,8 +57,8 @@ export function EvalSuiteListPage() {
       const suite = await api.createEvalSuite(workflowId, data)
       upsertSuite(suite)
       setShowForm(false)
-      if (suite.webhook_secret && suite.webhook_secret !== '***') {
-        setPendingSecret({ webhookUrl: suite.webhook_url!, secret: suite.webhook_secret })
+      if (suite.webhook_secret && suite.webhook_secret !== '***' && suite.webhook_url) {
+        setPendingSecret({ webhookUrl: suite.webhook_url, secret: suite.webhook_secret })
       }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to create suite')
@@ -75,8 +75,8 @@ export function EvalSuiteListPage() {
       const suite = await api.updateEvalSuite(editingSuite.id, data)
       upsertSuite(suite)
       setEditingSuite(null)
-      if (suite.webhook_secret && suite.webhook_secret !== '***') {
-        setPendingSecret({ webhookUrl: suite.webhook_url!, secret: suite.webhook_secret })
+      if (suite.webhook_secret && suite.webhook_secret !== '***' && suite.webhook_url) {
+        setPendingSecret({ webhookUrl: suite.webhook_url, secret: suite.webhook_secret })
       }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to update suite')

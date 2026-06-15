@@ -118,7 +118,7 @@ func (s *WorkflowStore) ListEvalSuitesByCronTrigger(ctx context.Context) ([]stor
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted,
 		        trigger_kind, trigger_config, created_at, updated_at
-		 FROM eval_suites WHERE trigger_kind = 'cron'`)
+		 FROM eval_suites WHERE trigger_kind = 'cron' AND workflow_deleted = FALSE`)
 	if err != nil {
 		return nil, fmt.Errorf("eval store: list cron suites: %w", err)
 	}

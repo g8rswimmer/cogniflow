@@ -14,6 +14,11 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
+// ErrWorkflowDeleted is returned by Execute when the suite's workflow has been deleted.
+// Callers (handler, scheduler) can use errors.Is to produce the right response code or
+// self-disarm a cron job rather than logging an opaque internal error.
+var ErrWorkflowDeleted = fmt.Errorf("eval runner: workflow has been deleted")
+
 // engineRunner is the minimal interface the eval runner needs from the workflow engine.
 // *engine.WorkflowEngine satisfies it.
 type engineRunner interface {
@@ -46,7 +51,7 @@ func (r *EvalRunner) Execute(ctx context.Context, suiteID string, triggeredBy st
 		return "", fmt.Errorf("eval runner: get suite: %w", err)
 	}
 	if suite.WorkflowDeleted {
-		return "", fmt.Errorf("eval runner: workflow has been deleted; cannot trigger run")
+		return "", ErrWorkflowDeleted
 	}
 
 	testCases, err := r.store.ListTestCases(ctx, suiteID)

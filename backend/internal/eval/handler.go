@@ -55,6 +55,11 @@ func (h *Handler) ListByWorkflow(w http.ResponseWriter, r *http.Request) {
 	if suites == nil {
 		suites = []store.EvalSuiteSummary{}
 	}
+	// Never expose the encrypted webhook secret in list responses; callers receive
+	// the plaintext only on create or explicit rotation via the detail endpoint.
+	for i := range suites {
+		suites[i].WebhookSecret = ""
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"eval_suites": suites})
 }
 
@@ -142,23 +147,27 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name                 string  `json:"name"`
-		Description          *string `json:"description"` // pointer so omitted ≠ explicit empty string
-		PassThreshold        float64 `json:"pass_threshold"`
-		MaxConcurrency       int     `json:"max_concurrency"`
-		TriggerKind          string  `json:"trigger_kind"`
-		CronExpr             string  `json:"cron_expr"`
-		RotateWebhookSecret  bool    `json:"rotate_webhook_secret"`
+		Name                string   `json:"name"`
+		Description         *string  `json:"description"` // pointer so omitted ≠ explicit empty string
+		PassThreshold       *float64 `json:"pass_threshold"` // pointer: nil = omitted, 0.0 = explicit zero
+		MaxConcurrency      int      `json:"max_concurrency"`
+		TriggerKind         string   `json:"trigger_kind"`
+		CronExpr            string   `json:"cron_expr"`
+		RotateWebhookSecret bool     `json:"rotate_webhook_secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body: "+err.Error())
 		return
 	}
+	if body.RotateWebhookSecret && body.TriggerKind != "" && body.TriggerKind != "webhook" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "rotate_webhook_secret cannot be combined with a non-webhook trigger_kind")
+		return
+	}
 	if body.Name == "" {
 		body.Name = existing.Name
 	}
-	if body.PassThreshold == 0 {
-		body.PassThreshold = existing.PassThreshold
+	if body.PassThreshold != nil {
+		existing.PassThreshold = *body.PassThreshold
 	}
 	if body.MaxConcurrency == 0 {
 		body.MaxConcurrency = existing.MaxConcurrency
@@ -168,7 +177,6 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	if body.Description != nil {
 		existing.Description = *body.Description
 	}
-	existing.PassThreshold = body.PassThreshold
 	existing.MaxConcurrency = body.MaxConcurrency
 
 	// Apply trigger changes. If trigger_kind is omitted, keep the existing one.
@@ -184,7 +192,9 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 		existing.TriggerKind = "webhook"
 	}
 
-	plainSecret, err := h.applyTrigger(&existing, body.RotateWebhookSecret)
+	// Generate a new secret when switching to webhook (empty secret) or rotating.
+	generateSecret := body.RotateWebhookSecret || (existing.TriggerKind == "webhook" && existing.WebhookSecret == "")
+	plainSecret, err := h.applyTrigger(&existing, generateSecret)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 		return
@@ -532,6 +542,10 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
 			return
 		}
+		if errors.Is(err, ErrWorkflowDeleted) {
+			writeError(w, http.StatusBadRequest, "WORKFLOW_DELETED", "linked workflow has been deleted")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
@@ -563,8 +577,15 @@ func (h *Handler) WebhookTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || token == "" {
+	// RFC 7617: the "Bearer" scheme name is case-insensitive.
+	authHeader := r.Header.Get("Authorization")
+	const bearerPrefix = "bearer "
+	if len(authHeader) <= len(bearerPrefix) || !strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization: Bearer <token> header required")
+		return
+	}
+	token := authHeader[len(bearerPrefix):]
+	if token == "" {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization: Bearer <token> header required")
 		return
 	}
