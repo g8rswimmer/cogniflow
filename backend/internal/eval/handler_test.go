@@ -30,7 +30,7 @@ func newTestHandler(t *testing.T) (*Handler, *stubStore) {
 	}
 	v := NewGraderVault(c)
 	st := newStubStore()
-	h := NewHandler(st, v, node.NewRegistry(), nil)
+	h := NewHandler(st, v, node.NewRegistry(), nil, nil)
 	return h, st
 }
 

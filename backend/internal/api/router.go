@@ -74,7 +74,16 @@ func NewRouter(
 	// Eval routes — suite CRUD, test case CRUD, and run execution.
 	vault := eval.NewGraderVault(cipher)
 	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory())
-	eh := eval.NewHandler(st, vault, registry, runner)
+
+	evalSched := eval.NewEvalScheduler(srvCtx, runner)
+	if cronSuites, err := st.ListEvalSuitesByCronTrigger(context.Background()); err != nil {
+		slog.Warn("eval scheduler: could not load cron suites at startup", "error", err)
+	} else {
+		evalSched.LoadAll(cronSuites)
+	}
+	evalSched.Start()
+
+	eh := eval.NewHandler(st, vault, registry, runner, evalSched)
 
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}/eval-suites", eh.ListByWorkflow)
 	mux.HandleFunc("POST /v1/workflows/{workflow_id}/eval-suites", eh.CreateSuite)

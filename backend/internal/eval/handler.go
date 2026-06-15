@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -27,15 +28,16 @@ type evalRunnerI interface {
 // Handler provides HTTP handlers for all eval endpoints.
 // It follows the same struct+methods pattern as the other handlers in api/.
 type Handler struct {
-	store    store.Store
-	vault    *GraderVault
-	registry *node.NodeRegistry
-	runner   evalRunnerI // nil when eval execution not yet wired (safe: TriggerRun guards nil)
+	store     store.Store
+	vault     *GraderVault
+	registry  *node.NodeRegistry
+	runner    evalRunnerI    // nil when eval execution not yet wired (safe: TriggerRun guards nil)
+	scheduler *EvalScheduler // nil-safe; arms/disarms cron jobs on suite CRUD
 }
 
 // NewHandler creates a Handler.
-func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI) *Handler {
-	return &Handler{store: st, vault: vault, registry: registry, runner: runner}
+func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI, scheduler *EvalScheduler) *Handler {
+	return &Handler{store: st, vault: vault, registry: registry, runner: runner, scheduler: scheduler}
 }
 
 // ---- Suite endpoints -------------------------------------------------------
@@ -81,6 +83,11 @@ func (h *Handler) CreateSuite(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
+	}
+	if created.TriggerKind == "cron" {
+		if err := h.scheduler.Arm(created.ID, created.CronExpr); err != nil {
+			slog.Warn("eval handler: failed to arm cron suite", "suite_id", created.ID, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusCreated, suiteResponse(created, plainSecret))
 }
@@ -190,6 +197,14 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+	switch updated.TriggerKind {
+	case "cron":
+		if err := h.scheduler.Arm(updated.ID, updated.CronExpr); err != nil {
+			slog.Warn("eval handler: failed to arm cron suite", "suite_id", updated.ID, "error", err)
+		}
+	default:
+		h.scheduler.Disarm(updated.ID)
+	}
 	writeJSON(w, http.StatusOK, suiteResponse(updated, plainSecret))
 }
 
@@ -205,6 +220,7 @@ func (h *Handler) DeleteSuite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+	h.scheduler.Disarm(suiteID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
