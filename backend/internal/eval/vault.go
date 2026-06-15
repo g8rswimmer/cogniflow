@@ -126,6 +126,40 @@ func (v *GraderVault) MaskGraders(graders []store.GraderDef) []store.GraderDef {
 	return result
 }
 
+// EncryptValue encrypts a plain-text string using the same AES-256-GCM cipher
+// and "enc:<base64>" format as grader api_keys. Used for the webhook_secret.
+// Already-encrypted values (valid "enc:..." prefix) are returned unchanged.
+func (v *GraderVault) EncryptValue(plaintext string) (string, error) {
+	if strings.HasPrefix(plaintext, encPrefix) {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(plaintext, encPrefix))
+		if err == nil && len(decoded) >= minCiphertextLen {
+			return plaintext, nil
+		}
+	}
+	ciphertext, err := v.cipher.Encrypt([]byte(plaintext))
+	if err != nil {
+		return "", fmt.Errorf("grader vault: encrypt value: %w", err)
+	}
+	return encPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+// DecryptValue decrypts an "enc:..." string produced by EncryptValue.
+// Returns the input unchanged if it is not prefixed with "enc:".
+func (v *GraderVault) DecryptValue(encrypted string) (string, error) {
+	if !strings.HasPrefix(encrypted, encPrefix) {
+		return encrypted, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(encrypted, encPrefix))
+	if err != nil {
+		return "", fmt.Errorf("grader vault: base64 decode value: %w", err)
+	}
+	plaintext, err := v.cipher.Decrypt(decoded)
+	if err != nil {
+		return "", fmt.Errorf("grader vault: decrypt value: %w", err)
+	}
+	return string(plaintext), nil
+}
+
 func cloneConfig(src map[string]any) map[string]any {
 	dst := make(map[string]any, len(src))
 	for k, v := range src {

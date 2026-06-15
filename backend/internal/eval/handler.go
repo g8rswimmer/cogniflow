@@ -2,6 +2,8 @@ package eval
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
+	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
 const maxBodyBytes = 1 << 20 // 1 MB
@@ -18,7 +21,7 @@ const maxBodyBytes = 1 << 20 // 1 MB
 // evalRunnerI is the minimal interface the handler needs from EvalRunner.
 // *EvalRunner satisfies it; a stub can be injected in tests.
 type evalRunnerI interface {
-	Execute(ctx context.Context, suiteID string) (string, error)
+	Execute(ctx context.Context, suiteID string, triggeredBy string) (string, error)
 }
 
 // Handler provides HTTP handlers for all eval endpoints.
@@ -68,12 +71,18 @@ func (h *Handler) CreateSuite(w http.ResponseWriter, r *http.Request) {
 	body.WorkflowID = workflowID
 	applyDefaults(&body)
 
+	plainSecret, err := h.applyTrigger(&body, true)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	created, err := h.store.CreateEvalSuite(r.Context(), body)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	writeJSON(w, http.StatusCreated, suiteResponse(created, plainSecret))
 }
 
 // GetSuite handles GET /v1/eval-suites/{suite_id}.
@@ -103,18 +112,9 @@ func (h *Handler) GetSuite(w http.ResponseWriter, r *http.Request) {
 		testCases[i].Graders = h.vault.MaskGraders(testCases[i].Graders)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":               suite.ID,
-		"workflow_id":      suite.WorkflowID,
-		"name":             suite.Name,
-		"description":      suite.Description,
-		"pass_threshold":   suite.PassThreshold,
-		"max_concurrency":  suite.MaxConcurrency,
-		"workflow_deleted": suite.WorkflowDeleted,
-		"created_at":       suite.CreatedAt,
-		"updated_at":       suite.UpdatedAt,
-		"test_cases":       testCases,
-	})
+	resp := suiteResponse(suite, "") // secret masked on GET
+	resp["test_cases"] = testCases
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // UpdateSuite handles PUT /v1/eval-suites/{suite_id}.
@@ -133,10 +133,13 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name           string  `json:"name"`
-		Description    *string `json:"description"` // pointer so omitted ≠ explicit empty string
-		PassThreshold  float64 `json:"pass_threshold"`
-		MaxConcurrency int     `json:"max_concurrency"`
+		Name                 string  `json:"name"`
+		Description          *string `json:"description"` // pointer so omitted ≠ explicit empty string
+		PassThreshold        float64 `json:"pass_threshold"`
+		MaxConcurrency       int     `json:"max_concurrency"`
+		TriggerKind          string  `json:"trigger_kind"`
+		CronExpr             string  `json:"cron_expr"`
+		RotateWebhookSecret  bool    `json:"rotate_webhook_secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body: "+err.Error())
@@ -159,6 +162,25 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	existing.PassThreshold = body.PassThreshold
 	existing.MaxConcurrency = body.MaxConcurrency
 
+	// Apply trigger changes. If trigger_kind is omitted, keep the existing one.
+	if body.TriggerKind != "" {
+		existing.TriggerKind = body.TriggerKind
+		existing.CronExpr = body.CronExpr
+		if body.TriggerKind != "webhook" {
+			existing.WebhookSecret = "" // clear secret when switching away from webhook
+		}
+	}
+	// Rotate the webhook secret when explicitly requested.
+	if body.RotateWebhookSecret {
+		existing.TriggerKind = "webhook"
+	}
+
+	plainSecret, err := h.applyTrigger(&existing, body.RotateWebhookSecret)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	updated, err := h.store.UpdateEvalSuite(r.Context(), existing)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -168,7 +190,7 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, suiteResponse(updated, plainSecret))
 }
 
 // DeleteSuite handles DELETE /v1/eval-suites/{suite_id}.
@@ -486,7 +508,7 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	evalRunID, err := h.runner.Execute(r.Context(), suiteID)
+	evalRunID, err := h.runner.Execute(r.Context(), suiteID, "manual")
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
@@ -716,6 +738,75 @@ func applyDefaults(s *store.EvalSuite) {
 	if s.MaxConcurrency == 0 {
 		s.MaxConcurrency = 1
 	}
+	if s.TriggerKind == "" {
+		s.TriggerKind = "none"
+	}
+}
+
+// applyTrigger validates trigger config and, for webhook suites, generates or
+// rotates the secret. generateSecret should be true on create and on secret rotation.
+// Returns the plain-text secret (non-empty only when a new secret was generated).
+// Mutates s.WebhookSecret in place with the encrypted value before returning.
+func (h *Handler) applyTrigger(s *store.EvalSuite, generateSecret bool) (string, error) {
+	switch s.TriggerKind {
+	case "", "none":
+		s.TriggerKind = "none"
+		s.CronExpr = ""
+		s.WebhookSecret = ""
+	case "cron":
+		if err := trigger.ValidateCronExpr(s.CronExpr); err != nil {
+			return "", fmt.Errorf("invalid cron_expr: %w", err)
+		}
+		s.WebhookSecret = ""
+	case "webhook":
+		if generateSecret {
+			raw := make([]byte, 32)
+			if _, err := rand.Read(raw); err != nil {
+				return "", fmt.Errorf("generate webhook secret: %w", err)
+			}
+			plain := hex.EncodeToString(raw)
+			enc, err := h.vault.EncryptValue(plain)
+			if err != nil {
+				return "", fmt.Errorf("encrypt webhook secret: %w", err)
+			}
+			s.WebhookSecret = enc
+			return plain, nil
+		}
+		// Keep existing encrypted secret unchanged.
+	default:
+		return "", fmt.Errorf("trigger_kind must be one of: none, cron, webhook")
+	}
+	return "", nil
+}
+
+// suiteResponse builds the JSON map for suite create/get/update responses.
+// plainSecret is non-empty only on create or secret rotation (one-time reveal).
+// On all other reads the webhook_secret field is omitted or masked.
+func suiteResponse(s store.EvalSuite, plainSecret string) map[string]any {
+	resp := map[string]any{
+		"id":               s.ID,
+		"workflow_id":      s.WorkflowID,
+		"name":             s.Name,
+		"description":      s.Description,
+		"pass_threshold":   s.PassThreshold,
+		"max_concurrency":  s.MaxConcurrency,
+		"workflow_deleted": s.WorkflowDeleted,
+		"trigger_kind":     s.TriggerKind,
+		"created_at":       s.CreatedAt,
+		"updated_at":       s.UpdatedAt,
+	}
+	switch s.TriggerKind {
+	case "cron":
+		resp["cron_expr"] = s.CronExpr
+	case "webhook":
+		resp["webhook_url"] = "/v1/eval-webhooks/" + s.ID
+		if plainSecret != "" {
+			resp["webhook_secret"] = plainSecret
+		} else {
+			resp["webhook_secret"] = "***"
+		}
+	}
+	return resp
 }
 
 // workflowNodes loads the nodes for a workflow so mock node IDs can be validated.

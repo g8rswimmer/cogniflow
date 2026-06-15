@@ -196,6 +196,9 @@ func (v *ConfigVault) GetEvalSuite(ctx context.Context, id string) (store.EvalSu
 func (v *ConfigVault) ListEvalSuites(ctx context.Context, workflowID string) ([]store.EvalSuiteSummary, error) {
 	return v.inner.ListEvalSuites(ctx, workflowID)
 }
+func (v *ConfigVault) ListEvalSuitesByCronTrigger(ctx context.Context) ([]store.EvalSuite, error) {
+	return v.inner.ListEvalSuitesByCronTrigger(ctx)
+}
 func (v *ConfigVault) UpdateEvalSuite(ctx context.Context, s store.EvalSuite) (store.EvalSuite, error) {
 	return v.inner.UpdateEvalSuite(ctx, s)
 }

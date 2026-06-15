@@ -247,6 +247,9 @@ func (m *mockStore) GetEvalSuite(_ context.Context, _ string) (store.EvalSuite, 
 func (m *mockStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
 	return nil, nil
 }
+func (m *mockStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
+}
 func (m *mockStore) UpdateEvalSuite(_ context.Context, s store.EvalSuite) (store.EvalSuite, error) {
 	return s, nil
 }

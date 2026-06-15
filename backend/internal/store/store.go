@@ -201,6 +201,9 @@ type Store interface {
 	CreateEvalSuite(ctx context.Context, s EvalSuite) (EvalSuite, error)
 	GetEvalSuite(ctx context.Context, id string) (EvalSuite, error)
 	ListEvalSuites(ctx context.Context, workflowID string) ([]EvalSuiteSummary, error)
+	// ListEvalSuitesByCronTrigger returns all suites with trigger_kind == "cron".
+	// Used at startup to re-arm the eval scheduler after a server restart.
+	ListEvalSuitesByCronTrigger(ctx context.Context) ([]EvalSuite, error)
 	UpdateEvalSuite(ctx context.Context, s EvalSuite) (EvalSuite, error)
 	DeleteEvalSuite(ctx context.Context, id string) error
 
@@ -282,8 +285,15 @@ type EvalSuite struct {
 	PassThreshold   float64   `json:"pass_threshold"   db:"pass_threshold"`
 	MaxConcurrency  int       `json:"max_concurrency"  db:"max_concurrency"`
 	WorkflowDeleted bool      `json:"workflow_deleted" db:"workflow_deleted"`
-	CreatedAt       time.Time `json:"created_at"       db:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"       db:"updated_at"`
+	// TriggerKind is "none", "cron", or "webhook".
+	TriggerKind string `json:"trigger_kind" db:"trigger_kind"`
+	// CronExpr is populated when TriggerKind == "cron". Stored inside trigger_config JSON.
+	CronExpr string `json:"cron_expr,omitempty"`
+	// WebhookSecret holds the AES-256-GCM encrypted secret ("enc:...") as read
+	// from the DB. The handler decrypts it for use and masks it in API responses.
+	WebhookSecret string `json:"webhook_secret,omitempty"`
+	CreatedAt     time.Time `json:"created_at"       db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"       db:"updated_at"`
 }
 
 // EvalSuiteSummary is EvalSuite enriched with aggregate fields for list responses.
@@ -320,16 +330,17 @@ const (
 
 // EvalRun is one async execution of an EvalSuite.
 type EvalRun struct {
-	ID          string        `json:"id"           db:"id"`
-	SuiteID     string        `json:"suite_id"     db:"suite_id"`
-	Status      EvalRunStatus `json:"status"       db:"status"`
-	TotalCases  int           `json:"total_cases"  db:"total_cases"`
-	PassedCount int           `json:"passed_count" db:"passed_count"`
-	FailedCount int           `json:"failed_count" db:"failed_count"`
-	ErrorCount  int           `json:"error_count"  db:"error_count"`
-	StartedAt   *time.Time    `json:"started_at"   db:"started_at"`
-	FinishedAt  *time.Time    `json:"finished_at"  db:"finished_at"`
-	CreatedAt   time.Time     `json:"created_at"   db:"created_at"`
+	ID          string        `json:"id"            db:"id"`
+	SuiteID     string        `json:"suite_id"      db:"suite_id"`
+	TriggeredBy string        `json:"triggered_by"  db:"triggered_by"`
+	Status      EvalRunStatus `json:"status"        db:"status"`
+	TotalCases  int           `json:"total_cases"   db:"total_cases"`
+	PassedCount int           `json:"passed_count"  db:"passed_count"`
+	FailedCount int           `json:"failed_count"  db:"failed_count"`
+	ErrorCount  int           `json:"error_count"   db:"error_count"`
+	StartedAt   *time.Time    `json:"started_at"    db:"started_at"`
+	FinishedAt  *time.Time    `json:"finished_at"   db:"finished_at"`
+	CreatedAt   time.Time     `json:"created_at"    db:"created_at"`
 }
 
 // EvalRunFilter constrains ListEvalRuns queries.

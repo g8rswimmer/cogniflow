@@ -148,6 +148,10 @@ func (s *stubStore) ListEvalSuites(_ context.Context, workflowID string) ([]stor
 	return out, nil
 }
 
+func (s *stubStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
+}
+
 func (s *stubStore) UpdateEvalSuite(_ context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -877,6 +881,6 @@ type stubRunner struct {
 	err   error
 }
 
-func (s *stubRunner) Execute(_ context.Context, _ string) (string, error) {
+func (s *stubRunner) Execute(_ context.Context, _ string, _ string) (string, error) {
 	return s.runID, s.err
 }

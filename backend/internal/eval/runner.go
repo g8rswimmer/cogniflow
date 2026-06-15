@@ -39,7 +39,8 @@ func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngi
 }
 
 // Execute creates an EvalRun record, starts async execution, and returns the run ID immediately.
-func (r *EvalRunner) Execute(ctx context.Context, suiteID string) (string, error) {
+// triggeredBy should be "manual", "cron", or "webhook".
+func (r *EvalRunner) Execute(ctx context.Context, suiteID string, triggeredBy string) (string, error) {
 	suite, err := r.store.GetEvalSuite(ctx, suiteID)
 	if err != nil {
 		return "", fmt.Errorf("eval runner: get suite: %w", err)
@@ -62,11 +63,15 @@ func (r *EvalRunner) Execute(ctx context.Context, suiteID string) (string, error
 		testCases[i].Graders = dec
 	}
 
+	if triggeredBy == "" {
+		triggeredBy = "manual"
+	}
 	evalRun, err := r.store.CreateEvalRun(ctx, store.EvalRun{
-		ID:         uuid.New().String(),
-		SuiteID:    suiteID,
-		Status:     store.EvalRunPending,
-		TotalCases: len(testCases),
+		ID:          uuid.New().String(),
+		SuiteID:     suiteID,
+		TriggeredBy: triggeredBy,
+		Status:      store.EvalRunPending,
+		TotalCases:  len(testCases),
 	})
 	if err != nil {
 		return "", fmt.Errorf("eval runner: create eval run: %w", err)
