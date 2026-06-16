@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ReactJson from '@microlink/react-json-view'
 import type { NodeRunStatus } from '../../stores/useRunStore'
 import { nodeStatusDot, nodeStatusLabel } from '../../lib/nodeStatus'
 
@@ -55,9 +56,21 @@ export function NodeStatusList({ entries }: Props) {
                   </pre>
                 )}
                 {status?.output && (
-                  <pre className="text-xs text-green-300 mt-2 whitespace-pre-wrap break-all overflow-x-auto max-h-40">
-                    {JSON.stringify(status.output, null, 2)}
-                  </pre>
+                  <div className="mt-2">
+                    <ReactJson
+                      src={status.output}
+                      name={false}
+                      theme="ocean"
+                      style={{ background: 'transparent', fontSize: '12px' }}
+                      collapsed={1}
+                      collapseStringsAfterLength={120}
+                      displayDataTypes={false}
+                      displayObjectSize={true}
+                      enableClipboard={true}
+                      quotesOnKeys={false}
+                      indentWidth={2}
+                    />
+                  </div>
                 )}
               </div>
             )}
