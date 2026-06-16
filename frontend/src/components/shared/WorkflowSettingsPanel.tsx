@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'
 import { useWorkflowStore } from '../../stores/useWorkflowStore'
 import type { Trigger, TriggerKind } from '../../api/types'
 import { InitialDataSchemaEditor } from '../sidebar/InitialDataSchemaEditor'
@@ -22,20 +23,37 @@ export function WorkflowSettingsPanel({ workflowId, onClose }: Props) {
 
   const webhookUrl = workflowId ? `/webhooks/${workflowId}` : '(save workflow first)'
 
+  // Survives kind switches within the session so the user's cron expression
+  // is not lost when they temporarily select a different kind and come back.
+  const lastCronExpr = useRef(trigger.cron_expr ?? '* * * * *')
+
   const handleKindChange = (kind: TriggerKind) => {
     const next: Trigger = { kind }
-    if (kind === 'cron') next.cron_expr = trigger.cron_expr ?? '* * * * *'
-    if (kind === 'webhook' && workflowId) next.webhook_url = `/webhooks/${workflowId}`
+    if (kind === 'cron') next.cron_expr = lastCronExpr.current
+    if (kind === 'webhook' && workflowId) next.webhook_url = webhookUrl
     setTrigger(next)
   }
 
   const handleCronChange = (cron_expr: string) => {
+    lastCronExpr.current = cron_expr
     setTrigger({ kind: 'cron', cron_expr })
   }
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-2xl w-[32rem] flex flex-col max-h-[90vh]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gray-800 border border-gray-700 rounded-xl shadow-2xl w-[32rem] flex flex-col max-h-[90vh]"
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 flex-shrink-0">
           <h2 className="text-base font-semibold text-gray-100">⚙ Workflow Settings</h2>
@@ -168,7 +186,7 @@ export function WorkflowSettingsPanel({ workflowId, onClose }: Props) {
                 </code>.
               </p>
             )}
-            <InitialDataSchemaEditor />
+            <InitialDataSchemaEditor hideHeading />
           </div>
         </div>
 
