@@ -45,6 +45,7 @@ http://localhost:3000
 - **Watch** per-node status update live in the run panel as the workflow executes
 - **Browse** run history and inspect each node's output
 - **Evaluate** workflows with eval suites — define test cases with fixed inputs, node mocks, and graders (string match, numeric threshold, LLM-as-judge, JSON schema, checklist); trigger runs and drill into per-grader verdicts with full checklist breakdowns
+- **Automate eval runs** on a cron schedule or from a CI pipeline via a per-suite inbound webhook (Bearer-token authenticated); the suite UI surfaces the one-time secret, a copy-ready curl example, and a Rotate Secret action
 
 ---
 
@@ -102,6 +103,8 @@ go run ./cmd/server
 [`DEMO.md`](DEMO.md) walks through building a complete **IT Support Ticket Triage** workflow end-to-end: an Anthropic LLM node classifies urgency, a visual conditional node routes tickets to an escalation or standard-reply branch, and a merge node collects the result. It covers every major feature — output parsers, template variables, edge labels, live run events, and run history.
 
 For the **Workflow Evaluation** feature, see [`DEMO_ME4.md`](DEMO_ME4.md) (suite and test case authoring) and [`DEMO_ME5.md`](DEMO_ME5.md) (triggering runs and inspecting results).
+
+For **Automated Eval Runs**, see [`MEF2_DEMO.md`](MEF2_DEMO.md) (cron scheduling), [`MEF3_DEMO.md`](MEF3_DEMO.md) (CI webhook trigger), and [`MEF4_DEMO.md`](MEF4_DEMO.md) (frontend trigger UI).
 
 ---
 
