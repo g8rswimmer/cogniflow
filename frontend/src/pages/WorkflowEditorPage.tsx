@@ -125,6 +125,7 @@ export function WorkflowEditorPage() {
   const loadWorkflow = useWorkflowStore(s => s.loadWorkflow)
   const workflowId = useWorkflowStore(s => s.workflowId)
   const name = useWorkflowStore(s => s.name)
+  const description = useWorkflowStore(s => s.description)
   const trigger = useWorkflowStore(s => s.trigger)
   const timeoutSeconds = useWorkflowStore(s => s.timeoutSeconds)
   const nodes = useWorkflowStore(s => s.nodes)
@@ -174,6 +175,7 @@ export function WorkflowEditorPage() {
 
   const buildPayload = () => ({
     name,
+    description,
     trigger,
     timeout_seconds: timeoutSeconds,
     initial_data_schema: initialDataSchema,

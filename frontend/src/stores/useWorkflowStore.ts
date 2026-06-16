@@ -27,6 +27,7 @@ interface WorkflowStore {
   // Persisted identity
   workflowId: string | null
   name: string
+  description: string
   trigger: Trigger
   timeoutSeconds: number
   isDirty: boolean
@@ -51,6 +52,7 @@ interface WorkflowStore {
 
   // Actions
   setName: (name: string) => void
+  setDescription: (description: string) => void
   setTrigger: (trigger: Trigger) => void
   setTimeoutSeconds: (s: number) => void
   addNode: (node: WorkflowNode) => void
@@ -78,6 +80,7 @@ interface WorkflowStore {
 export const useWorkflowStore = create<WorkflowStore>((set) => ({
   workflowId: null,
   name: 'Untitled Workflow',
+  description: '',
   trigger: defaultTrigger,
   timeoutSeconds: 60,
   isDirty: false,
@@ -142,6 +145,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     })),
 
   setName: (name) => set({ name, isDirty: true }),
+  setDescription: (description) => set({ description, isDirty: true }),
   setTrigger: (trigger) => set({ trigger, isDirty: true }),
   setTimeoutSeconds: (timeoutSeconds) => set({ timeoutSeconds, isDirty: true }),
 
@@ -249,6 +253,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     set({
       workflowId: wf.id,
       name: wf.name,
+      description: wf.description ?? '',
       trigger: wf.trigger,
       timeoutSeconds: wf.timeout_seconds,
       nodes,
@@ -265,6 +270,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     set({
       workflowId: null,
       name: 'Untitled Workflow',
+      description: '',
       trigger: defaultTrigger,
       timeoutSeconds: 60,
       nodes: [],
