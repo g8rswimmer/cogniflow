@@ -56,7 +56,7 @@ export function NodeStatusList({ entries }: Props) {
                   </pre>
                 )}
                 {status?.output && (
-                  <div className="mt-2">
+                  <div className="mt-2 max-h-64 overflow-y-auto">
                     <ReactJson
                       src={status.output}
                       name={false}

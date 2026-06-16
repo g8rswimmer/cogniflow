@@ -134,12 +134,9 @@ export function RunDetailPage() {
   }
 
   function resolveDetailStatus(nodeId: string): DetailRunStatus {
-    if (nodeResults) {
-      const r = nodeResults[nodeId]
-      if (!r) return 'skipped'
-      return r.status // 'succeeded' | 'failed'
-    }
-    return finalOutput[nodeId] ? 'succeeded' : 'unknown'
+    const r = resolveNodeResult(nodeId)
+    if (!r) return nodeResults ? 'skipped' : 'unknown'
+    return r.status
   }
 
   const rfNodes: Node<DetailNodeData>[] = workflow.nodes.map(n => ({

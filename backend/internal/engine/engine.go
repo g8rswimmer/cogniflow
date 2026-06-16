@@ -86,33 +86,18 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 		defer cancel()
 		defer cleanup()
 
-		// Subscribe internally before runDAG so no node events are missed.
-		// The drain goroutine collects succeeded/failed outcomes for persistence.
-		internalCh, internalCleanup := e.bus.Subscribe(run.ID)
-		nodeResults := make(map[string]store.NodeResult)
-		drainDone := make(chan struct{})
-		go func() {
-			defer close(drainDone)
-			for event := range internalCh {
-				switch event.Type {
-				case EventNodeSucceeded:
-					nodeResults[event.NodeID] = store.NodeResult{Status: "succeeded", Output: event.Output}
-				case EventNodeFailed:
-					nodeResults[event.NodeID] = store.NodeResult{Status: "failed", Error: event.Error}
-				}
-			}
-		}()
-
 		start := time.Now()
-		finalOutput, runErr := runDAG(runCtx, run.ID, dag, req.InitialData, e.registry, e.bus, req.NodeMocks)
+		finalOutput, nodeResults, runErr := runDAG(runCtx, run.ID, dag, req.InitialData, e.registry, e.bus, req.NodeMocks)
 		durationMs := time.Since(start).Milliseconds()
 
 		var statusUpdate store.RunStatus
 		var outputMap map[string]any
+		var terminalEvent NodeEvent
 
 		if runErr != nil {
 			statusUpdate = store.RunStatusFailed
 			outputMap = map[string]any{"error": runErr.Error()}
+			terminalEvent = NodeEvent{RunID: run.ID, Type: EventRunFailed, Error: runErr.Error(), Timestamp: time.Now().UTC()}
 			slog.Error("run failed",
 				"run_id", run.ID,
 				"workflow_id", wf.ID,
@@ -120,10 +105,10 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 				"duration_ms", durationMs,
 				"error", runErr,
 			)
-			e.bus.Publish(NodeEvent{RunID: run.ID, Type: EventRunFailed, Error: runErr.Error(), Timestamp: time.Now().UTC()})
 		} else {
 			statusUpdate = store.RunStatusSucceeded
 			outputMap = flattenOutput(finalOutput)
+			terminalEvent = NodeEvent{RunID: run.ID, Type: EventRunSucceeded, Timestamp: time.Now().UTC()}
 			slog.Info("run succeeded",
 				"run_id", run.ID,
 				"workflow_id", wf.ID,
@@ -131,20 +116,18 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 				"duration_ms", durationMs,
 				"sink_nodes", len(finalOutput),
 			)
-			e.bus.Publish(NodeEvent{RunID: run.ID, Type: EventRunSucceeded, Timestamp: time.Now().UTC()})
 		}
 
+		// Persist DB state before notifying WebSocket subscribers so that any
+		// client calling GetRun immediately on the terminal event sees final data.
 		if err := e.store.UpdateRunStatus(context.Background(), run.ID, statusUpdate, outputMap); err != nil {
 			slog.Error("engine: update run status", "run_id", run.ID, "error", err)
 		}
-
-		// Close internal subscription and wait for the drain goroutine to finish
-		// processing any remaining buffered events before persisting node results.
-		internalCleanup()
-		<-drainDone
 		if err := e.store.SaveRunNodeResults(context.Background(), run.ID, nodeResults); err != nil {
 			slog.Error("engine: save node results", "run_id", run.ID, "error", err)
 		}
+
+		e.bus.Publish(terminalEvent)
 	}()
 
 	return RunHandle{RunID: run.ID, Events: events, Cancel: cancel}, nil

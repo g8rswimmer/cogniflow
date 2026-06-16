@@ -18,7 +18,9 @@ type nodeResult struct {
 	err           error
 }
 
-// runDAG executes a workflow DAG, returning the outputs of all sink nodes on success.
+// runDAG executes a workflow DAG, returning the outputs of all sink nodes and
+// per-node results on success. Per-node results are populated for every dispatched
+// node (succeeded or failed); skipped/pruned nodes are absent from the map.
 //
 // Concurrency model:
 //   - Root nodes (in-degree 0) are dispatched immediately as goroutines.
@@ -33,13 +35,17 @@ func runDAG(
 	registry *node.NodeRegistry,
 	bus *EventBus,
 	nodeMocks map[string]map[string]any,
-) (map[string]map[string]any, error) {
+) (map[string]map[string]any, map[string]store.NodeResult, error) {
 	if len(dag.Nodes) == 0 {
-		return map[string]map[string]any{}, nil
+		return map[string]map[string]any{}, map[string]store.NodeResult{}, nil
 	}
 
 	execCtx := newExecutionContext()
 	execCtx.set("_initial", initData)
+
+	// nodeResults collects the persisted outcome for every dispatched node.
+	// Skipped/pruned nodes are never dispatched and will be absent from the map.
+	nodeResults := make(map[string]store.NodeResult, len(dag.Nodes))
 
 	// pending[id] counts how many predecessors have not yet completed.
 	pending := make(map[string]int, len(dag.Nodes))
@@ -113,6 +119,7 @@ func runDAG(
 		received++
 
 		if result.err != nil {
+			nodeResults[result.nodeID] = store.NodeResult{Status: "failed", Error: result.err.Error()}
 			if firstErr == nil {
 				firstErr = result.err
 				cancel()
@@ -121,6 +128,7 @@ func runDAG(
 			continue
 		}
 
+		nodeResults[result.nodeID] = store.NodeResult{Status: "succeeded", Output: result.output}
 		execCtx.set(result.nodeID, result.output)
 
 		if firstErr != nil {
@@ -143,7 +151,7 @@ func runDAG(
 	}
 
 	if firstErr != nil {
-		return nil, firstErr
+		return nil, nodeResults, firstErr
 	}
 	finalOutput := execCtx.sinkOutputs(dag)
 	// If conditional routing suppressed every path to every sink, the run
@@ -153,11 +161,11 @@ func runDAG(
 	if len(finalOutput) == 0 && len(skipped) > 0 {
 		for id := range skipped {
 			if len(dag.Successors[id]) == 0 {
-				return nil, fmt.Errorf("all sink branches were suppressed by conditional routing")
+				return nil, nodeResults, fmt.Errorf("all sink branches were suppressed by conditional routing")
 			}
 		}
 	}
-	return finalOutput, nil
+	return finalOutput, nodeResults, nil
 }
 
 // branchAllows reports whether the given edge should fire given the completed
