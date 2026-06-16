@@ -99,16 +99,24 @@ const (
 	RunStatusFailed    RunStatus = "failed"
 )
 
+// NodeResult is the persisted outcome of a single node execution within a run.
+type NodeResult struct {
+	Status string         `json:"status"`           // "succeeded" | "failed"
+	Output map[string]any `json:"output,omitempty"` // populated on succeeded
+	Error  string         `json:"error,omitempty"`  // populated on failed
+}
+
 // Run is one execution instance of a workflow.
 type Run struct {
-	ID          string         `json:"run_id"`
-	WorkflowID  string         `json:"workflow_id"`
-	TriggeredBy string         `json:"triggered_by"`
-	Status      RunStatus      `json:"status"`
-	StartedAt   *time.Time     `json:"started_at,omitempty"`
-	FinishedAt  *time.Time     `json:"finished_at,omitempty"`
-	FinalOutput map[string]any `json:"final_output,omitempty"`
-	ErrorDetail map[string]any `json:"error_detail,omitempty"`
+	ID          string                `json:"run_id"`
+	WorkflowID  string                `json:"workflow_id"`
+	TriggeredBy string                `json:"triggered_by"`
+	Status      RunStatus             `json:"status"`
+	StartedAt   *time.Time            `json:"started_at,omitempty"`
+	FinishedAt  *time.Time            `json:"finished_at,omitempty"`
+	FinalOutput map[string]any        `json:"final_output,omitempty"`
+	ErrorDetail map[string]any        `json:"error_detail,omitempty"`
+	NodeResults map[string]NodeResult `json:"node_results,omitempty"`
 }
 
 // RunFilter constrains ListRuns queries.
@@ -179,6 +187,7 @@ type Store interface {
 	// Runs
 	CreateRun(ctx context.Context, r Run) (Run, error)
 	UpdateRunStatus(ctx context.Context, runID string, status RunStatus, output map[string]any) error
+	SaveRunNodeResults(ctx context.Context, runID string, results map[string]NodeResult) error
 	GetRun(ctx context.Context, runID string) (Run, error)
 	ListRuns(ctx context.Context, f RunFilter) ([]Run, error)
 

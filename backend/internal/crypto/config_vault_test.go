@@ -38,6 +38,9 @@ func (s *vaultStubStore) CreateRun(_ context.Context, r store.Run) (store.Run, e
 func (s *vaultStubStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {
 	return nil
 }
+func (s *vaultStubStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (s *vaultStubStore) GetRun(_ context.Context, _ string) (store.Run, error) { return store.Run{}, nil }
 func (s *vaultStubStore) ListRuns(_ context.Context, _ store.RunFilter) ([]store.Run, error) {
 	return nil, nil

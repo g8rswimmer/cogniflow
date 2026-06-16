@@ -151,6 +151,9 @@ func (s *runnerStore) CreateRun(_ context.Context, r store.Run) (store.Run, erro
 func (s *runnerStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {
 	return nil
 }
+func (s *runnerStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (s *runnerStore) ListRuns(_ context.Context, _ store.RunFilter) ([]store.Run, error) {
 	return nil, nil
 }

@@ -134,6 +134,12 @@ export interface NodeEvent {
 
 export type RunStatus = 'pending' | 'running' | 'succeeded' | 'failed'
 
+export interface NodeResult {
+  status: 'succeeded' | 'failed'
+  output?: Record<string, unknown>
+  error?: string
+}
+
 export interface Run {
   run_id: string
   workflow_id: string
@@ -143,6 +149,7 @@ export interface Run {
   finished_at?: string
   final_output?: Record<string, Record<string, unknown>>
   error_detail?: unknown
+  node_results?: Record<string, NodeResult>
 }
 
 export interface RunListResponse {

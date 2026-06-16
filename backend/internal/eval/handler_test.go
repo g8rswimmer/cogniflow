@@ -359,6 +359,9 @@ func (s *stubStore) CreateRun(_ context.Context, r store.Run) (store.Run, error)
 func (s *stubStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {
 	return nil
 }
+func (s *stubStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (s *stubStore) GetRun(_ context.Context, _ string) (store.Run, error) {
 	return store.Run{}, store.ErrNotFound
 }

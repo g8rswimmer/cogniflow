@@ -36,6 +36,9 @@ func (m *fullMockStore) ListPluginRegistrations(_ context.Context) ([]store.Plug
 	return nil, nil
 }
 func (m *fullMockStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (m *fullMockStore) CreateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
 	return v, nil
 }

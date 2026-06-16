@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at   DATETIME,
     finished_at  DATETIME,
     final_output TEXT,
-    error_detail TEXT
+    error_detail TEXT,
+    node_results TEXT
 );
 
 CREATE TABLE IF NOT EXISTS rag_documents (

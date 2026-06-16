@@ -375,6 +375,91 @@ func TestRunStore_ListRuns_SinceUntilFilter(t *testing.T) {
 	}
 }
 
+// ---- SaveRunNodeResults -----------------------------------------------------
+
+func TestRunStore_SaveRunNodeResults_RoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
+
+	now := time.Now().UTC()
+	created, err := s.CreateRun(ctx, store.Run{
+		WorkflowID:  "wf-1",
+		TriggeredBy: "manual",
+		Status:      store.RunStatusRunning,
+		StartedAt:   &now,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	results := map[string]store.NodeResult{
+		"n1": {Status: "succeeded", Output: map[string]any{"status_code": float64(200)}},
+		"n2": {Status: "failed", Error: "connection refused"},
+	}
+	if err := s.SaveRunNodeResults(ctx, created.ID, results); err != nil {
+		t.Fatalf("SaveRunNodeResults: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if len(got.NodeResults) != 2 {
+		t.Fatalf("node_results: want 2 entries, got %d", len(got.NodeResults))
+	}
+
+	n1 := got.NodeResults["n1"]
+	if n1.Status != "succeeded" {
+		t.Errorf("n1.status: want succeeded, got %q", n1.Status)
+	}
+	if n1.Output["status_code"] != float64(200) {
+		t.Errorf("n1.output.status_code: want 200, got %v", n1.Output["status_code"])
+	}
+
+	n2 := got.NodeResults["n2"]
+	if n2.Status != "failed" {
+		t.Errorf("n2.status: want failed, got %q", n2.Status)
+	}
+	if n2.Error != "connection refused" {
+		t.Errorf("n2.error: want %q, got %q", "connection refused", n2.Error)
+	}
+}
+
+func TestRunStore_SaveRunNodeResults_NotInListRuns(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	insertTestWorkflow(t, s, "wf-1")
+
+	now := time.Now().UTC()
+	created, err := s.CreateRun(ctx, store.Run{
+		WorkflowID:  "wf-1",
+		TriggeredBy: "manual",
+		Status:      store.RunStatusSucceeded,
+		StartedAt:   &now,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := s.SaveRunNodeResults(ctx, created.ID, map[string]store.NodeResult{
+		"n1": {Status: "succeeded"},
+	}); err != nil {
+		t.Fatalf("SaveRunNodeResults: %v", err)
+	}
+
+	// ListRuns omits node_results for efficiency; NodeResults should be nil.
+	list, err := s.ListRuns(ctx, store.RunFilter{WorkflowID: "wf-1"})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("want 1 run, got %d", len(list))
+	}
+	if list[0].NodeResults != nil {
+		t.Errorf("ListRuns should not populate NodeResults, got %v", list[0].NodeResults)
+	}
+}
+
 func TestRunStore_ListRuns_OrderedByStartedAtDesc(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
