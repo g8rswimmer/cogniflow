@@ -161,6 +161,8 @@ export interface TriggerRunResponse {
 // Eval types
 // ---------------------------------------------------------------------------
 
+export type EvalTriggerKind = 'none' | 'cron' | 'webhook'
+
 export type GraderType = 'string_match' | 'numeric_threshold' | 'llm_judge' | 'json_schema' | 'checklist'
 export type GraderScope = 'workflow' | 'node'
 export type EvalRunStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -201,6 +203,10 @@ export interface EvalSuite {
   pass_threshold: number
   max_concurrency?: number
   workflow_deleted?: boolean
+  trigger_kind?: EvalTriggerKind
+  cron_expr?: string
+  webhook_url?: string
+  webhook_secret?: string
   created_at: string
   updated_at: string
 }
@@ -247,6 +253,7 @@ export interface EvalRun {
   id: string
   suite_id: string
   status: EvalRunStatus
+  triggered_by?: 'manual' | 'cron' | 'webhook'
   total_cases: number
   passed_count: number
   failed_count: number

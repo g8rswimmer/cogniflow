@@ -45,6 +45,9 @@ func (m *fullMockStore) GetEvalSuite(_ context.Context, _ string) (store.EvalSui
 func (m *fullMockStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
 	return nil, nil
 }
+func (m *fullMockStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
+}
 func (m *fullMockStore) UpdateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
 	return v, nil
 }

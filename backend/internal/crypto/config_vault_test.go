@@ -74,6 +74,9 @@ func (s *vaultStubStore) GetEvalSuite(_ context.Context, _ string) (store.EvalSu
 func (s *vaultStubStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
 	return nil, nil
 }
+func (s *vaultStubStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
+}
 func (s *vaultStubStore) UpdateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
 	return v, nil
 }

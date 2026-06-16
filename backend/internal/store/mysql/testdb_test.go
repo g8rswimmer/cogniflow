@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS eval_suites (
     pass_threshold   REAL    NOT NULL DEFAULT 1.0,
     max_concurrency  INTEGER NOT NULL DEFAULT 1,
     workflow_deleted INTEGER NOT NULL DEFAULT 0,
+    trigger_kind     TEXT    NOT NULL DEFAULT 'none',
+    trigger_config   TEXT    NOT NULL DEFAULT '{}',
     created_at       DATETIME NOT NULL,
     updated_at       DATETIME NOT NULL
 );
@@ -112,6 +114,7 @@ CREATE TABLE IF NOT EXISTS eval_test_cases (
 CREATE TABLE IF NOT EXISTS eval_runs (
     id           TEXT     NOT NULL PRIMARY KEY,
     suite_id     TEXT     NOT NULL,
+    triggered_by TEXT     NOT NULL DEFAULT 'manual',
     status       TEXT     NOT NULL DEFAULT 'pending',
     total_cases  INTEGER  NOT NULL DEFAULT 0,
     passed_count INTEGER  NOT NULL DEFAULT 0,

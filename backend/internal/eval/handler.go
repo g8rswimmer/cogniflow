@@ -2,15 +2,21 @@ package eval
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
+	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
 const maxBodyBytes = 1 << 20 // 1 MB
@@ -18,21 +24,22 @@ const maxBodyBytes = 1 << 20 // 1 MB
 // evalRunnerI is the minimal interface the handler needs from EvalRunner.
 // *EvalRunner satisfies it; a stub can be injected in tests.
 type evalRunnerI interface {
-	Execute(ctx context.Context, suiteID string) (string, error)
+	Execute(ctx context.Context, suiteID string, triggeredBy string) (string, error)
 }
 
 // Handler provides HTTP handlers for all eval endpoints.
 // It follows the same struct+methods pattern as the other handlers in api/.
 type Handler struct {
-	store    store.Store
-	vault    *GraderVault
-	registry *node.NodeRegistry
-	runner   evalRunnerI // nil when eval execution not yet wired (safe: TriggerRun guards nil)
+	store     store.Store
+	vault     *GraderVault
+	registry  *node.NodeRegistry
+	runner    evalRunnerI    // nil when eval execution not yet wired (safe: TriggerRun guards nil)
+	scheduler *EvalScheduler // nil-safe; arms/disarms cron jobs on suite CRUD
 }
 
 // NewHandler creates a Handler.
-func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI) *Handler {
-	return &Handler{store: st, vault: vault, registry: registry, runner: runner}
+func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI, scheduler *EvalScheduler) *Handler {
+	return &Handler{store: st, vault: vault, registry: registry, runner: runner, scheduler: scheduler}
 }
 
 // ---- Suite endpoints -------------------------------------------------------
@@ -47,6 +54,11 @@ func (h *Handler) ListByWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	if suites == nil {
 		suites = []store.EvalSuiteSummary{}
+	}
+	// Never expose the encrypted webhook secret in list responses; callers receive
+	// the plaintext only on create or explicit rotation via the detail endpoint.
+	for i := range suites {
+		suites[i].WebhookSecret = ""
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"eval_suites": suites})
 }
@@ -68,12 +80,23 @@ func (h *Handler) CreateSuite(w http.ResponseWriter, r *http.Request) {
 	body.WorkflowID = workflowID
 	applyDefaults(&body)
 
+	plainSecret, err := h.applyTrigger(&body, true)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
 	created, err := h.store.CreateEvalSuite(r.Context(), body)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	if created.TriggerKind == "cron" {
+		if err := h.scheduler.Arm(created.ID, created.CronExpr); err != nil {
+			slog.Warn("eval handler: failed to arm cron suite", "suite_id", created.ID, "error", err)
+		}
+	}
+	writeJSON(w, http.StatusCreated, suiteResponse(created, plainSecret))
 }
 
 // GetSuite handles GET /v1/eval-suites/{suite_id}.
@@ -103,18 +126,9 @@ func (h *Handler) GetSuite(w http.ResponseWriter, r *http.Request) {
 		testCases[i].Graders = h.vault.MaskGraders(testCases[i].Graders)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":               suite.ID,
-		"workflow_id":      suite.WorkflowID,
-		"name":             suite.Name,
-		"description":      suite.Description,
-		"pass_threshold":   suite.PassThreshold,
-		"max_concurrency":  suite.MaxConcurrency,
-		"workflow_deleted": suite.WorkflowDeleted,
-		"created_at":       suite.CreatedAt,
-		"updated_at":       suite.UpdatedAt,
-		"test_cases":       testCases,
-	})
+	resp := suiteResponse(suite, "") // secret masked on GET
+	resp["test_cases"] = testCases
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // UpdateSuite handles PUT /v1/eval-suites/{suite_id}.
@@ -133,20 +147,27 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name           string  `json:"name"`
-		Description    *string `json:"description"` // pointer so omitted ≠ explicit empty string
-		PassThreshold  float64 `json:"pass_threshold"`
-		MaxConcurrency int     `json:"max_concurrency"`
+		Name                string   `json:"name"`
+		Description         *string  `json:"description"` // pointer so omitted ≠ explicit empty string
+		PassThreshold       *float64 `json:"pass_threshold"` // pointer: nil = omitted, 0.0 = explicit zero
+		MaxConcurrency      int      `json:"max_concurrency"`
+		TriggerKind         string   `json:"trigger_kind"`
+		CronExpr            string   `json:"cron_expr"`
+		RotateWebhookSecret bool     `json:"rotate_webhook_secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body: "+err.Error())
 		return
 	}
+	if body.RotateWebhookSecret && body.TriggerKind != "" && body.TriggerKind != "webhook" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "rotate_webhook_secret cannot be combined with a non-webhook trigger_kind")
+		return
+	}
 	if body.Name == "" {
 		body.Name = existing.Name
 	}
-	if body.PassThreshold == 0 {
-		body.PassThreshold = existing.PassThreshold
+	if body.PassThreshold != nil {
+		existing.PassThreshold = *body.PassThreshold
 	}
 	if body.MaxConcurrency == 0 {
 		body.MaxConcurrency = existing.MaxConcurrency
@@ -156,8 +177,28 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 	if body.Description != nil {
 		existing.Description = *body.Description
 	}
-	existing.PassThreshold = body.PassThreshold
 	existing.MaxConcurrency = body.MaxConcurrency
+
+	// Apply trigger changes. If trigger_kind is omitted, keep the existing one.
+	if body.TriggerKind != "" {
+		existing.TriggerKind = body.TriggerKind
+		existing.CronExpr = body.CronExpr
+		if body.TriggerKind != "webhook" {
+			existing.WebhookSecret = "" // clear secret when switching away from webhook
+		}
+	}
+	// Rotate the webhook secret when explicitly requested.
+	if body.RotateWebhookSecret {
+		existing.TriggerKind = "webhook"
+	}
+
+	// Generate a new secret when switching to webhook (empty secret) or rotating.
+	generateSecret := body.RotateWebhookSecret || (existing.TriggerKind == "webhook" && existing.WebhookSecret == "")
+	plainSecret, err := h.applyTrigger(&existing, generateSecret)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
 
 	updated, err := h.store.UpdateEvalSuite(r.Context(), existing)
 	if err != nil {
@@ -168,7 +209,15 @@ func (h *Handler) UpdateSuite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	switch updated.TriggerKind {
+	case "cron":
+		if err := h.scheduler.Arm(updated.ID, updated.CronExpr); err != nil {
+			slog.Warn("eval handler: failed to arm cron suite", "suite_id", updated.ID, "error", err)
+		}
+	default:
+		h.scheduler.Disarm(updated.ID)
+	}
+	writeJSON(w, http.StatusOK, suiteResponse(updated, plainSecret))
 }
 
 // DeleteSuite handles DELETE /v1/eval-suites/{suite_id}.
@@ -183,6 +232,7 @@ func (h *Handler) DeleteSuite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+	h.scheduler.Disarm(suiteID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -486,7 +536,76 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	evalRunID, err := h.runner.Execute(r.Context(), suiteID)
+	evalRunID, err := h.runner.Execute(r.Context(), suiteID, "manual")
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
+		if errors.Is(err, ErrWorkflowDeleted) {
+			writeError(w, http.StatusBadRequest, "WORKFLOW_DELETED", "linked workflow has been deleted")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"id": evalRunID})
+}
+
+// WebhookTrigger handles POST /v1/eval-webhooks/{suite_id}.
+// Validates the Authorization: Bearer <token> header against the suite's
+// stored webhook secret and triggers an async eval run on success.
+func (h *Handler) WebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	suiteID := r.PathValue("suite_id")
+
+	suite, err := h.store.GetEvalSuite(r.Context(), suiteID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if suite.WorkflowDeleted {
+		writeError(w, http.StatusBadRequest, "WORKFLOW_DELETED", "linked workflow has been deleted")
+		return
+	}
+	if suite.TriggerKind != "webhook" {
+		writeError(w, http.StatusBadRequest, "INVALID_TRIGGER", "suite is not configured for webhook trigger")
+		return
+	}
+
+	// RFC 7617: the "Bearer" scheme name is case-insensitive.
+	authHeader := r.Header.Get("Authorization")
+	const bearerPrefix = "bearer "
+	if len(authHeader) <= len(bearerPrefix) || !strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization: Bearer <token> header required")
+		return
+	}
+	token := authHeader[len(bearerPrefix):]
+	if token == "" {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization: Bearer <token> header required")
+		return
+	}
+
+	plainSecret, err := h.vault.DecryptValue(suite.WebhookSecret)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not verify webhook secret")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(plainSecret)) != 1 {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid webhook token")
+		return
+	}
+
+	if h.runner == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval run execution is not yet available")
+		return
+	}
+
+	evalRunID, err := h.runner.Execute(r.Context(), suiteID, "webhook")
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
@@ -496,7 +615,7 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{"id": evalRunID})
+	writeJSON(w, http.StatusAccepted, map[string]any{"eval_run_id": evalRunID})
 }
 
 // ListRuns handles GET /v1/eval-suites/{suite_id}/runs.
@@ -561,17 +680,18 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":                 run.ID,
-		"suite_id":           run.SuiteID,
-		"status":             run.Status,
-		"total_cases":        run.TotalCases,
-		"passed_count":       run.PassedCount,
-		"failed_count":       run.FailedCount,
-		"error_count":        run.ErrorCount,
-		"started_at":         run.StartedAt,
-		"finished_at":        run.FinishedAt,
-		"created_at":         run.CreatedAt,
-		"test_case_results":  results,
+		"id":                run.ID,
+		"suite_id":          run.SuiteID,
+		"status":            run.Status,
+		"triggered_by":      run.TriggeredBy,
+		"total_cases":       run.TotalCases,
+		"passed_count":      run.PassedCount,
+		"failed_count":      run.FailedCount,
+		"error_count":       run.ErrorCount,
+		"started_at":        run.StartedAt,
+		"finished_at":       run.FinishedAt,
+		"created_at":        run.CreatedAt,
+		"test_case_results": results,
 	})
 }
 
@@ -716,6 +836,75 @@ func applyDefaults(s *store.EvalSuite) {
 	if s.MaxConcurrency == 0 {
 		s.MaxConcurrency = 1
 	}
+	if s.TriggerKind == "" {
+		s.TriggerKind = "none"
+	}
+}
+
+// applyTrigger validates trigger config and, for webhook suites, generates or
+// rotates the secret. generateSecret should be true on create and on secret rotation.
+// Returns the plain-text secret (non-empty only when a new secret was generated).
+// Mutates s.WebhookSecret in place with the encrypted value before returning.
+func (h *Handler) applyTrigger(s *store.EvalSuite, generateSecret bool) (string, error) {
+	switch s.TriggerKind {
+	case "", "none":
+		s.TriggerKind = "none"
+		s.CronExpr = ""
+		s.WebhookSecret = ""
+	case "cron":
+		if err := trigger.ValidateCronExpr(s.CronExpr); err != nil {
+			return "", fmt.Errorf("invalid cron_expr: %w", err)
+		}
+		s.WebhookSecret = ""
+	case "webhook":
+		if generateSecret {
+			raw := make([]byte, 32)
+			if _, err := rand.Read(raw); err != nil {
+				return "", fmt.Errorf("generate webhook secret: %w", err)
+			}
+			plain := hex.EncodeToString(raw)
+			enc, err := h.vault.EncryptValue(plain)
+			if err != nil {
+				return "", fmt.Errorf("encrypt webhook secret: %w", err)
+			}
+			s.WebhookSecret = enc
+			return plain, nil
+		}
+		// Keep existing encrypted secret unchanged.
+	default:
+		return "", fmt.Errorf("trigger_kind must be one of: none, cron, webhook")
+	}
+	return "", nil
+}
+
+// suiteResponse builds the JSON map for suite create/get/update responses.
+// plainSecret is non-empty only on create or secret rotation (one-time reveal).
+// On all other reads the webhook_secret field is omitted or masked.
+func suiteResponse(s store.EvalSuite, plainSecret string) map[string]any {
+	resp := map[string]any{
+		"id":               s.ID,
+		"workflow_id":      s.WorkflowID,
+		"name":             s.Name,
+		"description":      s.Description,
+		"pass_threshold":   s.PassThreshold,
+		"max_concurrency":  s.MaxConcurrency,
+		"workflow_deleted": s.WorkflowDeleted,
+		"trigger_kind":     s.TriggerKind,
+		"created_at":       s.CreatedAt,
+		"updated_at":       s.UpdatedAt,
+	}
+	switch s.TriggerKind {
+	case "cron":
+		resp["cron_expr"] = s.CronExpr
+	case "webhook":
+		resp["webhook_url"] = "/v1/eval-webhooks/" + s.ID
+		if plainSecret != "" {
+			resp["webhook_secret"] = plainSecret
+		} else {
+			resp["webhook_secret"] = "***"
+		}
+	}
+	return resp
 }
 
 // workflowNodes loads the nodes for a workflow so mock node IDs can be validated.

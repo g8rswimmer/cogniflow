@@ -2,8 +2,24 @@ import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import { useEvalStore } from '../stores/useEvalStore'
-import { EvalSuiteForm } from '../components/eval/EvalSuiteForm'
+import { EvalSuiteForm, type SuiteFormData } from '../components/eval/EvalSuiteForm'
+import { WebhookSecretModal } from '../components/eval/WebhookSecretModal'
 import type { EvalSuite } from '../api/types'
+
+function TriggerBadge({ suite }: { suite: EvalSuite }) {
+  if (!suite.trigger_kind || suite.trigger_kind === 'none') return null
+  return (
+    <span
+      className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+        suite.trigger_kind === 'cron'
+          ? 'bg-blue-900/60 text-blue-300'
+          : 'bg-purple-900/60 text-purple-300'
+      }`}
+    >
+      {suite.trigger_kind === 'cron' ? 'Cron' : 'Webhook'}
+    </span>
+  )
+}
 
 export function EvalSuiteListPage() {
   const { id: workflowId } = useParams<{ id: string }>()
@@ -21,6 +37,7 @@ export function EvalSuiteListPage() {
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState<string | undefined>()
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [pendingSecret, setPendingSecret] = useState<{ webhookUrl: string; secret: string } | null>(null)
 
   useEffect(() => {
     if (!workflowId) return
@@ -32,12 +49,7 @@ export function EvalSuiteListPage() {
       .finally(() => setLoading(false))
   }, [workflowId, setSuites])
 
-  const handleCreate = async (data: {
-    name: string
-    description?: string
-    pass_threshold: number
-    max_concurrency: number
-  }) => {
+  const handleCreate = async (data: SuiteFormData) => {
     if (!workflowId) return
     setFormSaving(true)
     setFormError(undefined)
@@ -45,6 +57,9 @@ export function EvalSuiteListPage() {
       const suite = await api.createEvalSuite(workflowId, data)
       upsertSuite(suite)
       setShowForm(false)
+      if (suite.webhook_secret && suite.webhook_secret !== '***' && suite.webhook_url) {
+        setPendingSecret({ webhookUrl: suite.webhook_url, secret: suite.webhook_secret })
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to create suite')
     } finally {
@@ -52,12 +67,7 @@ export function EvalSuiteListPage() {
     }
   }
 
-  const handleUpdate = async (data: {
-    name: string
-    description?: string
-    pass_threshold: number
-    max_concurrency: number
-  }) => {
+  const handleUpdate = async (data: SuiteFormData) => {
     if (!editingSuite) return
     setFormSaving(true)
     setFormError(undefined)
@@ -65,6 +75,9 @@ export function EvalSuiteListPage() {
       const suite = await api.updateEvalSuite(editingSuite.id, data)
       upsertSuite(suite)
       setEditingSuite(null)
+      if (suite.webhook_secret && suite.webhook_secret !== '***' && suite.webhook_url) {
+        setPendingSecret({ webhookUrl: suite.webhook_url, secret: suite.webhook_secret })
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to update suite')
     } finally {
@@ -136,6 +149,7 @@ export function EvalSuiteListPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-100">{suite.name}</span>
+                    <TriggerBadge suite={suite} />
                     {suite.workflow_deleted && (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300">
                         workflow deleted
@@ -149,6 +163,9 @@ export function EvalSuiteListPage() {
                     <span className="text-xs text-gray-500">
                       Pass threshold: {Math.round(suite.pass_threshold * 100)}%
                     </span>
+                    {suite.trigger_kind === 'cron' && suite.cron_expr && (
+                      <span className="text-xs text-gray-600 font-mono">{suite.cron_expr}</span>
+                    )}
                     <span className="text-xs text-gray-600">
                       Created {new Date(suite.created_at).toLocaleDateString()}
                     </span>
@@ -160,7 +177,10 @@ export function EvalSuiteListPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => { setEditingSuite(suite); setFormError(undefined) }}
+                    onClick={() => {
+                      setEditingSuite(suite)
+                      setFormError(undefined)
+                    }}
                     className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-1 rounded hover:bg-gray-700"
                   >
                     Edit
@@ -181,12 +201,7 @@ export function EvalSuiteListPage() {
       </div>
 
       {showForm && (
-        <EvalSuiteForm
-          onSave={handleCreate}
-          onClose={closeForm}
-          saving={formSaving}
-          error={formError}
-        />
+        <EvalSuiteForm onSave={handleCreate} onClose={closeForm} saving={formSaving} error={formError} />
       )}
 
       {editingSuite && (
@@ -196,6 +211,14 @@ export function EvalSuiteListPage() {
           onClose={closeForm}
           saving={formSaving}
           error={formError}
+        />
+      )}
+
+      {pendingSecret && (
+        <WebhookSecretModal
+          webhookUrl={pendingSecret.webhookUrl}
+          secret={pendingSecret.secret}
+          onClose={() => setPendingSecret(null)}
         />
       )}
     </div>

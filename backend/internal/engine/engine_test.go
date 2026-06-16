@@ -110,6 +110,9 @@ func (m *mockEngineStore) GetEvalSuite(_ context.Context, _ string) (store.EvalS
 func (m *mockEngineStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
 	return nil, nil
 }
+func (m *mockEngineStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
+}
 func (m *mockEngineStore) UpdateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
 	return v, nil
 }

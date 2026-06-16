@@ -183,6 +183,9 @@ func (s *runnerStore) CreateEvalSuite(_ context.Context, suite store.EvalSuite) 
 func (s *runnerStore) ListEvalSuites(_ context.Context, _ string) ([]store.EvalSuiteSummary, error) {
 	return nil, nil
 }
+func (s *runnerStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
+}
 func (s *runnerStore) UpdateEvalSuite(_ context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
 	return suite, nil
 }
@@ -260,7 +263,7 @@ func waitFor(t *testing.T, f func() bool) {
 
 func TestEvalRunner_Execute_ReturnsSuiteNotFound(t *testing.T) {
 	r, _, _ := newTestRunner(t)
-	_, err := r.Execute(context.Background(), "missing-suite")
+	_, err := r.Execute(context.Background(), "missing-suite", "manual")
 	if err == nil {
 		t.Error("expected error for missing suite")
 	}
@@ -276,7 +279,7 @@ func TestEvalRunner_Execute_ReturnsRunID(t *testing.T) {
 
 	eng.runs["default"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
 
-	runID, err := r.Execute(context.Background(), "es-1")
+	runID, err := r.Execute(context.Background(), "es-1", "manual")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -324,7 +327,7 @@ func TestEvalRunner_Execute_PassingStringMatchGrader(t *testing.T) {
 		},
 	}
 
-	runID, err := r.Execute(context.Background(), "es-1")
+	runID, err := r.Execute(context.Background(), "es-1", "manual")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -382,7 +385,7 @@ func TestEvalRunner_Execute_FailingGrader(t *testing.T) {
 
 	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
 
-	runID, err := r.Execute(context.Background(), "es-1")
+	runID, err := r.Execute(context.Background(), "es-1", "manual")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -427,7 +430,7 @@ func TestEvalRunner_Execute_WorkflowRunFailed_CountsAsError(t *testing.T) {
 
 	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusFailed}
 
-	runID, _ := r.Execute(context.Background(), "es-1")
+	runID, _ := r.Execute(context.Background(), "es-1", "manual")
 
 	waitFor(t, func() bool {
 		st.mu.Lock()
@@ -485,7 +488,7 @@ func TestEvalRunner_Execute_NodeMock_CapturesOutput(t *testing.T) {
 		},
 	}
 
-	runID, err := r.Execute(context.Background(), "es-1")
+	runID, err := r.Execute(context.Background(), "es-1", "manual")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -552,7 +555,7 @@ func TestEvalRunner_Execute_AllGradersError_CountsAsError(t *testing.T) {
 
 	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
 
-	runID, err := r.Execute(context.Background(), "es-1")
+	runID, err := r.Execute(context.Background(), "es-1", "manual")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -613,7 +616,7 @@ func TestEvalRunner_Execute_GraderErrorExcludedFromPassRate(t *testing.T) {
 
 	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
 
-	runID, err := r.Execute(context.Background(), "es-1")
+	runID, err := r.Execute(context.Background(), "es-1", "manual")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -656,7 +659,7 @@ func TestEvalRunner_Execute_ZeroGraders_SmokeTest(t *testing.T) {
 
 	eng.runs["r1"] = stubbedRun{runID: "wf-run-1", status: store.RunStatusSucceeded}
 
-	runID, _ := r.Execute(context.Background(), "es-1")
+	runID, _ := r.Execute(context.Background(), "es-1", "manual")
 
 	waitFor(t, func() bool {
 		st.mu.Lock()

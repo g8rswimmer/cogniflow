@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import { useEvalStore } from '../stores/useEvalStore'
-import { EvalSuiteForm } from '../components/eval/EvalSuiteForm'
+import { EvalSuiteForm, type SuiteFormData } from '../components/eval/EvalSuiteForm'
+import { WebhookSecretModal } from '../components/eval/WebhookSecretModal'
 import { TestCaseList } from '../components/eval/TestCaseList'
 import { TestCaseEditor } from '../components/eval/TestCaseEditor'
 import { EvalRunHistory } from '../components/eval/EvalRunHistory'
@@ -39,11 +40,12 @@ export function EvalSuiteDetailPage() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [triggeringRun, setTriggeringRun] = useState(false)
 
+  const [rotatingSec, setRotatingSec] = useState(false)
+  const [pendingSecret, setPendingSecret] = useState<{ webhookUrl: string; secret: string } | null>(null)
+
   const loadData = useCallback(async () => {
     if (!suiteId) return
 
-    // Clear stale store state immediately so the page doesn't render with
-    // data from a previous suite while this fetch is in progress.
     setActiveSuite(null)
     setTestCases([])
     setWorkflowNodes([])
@@ -60,8 +62,6 @@ export function EvalSuiteDetailPage() {
       const sorted = (tcResp.test_cases ?? []).sort((a, b) => a.position - b.position)
       setTestCases(sorted)
 
-      // Fetch the workflow for nodes and initial-data schema.
-      // This is non-fatal: if the workflow was deleted, we continue with no nodes.
       try {
         const wf = await api.getWorkflow(suite.workflow_id)
         const nodeOptions: NodeOption[] = (wf.nodes ?? [])
@@ -75,7 +75,6 @@ export function EvalSuiteDetailPage() {
       } catch {
         // workflow fetch failed — continue with empty node list
       } finally {
-        // Always mark workflow as ready so the UI unblocks even on failure.
         setWorkflowReady(true)
       }
     } catch (err) {
@@ -90,12 +89,7 @@ export function EvalSuiteDetailPage() {
     loadData()
   }, [loadData])
 
-  const handleSuiteUpdate = async (data: {
-    name: string
-    description?: string
-    pass_threshold: number
-    max_concurrency: number
-  }) => {
+  const handleSuiteUpdate = async (data: SuiteFormData) => {
     if (!suiteId) return
     setSuiteFormSaving(true)
     setSuiteFormError(undefined)
@@ -104,10 +98,30 @@ export function EvalSuiteDetailPage() {
       setActiveSuite(updated)
       upsertSuite(updated)
       setShowSuiteForm(false)
+      if (updated.webhook_secret && updated.webhook_secret !== '***' && updated.webhook_url) {
+        setPendingSecret({ webhookUrl: updated.webhook_url, secret: updated.webhook_secret })
+      }
     } catch (err) {
       setSuiteFormError(err instanceof Error ? err.message : 'Failed to update suite')
     } finally {
       setSuiteFormSaving(false)
+    }
+  }
+
+  const handleRotateSecret = async () => {
+    if (!suiteId || rotatingSec) return
+    setRotatingSec(true)
+    try {
+      const updated = await api.updateEvalSuite(suiteId, { rotate_webhook_secret: true })
+      setActiveSuite(updated)
+      upsertSuite(updated)
+      if (updated.webhook_secret && updated.webhook_secret !== '***' && updated.webhook_url) {
+        setPendingSecret({ webhookUrl: updated.webhook_url, secret: updated.webhook_secret })
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Rotate failed')
+    } finally {
+      setRotatingSec(false)
     }
   }
 
@@ -169,7 +183,6 @@ export function EvalSuiteDetailPage() {
       await api.reorderTestCases(suiteId!, ids)
       setTestCases(reordered.map((x, i) => ({ ...x, position: i })))
     } catch {
-      // Refresh from server on failure
       loadData()
     }
   }
@@ -235,6 +248,8 @@ export function EvalSuiteDetailPage() {
 
   if (!activeSuite) return null
 
+  const hasTrigger = activeSuite.trigger_kind && activeSuite.trigger_kind !== 'none'
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-4xl mx-auto px-4 py-8">
@@ -251,9 +266,19 @@ export function EvalSuiteDetailPage() {
         {/* Suite header */}
         <div className="rounded-lg bg-gray-800 border border-gray-700 px-5 py-4 mb-6">
           <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-gray-100">{activeSuite.name}</h1>
+                {activeSuite.trigger_kind === 'cron' && (
+                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-900/60 text-blue-300 font-medium">
+                    Cron
+                  </span>
+                )}
+                {activeSuite.trigger_kind === 'webhook' && (
+                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-900/60 text-purple-300 font-medium">
+                    Webhook
+                  </span>
+                )}
                 {activeSuite.workflow_deleted && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300">
                     workflow deleted
@@ -265,16 +290,51 @@ export function EvalSuiteDetailPage() {
               )}
               <div className="flex items-center gap-4 mt-2">
                 <span className="text-xs text-gray-500">
-                  Pass threshold: <span className="text-gray-300 font-medium">{Math.round(activeSuite.pass_threshold * 100)}%</span>
+                  Pass threshold:{' '}
+                  <span className="text-gray-300 font-medium">
+                    {Math.round(activeSuite.pass_threshold * 100)}%
+                  </span>
                 </span>
                 <span className="text-xs text-gray-500">
-                  Concurrency: <span className="text-gray-300 font-medium">{activeSuite.max_concurrency ?? 1}</span>
+                  Concurrency:{' '}
+                  <span className="text-gray-300 font-medium">
+                    {activeSuite.max_concurrency ?? 1}
+                  </span>
                 </span>
                 <span className="text-xs text-gray-600">
                   Updated {new Date(activeSuite.updated_at).toLocaleString()}
                 </span>
               </div>
+
+              {/* Trigger info row */}
+              {hasTrigger && (
+                <div className="flex items-center flex-wrap gap-3 mt-3 pt-2.5 border-t border-gray-700/50">
+                  {activeSuite.trigger_kind === 'cron' ? (
+                    <>
+                      <code className="text-xs font-mono text-blue-300 bg-blue-900/20 px-2 py-0.5 rounded">
+                        {activeSuite.cron_expr}
+                      </code>
+                      <span className="text-xs text-gray-500">Fires automatically on this schedule</span>
+                    </>
+                  ) : (
+                    <>
+                      <code className="text-xs font-mono text-gray-400 bg-gray-900/50 px-2 py-0.5 rounded select-all">
+                        {activeSuite.webhook_url}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={handleRotateSecret}
+                        disabled={rotatingSec}
+                        className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
+                      >
+                        {rotatingSec ? 'Rotating…' : 'Rotate Secret'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
+
             <div className="flex gap-2 flex-shrink-0">
               <button
                 type="button"
@@ -339,7 +399,10 @@ export function EvalSuiteDetailPage() {
         <EvalSuiteForm
           suite={activeSuite as EvalSuite}
           onSave={handleSuiteUpdate}
-          onClose={() => { setShowSuiteForm(false); setSuiteFormError(undefined) }}
+          onClose={() => {
+            setShowSuiteForm(false)
+            setSuiteFormError(undefined)
+          }}
           saving={suiteFormSaving}
           error={suiteFormError}
         />
@@ -352,9 +415,21 @@ export function EvalSuiteDetailPage() {
           nodes={workflowNodes}
           initialDataSchema={initialDataSchema}
           onSave={handleSaveTestCase}
-          onClose={() => { setEditorOpen(false); setEditingCase(null) }}
+          onClose={() => {
+            setEditorOpen(false)
+            setEditingCase(null)
+          }}
           saving={editorSaving}
           serverErrors={editorErrors}
+        />
+      )}
+
+      {/* One-time webhook secret reveal */}
+      {pendingSecret && (
+        <WebhookSecretModal
+          webhookUrl={pendingSecret.webhookUrl}
+          secret={pendingSecret.secret}
+          onClose={() => setPendingSecret(null)}
         />
       )}
     </div>

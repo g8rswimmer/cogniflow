@@ -14,6 +14,11 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
 
+// ErrWorkflowDeleted is returned by Execute when the suite's workflow has been deleted.
+// Callers (handler, scheduler) can use errors.Is to produce the right response code or
+// self-disarm a cron job rather than logging an opaque internal error.
+var ErrWorkflowDeleted = fmt.Errorf("eval runner: workflow has been deleted")
+
 // engineRunner is the minimal interface the eval runner needs from the workflow engine.
 // *engine.WorkflowEngine satisfies it.
 type engineRunner interface {
@@ -39,13 +44,14 @@ func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngi
 }
 
 // Execute creates an EvalRun record, starts async execution, and returns the run ID immediately.
-func (r *EvalRunner) Execute(ctx context.Context, suiteID string) (string, error) {
+// triggeredBy should be "manual", "cron", or "webhook".
+func (r *EvalRunner) Execute(ctx context.Context, suiteID string, triggeredBy string) (string, error) {
 	suite, err := r.store.GetEvalSuite(ctx, suiteID)
 	if err != nil {
 		return "", fmt.Errorf("eval runner: get suite: %w", err)
 	}
 	if suite.WorkflowDeleted {
-		return "", fmt.Errorf("eval runner: workflow has been deleted; cannot trigger run")
+		return "", ErrWorkflowDeleted
 	}
 
 	testCases, err := r.store.ListTestCases(ctx, suiteID)
@@ -62,11 +68,15 @@ func (r *EvalRunner) Execute(ctx context.Context, suiteID string) (string, error
 		testCases[i].Graders = dec
 	}
 
+	if triggeredBy == "" {
+		triggeredBy = "manual"
+	}
 	evalRun, err := r.store.CreateEvalRun(ctx, store.EvalRun{
-		ID:         uuid.New().String(),
-		SuiteID:    suiteID,
-		Status:     store.EvalRunPending,
-		TotalCases: len(testCases),
+		ID:          uuid.New().String(),
+		SuiteID:     suiteID,
+		TriggeredBy: triggeredBy,
+		Status:      store.EvalRunPending,
+		TotalCases:  len(testCases),
 	})
 	if err != nil {
 		return "", fmt.Errorf("eval runner: create eval run: %w", err)

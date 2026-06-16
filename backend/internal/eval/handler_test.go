@@ -30,7 +30,7 @@ func newTestHandler(t *testing.T) (*Handler, *stubStore) {
 	}
 	v := NewGraderVault(c)
 	st := newStubStore()
-	h := NewHandler(st, v, node.NewRegistry(), nil)
+	h := NewHandler(st, v, node.NewRegistry(), nil, nil)
 	return h, st
 }
 
@@ -43,6 +43,11 @@ func decodeJSON(t *testing.T, body []byte, v any) {
 
 // callHandler calls a handler method with the given request and returns the response recorder.
 func callHandler(h func(http.ResponseWriter, *http.Request), method, path, body string, pathValues map[string]string) *httptest.ResponseRecorder {
+	return callHandlerH(h, method, path, body, pathValues, nil)
+}
+
+// callHandlerH is like callHandler but also sets extra HTTP headers.
+func callHandlerH(h func(http.ResponseWriter, *http.Request), method, path, body string, pathValues, headers map[string]string) *httptest.ResponseRecorder {
 	var buf *bytes.Reader
 	if body != "" {
 		buf = bytes.NewReader([]byte(body))
@@ -55,6 +60,9 @@ func callHandler(h func(http.ResponseWriter, *http.Request), method, path, body 
 	}
 	for k, v := range pathValues {
 		req.SetPathValue(k, v)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	rr := httptest.NewRecorder()
 	h(rr, req)
@@ -146,6 +154,10 @@ func (s *stubStore) ListEvalSuites(_ context.Context, workflowID string) ([]stor
 		}
 	}
 	return out, nil
+}
+
+func (s *stubStore) ListEvalSuitesByCronTrigger(_ context.Context) ([]store.EvalSuite, error) {
+	return nil, nil
 }
 
 func (s *stubStore) UpdateEvalSuite(_ context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
@@ -873,10 +885,147 @@ func TestHandler_TriggerRun_RunnerError(t *testing.T) {
 
 // stubRunner is a test double for evalRunnerI.
 type stubRunner struct {
-	runID string
-	err   error
+	runID       string
+	triggeredBy string // captured on Execute for assertion
+	err         error
 }
 
-func (s *stubRunner) Execute(_ context.Context, _ string) (string, error) {
+func (s *stubRunner) Execute(_ context.Context, _ string, triggeredBy string) (string, error) {
+	s.triggeredBy = triggeredBy
 	return s.runID, s.err
+}
+
+// ---- WebhookTrigger tests --------------------------------------------------
+
+// webhookSuite creates a test suite with trigger_kind=webhook and a real
+// encrypted secret. Returns the suite and the plain-text secret.
+func webhookSuite(t *testing.T, h *Handler, st *stubStore) (store.EvalSuite, string) {
+	t.Helper()
+	const plainSecret = "supersecrettoken123"
+	enc, err := h.vault.EncryptValue(plainSecret)
+	if err != nil {
+		t.Fatalf("EncryptValue: %v", err)
+	}
+	suite := store.EvalSuite{
+		ID:            "wh-suite-1",
+		WorkflowID:    "wf-1",
+		Name:          "CI Gate",
+		TriggerKind:   "webhook",
+		WebhookSecret: enc,
+	}
+	st.mu.Lock()
+	st.suites[suite.ID] = suite
+	st.mu.Unlock()
+	return suite, plainSecret
+}
+
+func TestHandler_WebhookTrigger_Success(t *testing.T) {
+	h, st := newTestHandler(t)
+	_, secret := webhookSuite(t, h, st)
+	runner := &stubRunner{runID: "run-wh-1"}
+	h.runner = runner
+
+	rr := callHandlerH(h.WebhookTrigger, "POST", "/v1/eval-webhooks/wh-suite-1", "",
+		map[string]string{"suite_id": "wh-suite-1"},
+		map[string]string{"Authorization": "Bearer " + secret},
+	)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("want 202, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]string
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if resp["eval_run_id"] != "run-wh-1" {
+		t.Errorf("want eval_run_id=run-wh-1, got %q", resp["eval_run_id"])
+	}
+	if runner.triggeredBy != "webhook" {
+		t.Errorf("want triggered_by=webhook, got %q", runner.triggeredBy)
+	}
+}
+
+func TestHandler_WebhookTrigger_WrongToken(t *testing.T) {
+	h, st := newTestHandler(t)
+	webhookSuite(t, h, st)
+	h.runner = &stubRunner{runID: "run-1"}
+
+	rr := callHandlerH(h.WebhookTrigger, "POST", "/v1/eval-webhooks/wh-suite-1", "",
+		map[string]string{"suite_id": "wh-suite-1"},
+		map[string]string{"Authorization": "Bearer wrongtoken"},
+	)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", rr.Code)
+	}
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if code := resp["error"].(map[string]any)["code"]; code != "UNAUTHORIZED" {
+		t.Errorf("want UNAUTHORIZED, got %v", code)
+	}
+}
+
+func TestHandler_WebhookTrigger_MissingAuthHeader(t *testing.T) {
+	h, st := newTestHandler(t)
+	webhookSuite(t, h, st)
+
+	rr := callHandler(h.WebhookTrigger, "POST", "/v1/eval-webhooks/wh-suite-1", "",
+		map[string]string{"suite_id": "wh-suite-1"},
+	)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", rr.Code)
+	}
+}
+
+func TestHandler_WebhookTrigger_SuiteNotFound(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	rr := callHandlerH(h.WebhookTrigger, "POST", "/v1/eval-webhooks/missing", "",
+		map[string]string{"suite_id": "missing"},
+		map[string]string{"Authorization": "Bearer token"},
+	)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", rr.Code)
+	}
+}
+
+func TestHandler_WebhookTrigger_WrongTriggerKind(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.mu.Lock()
+	st.suites["cron-suite"] = store.EvalSuite{
+		ID: "cron-suite", WorkflowID: "wf-1", Name: "Cron Suite", TriggerKind: "cron",
+	}
+	st.mu.Unlock()
+
+	rr := callHandlerH(h.WebhookTrigger, "POST", "/v1/eval-webhooks/cron-suite", "",
+		map[string]string{"suite_id": "cron-suite"},
+		map[string]string{"Authorization": "Bearer token"},
+	)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rr.Code)
+	}
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if code := resp["error"].(map[string]any)["code"]; code != "INVALID_TRIGGER" {
+		t.Errorf("want INVALID_TRIGGER, got %v", code)
+	}
+}
+
+func TestHandler_WebhookTrigger_WorkflowDeleted(t *testing.T) {
+	h, st := newTestHandler(t)
+	_, secret := webhookSuite(t, h, st)
+	st.mu.Lock()
+	s := st.suites["wh-suite-1"]
+	s.WorkflowDeleted = true
+	st.suites["wh-suite-1"] = s
+	st.mu.Unlock()
+
+	rr := callHandlerH(h.WebhookTrigger, "POST", "/v1/eval-webhooks/wh-suite-1", "",
+		map[string]string{"suite_id": "wh-suite-1"},
+		map[string]string{"Authorization": "Bearer " + secret},
+	)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rr.Code)
+	}
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if code := resp["error"].(map[string]any)["code"]; code != "WORKFLOW_DELETED" {
+		t.Errorf("want WORKFLOW_DELETED, got %v", code)
+	}
 }

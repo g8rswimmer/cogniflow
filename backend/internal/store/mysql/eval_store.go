@@ -23,18 +23,25 @@ func (s *WorkflowStore) CreateEvalSuite(ctx context.Context, suite store.EvalSui
 	if suite.MaxConcurrency == 0 {
 		suite.MaxConcurrency = 1
 	}
-	if suite.Description == "" {
-		suite.Description = ""
+	if suite.TriggerKind == "" {
+		suite.TriggerKind = "none"
 	}
 	now := time.Now().UTC()
 	suite.CreatedAt = now
 	suite.UpdatedAt = now
 
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO eval_suites (id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	trigCfg, err := marshalTriggerConfig(suite)
+	if err != nil {
+		return store.EvalSuite{}, fmt.Errorf("eval store: marshal trigger_config: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO eval_suites
+		 (id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, trigger_kind, trigger_config, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		suite.ID, suite.WorkflowID, suite.Name, suite.Description,
 		suite.PassThreshold, suite.MaxConcurrency, boolToInt(suite.WorkflowDeleted),
+		suite.TriggerKind, trigCfg,
 		suite.CreatedAt, suite.UpdatedAt,
 	)
 	if err != nil {
@@ -46,7 +53,8 @@ func (s *WorkflowStore) CreateEvalSuite(ctx context.Context, suite store.EvalSui
 func (s *WorkflowStore) GetEvalSuite(ctx context.Context, id string) (store.EvalSuite, error) {
 	var row dbEvalSuite
 	err := s.db.GetContext(ctx, &row,
-		`SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, created_at, updated_at
+		`SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted,
+		        trigger_kind, trigger_config, created_at, updated_at
 		 FROM eval_suites WHERE id=?`, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.EvalSuite{}, store.ErrNotFound
@@ -54,13 +62,14 @@ func (s *WorkflowStore) GetEvalSuite(ctx context.Context, id string) (store.Eval
 	if err != nil {
 		return store.EvalSuite{}, fmt.Errorf("eval store: get suite: %w", err)
 	}
-	return rowToEvalSuite(row), nil
+	return rowToEvalSuite(row)
 }
 
 func (s *WorkflowStore) ListEvalSuites(ctx context.Context, workflowID string) ([]store.EvalSuiteSummary, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT es.id, es.workflow_id, es.name, es.description, es.pass_threshold,
-		        es.max_concurrency, es.workflow_deleted, es.created_at, es.updated_at,
+		        es.max_concurrency, es.workflow_deleted, es.trigger_kind, es.trigger_config,
+		        es.created_at, es.updated_at,
 		        (SELECT COUNT(*) FROM eval_test_cases WHERE suite_id = es.id) AS test_case_count,
 		        (SELECT status FROM eval_runs WHERE suite_id = es.id ORDER BY created_at DESC LIMIT 1) AS last_run_status,
 		        (SELECT created_at FROM eval_runs WHERE suite_id = es.id ORDER BY created_at DESC LIMIT 1) AS last_run_at
@@ -78,12 +87,26 @@ func (s *WorkflowStore) ListEvalSuites(ctx context.Context, workflowID string) (
 		if err := rows.Scan(
 			&row.ID, &row.WorkflowID, &row.Name, &row.Description,
 			&row.PassThreshold, &row.MaxConcurrency, &row.WorkflowDeleted,
+			&row.TriggerKind, &row.TriggerConfig,
 			&row.CreatedAt, &row.UpdatedAt, &row.TestCaseCount,
-			&row.LastRunStatus, &row.LastRunAt, // LastRunAt uses dbNullTime scanner
+			&row.LastRunStatus, &row.LastRunAt,
 		); err != nil {
 			return nil, fmt.Errorf("eval store: scan suite summary: %w", err)
 		}
-		summaries = append(summaries, rowToEvalSuiteSummary(row))
+		s, err := rowToEvalSuite(row.dbEvalSuite)
+		if err != nil {
+			return nil, err
+		}
+		sum := store.EvalSuiteSummary{
+			EvalSuite:     s,
+			TestCaseCount: row.TestCaseCount,
+			LastRunStatus: row.LastRunStatus,
+		}
+		if row.LastRunAt.Valid {
+			t := row.LastRunAt.Time
+			sum.LastRunAt = &t
+		}
+		summaries = append(summaries, sum)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("eval store: list suites rows: %w", err)
@@ -91,13 +114,52 @@ func (s *WorkflowStore) ListEvalSuites(ctx context.Context, workflowID string) (
 	return summaries, nil
 }
 
+func (s *WorkflowStore) ListEvalSuitesByCronTrigger(ctx context.Context) ([]store.EvalSuite, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted,
+		        trigger_kind, trigger_config, created_at, updated_at
+		 FROM eval_suites WHERE trigger_kind = 'cron' AND workflow_deleted = FALSE`)
+	if err != nil {
+		return nil, fmt.Errorf("eval store: list cron suites: %w", err)
+	}
+	defer rows.Close()
+
+	var suites []store.EvalSuite
+	for rows.Next() {
+		var row dbEvalSuite
+		if err := rows.Scan(
+			&row.ID, &row.WorkflowID, &row.Name, &row.Description,
+			&row.PassThreshold, &row.MaxConcurrency, &row.WorkflowDeleted,
+			&row.TriggerKind, &row.TriggerConfig,
+			&row.CreatedAt, &row.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("eval store: scan cron suite: %w", err)
+		}
+		suite, err := rowToEvalSuite(row)
+		if err != nil {
+			return nil, err
+		}
+		suites = append(suites, suite)
+	}
+	return suites, rows.Err()
+}
+
 func (s *WorkflowStore) UpdateEvalSuite(ctx context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
 	suite.UpdatedAt = time.Now().UTC()
+	if suite.TriggerKind == "" {
+		suite.TriggerKind = "none"
+	}
+	trigCfg, err := marshalTriggerConfig(suite)
+	if err != nil {
+		return store.EvalSuite{}, fmt.Errorf("eval store: marshal trigger_config: %w", err)
+	}
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE eval_suites SET name=?, description=?, pass_threshold=?, max_concurrency=?, updated_at=?
+		`UPDATE eval_suites
+		 SET name=?, description=?, pass_threshold=?, max_concurrency=?,
+		     trigger_kind=?, trigger_config=?, updated_at=?
 		 WHERE id=?`,
 		suite.Name, suite.Description, suite.PassThreshold, suite.MaxConcurrency,
-		suite.UpdatedAt, suite.ID,
+		suite.TriggerKind, trigCfg, suite.UpdatedAt, suite.ID,
 	)
 	if err != nil {
 		return store.EvalSuite{}, fmt.Errorf("eval store: update suite: %w", err)
@@ -321,12 +383,15 @@ func (s *WorkflowStore) CreateEvalRun(ctx context.Context, r store.EvalRun) (sto
 	if r.ID == "" {
 		r.ID = newUUID()
 	}
+	if r.TriggeredBy == "" {
+		r.TriggeredBy = "manual"
+	}
 	r.CreatedAt = time.Now().UTC()
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO eval_runs (id, suite_id, status, total_cases, passed_count, failed_count, error_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.SuiteID, string(r.Status), r.TotalCases,
+		`INSERT INTO eval_runs (id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.SuiteID, r.TriggeredBy, string(r.Status), r.TotalCases,
 		r.PassedCount, r.FailedCount, r.ErrorCount, r.CreatedAt,
 	)
 	if err != nil {
@@ -338,10 +403,10 @@ func (s *WorkflowStore) CreateEvalRun(ctx context.Context, r store.EvalRun) (sto
 func (s *WorkflowStore) GetEvalRun(ctx context.Context, id string) (store.EvalRun, error) {
 	var row dbEvalRun
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, suite_id, status, total_cases, passed_count, failed_count, error_count,
+		`SELECT id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count,
 		        started_at, finished_at, created_at
 		 FROM eval_runs WHERE id=?`, id,
-	).Scan(&row.ID, &row.SuiteID, &row.Status, &row.TotalCases,
+	).Scan(&row.ID, &row.SuiteID, &row.TriggeredBy, &row.Status, &row.TotalCases,
 		&row.PassedCount, &row.FailedCount, &row.ErrorCount,
 		&row.StartedAt, &row.FinishedAt, &row.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -354,7 +419,7 @@ func (s *WorkflowStore) GetEvalRun(ctx context.Context, id string) (store.EvalRu
 }
 
 func (s *WorkflowStore) ListEvalRuns(ctx context.Context, f store.EvalRunFilter) ([]store.EvalRun, error) {
-	q := `SELECT id, suite_id, status, total_cases, passed_count, failed_count, error_count,
+	q := `SELECT id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count,
 	             started_at, finished_at, created_at
 	      FROM eval_runs WHERE suite_id=?`
 	args := []any{f.SuiteID}
@@ -380,7 +445,7 @@ func (s *WorkflowStore) ListEvalRuns(ctx context.Context, f store.EvalRunFilter)
 	var runs []store.EvalRun
 	for dbRows.Next() {
 		var row dbEvalRun
-		if err := dbRows.Scan(&row.ID, &row.SuiteID, &row.Status,
+		if err := dbRows.Scan(&row.ID, &row.SuiteID, &row.TriggeredBy, &row.Status,
 			&row.TotalCases, &row.PassedCount, &row.FailedCount, &row.ErrorCount,
 			&row.StartedAt, &row.FinishedAt, &row.CreatedAt); err != nil {
 			return nil, fmt.Errorf("eval store: scan eval run: %w", err)
@@ -533,6 +598,8 @@ type dbEvalSuite struct {
 	PassThreshold   float64   `db:"pass_threshold"`
 	MaxConcurrency  int       `db:"max_concurrency"`
 	WorkflowDeleted int       `db:"workflow_deleted"`
+	TriggerKind     string    `db:"trigger_kind"`
+	TriggerConfig   []byte    `db:"trigger_config"`
 	CreatedAt       time.Time `db:"created_at"`
 	UpdatedAt       time.Time `db:"updated_at"`
 }
@@ -589,6 +656,7 @@ type dbTestCase struct {
 type dbEvalRun struct {
 	ID          string     `db:"id"`
 	SuiteID     string     `db:"suite_id"`
+	TriggeredBy string     `db:"triggered_by"`
 	Status      string     `db:"status"`
 	TotalCases  int        `db:"total_cases"`
 	PassedCount int        `db:"passed_count"`
@@ -614,8 +682,8 @@ type dbTestCaseResult struct {
 
 // ---- row converters -------------------------------------------------------
 
-func rowToEvalSuite(row dbEvalSuite) store.EvalSuite {
-	return store.EvalSuite{
+func rowToEvalSuite(row dbEvalSuite) (store.EvalSuite, error) {
+	s := store.EvalSuite{
 		ID:              row.ID,
 		WorkflowID:      row.WorkflowID,
 		Name:            row.Name,
@@ -623,22 +691,19 @@ func rowToEvalSuite(row dbEvalSuite) store.EvalSuite {
 		PassThreshold:   row.PassThreshold,
 		MaxConcurrency:  row.MaxConcurrency,
 		WorkflowDeleted: row.WorkflowDeleted != 0,
+		TriggerKind:     row.TriggerKind,
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
 	}
-}
-
-func rowToEvalSuiteSummary(row dbEvalSuiteSummary) store.EvalSuiteSummary {
-	s := store.EvalSuiteSummary{
-		EvalSuite:     rowToEvalSuite(row.dbEvalSuite),
-		TestCaseCount: row.TestCaseCount,
-		LastRunStatus: row.LastRunStatus,
+	if len(row.TriggerConfig) > 0 {
+		var cfg map[string]string
+		if err := json.Unmarshal(row.TriggerConfig, &cfg); err != nil {
+			return store.EvalSuite{}, fmt.Errorf("eval store: unmarshal trigger_config: %w", err)
+		}
+		s.CronExpr = cfg["cron_expr"]
+		s.WebhookSecret = cfg["webhook_secret"]
 	}
-	if row.LastRunAt.Valid {
-		t := row.LastRunAt.Time
-		s.LastRunAt = &t
-	}
-	return s
+	return s, nil
 }
 
 func rowToTestCase(row dbTestCase) (store.TestCase, error) {
@@ -682,6 +747,7 @@ func rowToEvalRun(row dbEvalRun) store.EvalRun {
 	return store.EvalRun{
 		ID:          row.ID,
 		SuiteID:     row.SuiteID,
+		TriggeredBy: row.TriggeredBy,
 		Status:      store.EvalRunStatus(row.Status),
 		TotalCases:  row.TotalCases,
 		PassedCount: row.PassedCount,
@@ -741,6 +807,23 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// marshalTriggerConfig serialises the trigger-specific fields of a suite to the
+// trigger_config JSON blob. Only fields relevant to the trigger_kind are included.
+func marshalTriggerConfig(s store.EvalSuite) (string, error) {
+	cfg := map[string]string{}
+	switch s.TriggerKind {
+	case "cron":
+		cfg["cron_expr"] = s.CronExpr
+	case "webhook":
+		cfg["webhook_secret"] = s.WebhookSecret
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // parseDateTime parses datetime strings as stored by SQLite in tests.

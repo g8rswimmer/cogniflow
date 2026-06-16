@@ -70,6 +70,15 @@ export function EvalRunHistory({ suiteId }: Props) {
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
+                      {run.triggered_by && run.triggered_by !== 'manual' && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                          run.triggered_by === 'cron'
+                            ? 'bg-blue-900/40 text-blue-400'
+                            : 'bg-purple-900/40 text-purple-400'
+                        }`}>
+                          {run.triggered_by}
+                        </span>
+                      )}
                       <span className="text-xs text-gray-400">
                         {run.passed_count}/{run.total_cases} passed
                       </span>
