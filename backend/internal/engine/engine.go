@@ -86,6 +86,23 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 		defer cancel()
 		defer cleanup()
 
+		// Subscribe internally before runDAG so no node events are missed.
+		// The drain goroutine collects succeeded/failed outcomes for persistence.
+		internalCh, internalCleanup := e.bus.Subscribe(run.ID)
+		nodeResults := make(map[string]store.NodeResult)
+		drainDone := make(chan struct{})
+		go func() {
+			defer close(drainDone)
+			for event := range internalCh {
+				switch event.Type {
+				case EventNodeSucceeded:
+					nodeResults[event.NodeID] = store.NodeResult{Status: "succeeded", Output: event.Output}
+				case EventNodeFailed:
+					nodeResults[event.NodeID] = store.NodeResult{Status: "failed", Error: event.Error}
+				}
+			}
+		}()
+
 		start := time.Now()
 		finalOutput, runErr := runDAG(runCtx, run.ID, dag, req.InitialData, e.registry, e.bus, req.NodeMocks)
 		durationMs := time.Since(start).Milliseconds()
@@ -119,6 +136,14 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 
 		if err := e.store.UpdateRunStatus(context.Background(), run.ID, statusUpdate, outputMap); err != nil {
 			slog.Error("engine: update run status", "run_id", run.ID, "error", err)
+		}
+
+		// Close internal subscription and wait for the drain goroutine to finish
+		// processing any remaining buffered events before persisting node results.
+		internalCleanup()
+		<-drainDone
+		if err := e.store.SaveRunNodeResults(context.Background(), run.ID, nodeResults); err != nil {
+			slog.Error("engine: save node results", "run_id", run.ID, "error", err)
 		}
 	}()
 

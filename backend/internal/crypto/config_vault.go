@@ -139,6 +139,10 @@ func (v *ConfigVault) UpdateRunStatus(ctx context.Context, runID string, status 
 	return v.inner.UpdateRunStatus(ctx, runID, status, output)
 }
 
+func (v *ConfigVault) SaveRunNodeResults(ctx context.Context, runID string, results map[string]store.NodeResult) error {
+	return v.inner.SaveRunNodeResults(ctx, runID, results)
+}
+
 func (v *ConfigVault) GetRun(ctx context.Context, runID string) (store.Run, error) {
 	return v.inner.GetRun(ctx, runID)
 }

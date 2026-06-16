@@ -48,6 +48,9 @@ func (m *mockEngineStore) CreateRun(_ context.Context, r store.Run) (store.Run, 
 	m.runs[r.ID] = r
 	return r, nil
 }
+func (m *mockEngineStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (m *mockEngineStore) UpdateRunStatus(_ context.Context, runID string, status store.RunStatus, output map[string]any) error {
 	m.lastStatus = status
 	m.lastOutput = output

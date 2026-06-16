@@ -97,7 +97,7 @@ func (s *WorkflowStore) GetRun(ctx context.Context, runID string) (store.Run, er
 	var row dbRun
 	err := s.db.GetContext(ctx, &row,
 		`SELECT id, workflow_id, triggered_by, status, started_at, finished_at,
-		        final_output, error_detail
+		        final_output, error_detail, node_results
 		 FROM runs WHERE id=?`, runID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Run{}, store.ErrNotFound
@@ -108,7 +108,22 @@ func (s *WorkflowStore) GetRun(ctx context.Context, runID string) (store.Run, er
 	return rowToRun(row)
 }
 
+func (s *WorkflowStore) SaveRunNodeResults(ctx context.Context, runID string, results map[string]store.NodeResult) error {
+	b, err := json.Marshal(results)
+	if err != nil {
+		return fmt.Errorf("run store: marshal node_results: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE runs SET node_results=? WHERE id=?`, string(b), runID)
+	if err != nil {
+		return fmt.Errorf("run store: save node results: %w", err)
+	}
+	return nil
+}
+
 func (s *WorkflowStore) ListRuns(ctx context.Context, f store.RunFilter) ([]store.Run, error) {
+	// node_results is intentionally excluded from list queries — it can be large
+	// and is only needed by the detail endpoint (GetRun).
 	q := `SELECT id, workflow_id, triggered_by, status, started_at, finished_at,
 	             final_output, error_detail
 	      FROM runs WHERE workflow_id=?`
@@ -158,6 +173,7 @@ type dbRun struct {
 	FinishedAt  *time.Time `db:"finished_at"`
 	FinalOutput []byte     `db:"final_output"`
 	ErrorDetail []byte     `db:"error_detail"`
+	NodeResults []byte     `db:"node_results"` // nullable; populated by SaveRunNodeResults
 }
 
 type runWriteRow struct {
@@ -193,6 +209,11 @@ func rowToRun(row dbRun) (store.Run, error) {
 	if len(row.ErrorDetail) > 0 {
 		if err := json.Unmarshal(row.ErrorDetail, &r.ErrorDetail); err != nil {
 			return store.Run{}, fmt.Errorf("run store: unmarshal error_detail: %w", err)
+		}
+	}
+	if len(row.NodeResults) > 0 {
+		if err := json.Unmarshal(row.NodeResults, &r.NodeResults); err != nil {
+			return store.Run{}, fmt.Errorf("run store: unmarshal node_results: %w", err)
 		}
 	}
 	return r, nil

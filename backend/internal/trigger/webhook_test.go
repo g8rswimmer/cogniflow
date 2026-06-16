@@ -56,6 +56,9 @@ func (m *mockTriggerStore) CreateRun(_ context.Context, r store.Run) (store.Run,
 func (m *mockTriggerStore) UpdateRunStatus(_ context.Context, _ string, _ store.RunStatus, _ map[string]any) error {
 	return nil
 }
+func (m *mockTriggerStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (m *mockTriggerStore) GetRun(_ context.Context, _ string) (store.Run, error) {
 	return store.Run{}, nil
 }

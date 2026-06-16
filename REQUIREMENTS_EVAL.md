@@ -504,8 +504,8 @@ The following decisions were made during requirements authoring and are reflecte
 
 | # | Item |
 |---|------|
-| EF-01 | Scheduled EvalRuns (cron-triggered, similar to workflow cron triggers) |
-| EF-02 | CI webhook trigger — call `POST /v1/eval-suites/{id}/runs` from a pipeline with a token |
+| ~~EF-01~~ | ~~Scheduled EvalRuns (cron-triggered, similar to workflow cron triggers)~~ |
+| ~~EF-02~~ | ~~CI webhook trigger — call `POST /v1/eval-suites/{id}/runs` from a pipeline with a token~~ |
 | EF-03 | Dataset import — generate TestCases from a CSV or JSONL file |
 | EF-04 | Baseline comparison — diff two EvalRun results to surface regressions |
 | EF-05 | Custom grader plugins via gRPC (mirrors node plugin protocol) |

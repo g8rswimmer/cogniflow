@@ -13,7 +13,7 @@ import '@xyflow/react/dist/style.css'
 
 import { api } from '../hooks/useApi'
 import { CanvasControls } from '../components/canvas/CanvasControls'
-import type { Run, Workflow } from '../api/types'
+import type { Run, Workflow, NodeResult } from '../api/types'
 import { StatusBadge } from '../components/shared/StatusBadge'
 import { NodeStatusList } from '../components/run/NodeStatusList'
 import type { NodeEntry } from '../components/run/NodeStatusList'
@@ -23,15 +23,19 @@ import type { NodeRunStatus } from '../stores/useRunStore'
 // Static graph node with built-in status colouring (no store dependency)
 // ---------------------------------------------------------------------------
 
+type DetailRunStatus = 'succeeded' | 'failed' | 'skipped' | 'unknown'
+
 interface DetailNodeData {
   type_id: string
   label: string
-  runStatus?: 'succeeded' | 'unknown'
+  runStatus?: DetailRunStatus
   [key: string]: unknown
 }
 
 const detailNodeBg: Record<string, string> = {
   succeeded: 'bg-green-800 border-green-500',
+  failed: 'bg-red-900 border-red-500',
+  skipped: 'bg-gray-800 border-gray-600',
   unknown: 'bg-gray-700 border-gray-500',
 }
 
@@ -116,12 +120,27 @@ export function RunDetailPage() {
     )
   }
 
-  // final_output is null for failed runs (the backend stores the error in
-  // error_detail, not final_output). For succeeded runs it contains only
-  // sink-node outputs. We use presence in final_output as evidence that a
-  // node succeeded, but absence is not evidence of failure — the node may
-  // have succeeded without being a sink, or the run may have failed upstream.
+  // Resolve per-node status and output data.
+  // Prefer node_results (persisted after run completes) for accurate status.
+  // Fall back to final_output heuristic for runs recorded before F-05.
+  const nodeResults = run.node_results
   const finalOutput = run.final_output ?? {}
+
+  function resolveNodeResult(nodeId: string): NodeResult | undefined {
+    if (nodeResults) return nodeResults[nodeId] // undefined = skipped/pruned
+    // legacy fallback: presence in final_output means succeeded
+    const out = finalOutput[nodeId]
+    return out ? { status: 'succeeded', output: out } : undefined
+  }
+
+  function resolveDetailStatus(nodeId: string): DetailRunStatus {
+    if (nodeResults) {
+      const r = nodeResults[nodeId]
+      if (!r) return 'skipped'
+      return r.status // 'succeeded' | 'failed'
+    }
+    return finalOutput[nodeId] ? 'succeeded' : 'unknown'
+  }
 
   const rfNodes: Node<DetailNodeData>[] = workflow.nodes.map(n => ({
     id: n.id,
@@ -130,7 +149,7 @@ export function RunDetailPage() {
     data: {
       type_id: n.type_id,
       label: n.label,
-      runStatus: finalOutput[n.id] ? 'succeeded' : 'unknown',
+      runStatus: resolveDetailStatus(n.id),
     },
   }))
 
@@ -142,14 +161,11 @@ export function RunDetailPage() {
     style: { stroke: '#6366f1', strokeWidth: 2 },
   }))
 
-  // Build NodeStatusList entries. Only mark nodes as succeeded when there is
-  // concrete evidence (output in final_output). Leave everything else without
-  // a status so NodeStatusList renders them as neutral gray — we cannot
-  // distinguish "failed" from "never ran" from the REST response alone.
+  // Build NodeStatusList entries using per-node results when available.
   const entries: NodeEntry[] = workflow.nodes.map(n => {
-    const output = finalOutput[n.id]
-    const status: NodeRunStatus | undefined = output
-      ? { status: 'succeeded', output }
+    const result = resolveNodeResult(n.id)
+    const status: NodeRunStatus | undefined = result
+      ? { status: result.status as NodeRunStatus['status'], output: result.output, error: result.error }
       : undefined
 
     return { nodeId: n.id, label: n.label, status }
@@ -206,7 +222,7 @@ export function RunDetailPage() {
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
           Node Results
         </h2>
-        {run.status === 'failed' && Object.keys(finalOutput).length === 0 && (
+        {run.status === 'failed' && !nodeResults && Object.keys(finalOutput).length === 0 && (
           <p className="text-xs text-orange-400 mb-3 italic">
             Run failed before producing output — check error details in the backend logs.
           </p>

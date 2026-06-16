@@ -137,6 +137,9 @@ func (m *mockStore) CreateRun(_ context.Context, r store.Run) (store.Run, error)
 	m.mu.Unlock()
 	return r, nil
 }
+func (m *mockStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
+	return nil
+}
 func (m *mockStore) UpdateRunStatus(_ context.Context, runID string, status store.RunStatus, _ map[string]any) error {
 	m.mu.Lock()
 	r := m.runs[runID]
