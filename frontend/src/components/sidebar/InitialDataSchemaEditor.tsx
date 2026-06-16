@@ -46,7 +46,7 @@ const selectCls = `
   focus:outline-none focus:border-indigo-500
 `.trim()
 
-export function InitialDataSchemaEditor() {
+export function InitialDataSchemaEditor({ hideHeading = false }: { hideHeading?: boolean }) {
   const initialDataSchema = useWorkflowStore(s => s.initialDataSchema)
   const setInitialDataSchema = useWorkflowStore(s => s.setInitialDataSchema)
 
@@ -96,9 +96,11 @@ export function InitialDataSchemaEditor() {
 
   return (
     <div className="space-y-3">
-      <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-        Workflow Inputs
-      </div>
+      {!hideHeading && (
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+          Workflow Inputs
+        </div>
+      )}
       <p className="text-xs text-gray-500">
         Declare the fields your workflow expects in its initial data.
         These appear as individual chips in the template variable picker

@@ -102,6 +102,9 @@ export function WorkflowListPage() {
                   >
                     {wf.name}
                   </Link>
+                  {wf.description && (
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{wf.description}</p>
+                  )}
                   <div className="text-xs text-gray-500 mt-0.5 flex gap-3">
                     <span className="capitalize">{wf.trigger_kind ?? 'manual'}</span>
                     <span>{wf.node_count} node{wf.node_count !== 1 ? 's' : ''}</span>

@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWorkflowStore } from '../../stores/useWorkflowStore'
-import { TriggerPanel } from './TriggerPanel'
-import { InputsPanel } from './InputsPanel'
+import { WorkflowSettingsPanel } from './WorkflowSettingsPanel'
 
 interface Props {
   onSave: () => void
@@ -23,14 +22,8 @@ export function Navbar({ onSave, onRun, saving, running }: Props) {
   const isDirty = useWorkflowStore(s => s.isDirty)
   const workflowId = useWorkflowStore(s => s.workflowId)
   const trigger = useWorkflowStore(s => s.trigger)
-  const initialDataSchema = useWorkflowStore(s => s.initialDataSchema)
 
-  const inputFieldCount = Object.keys(
-    (initialDataSchema?.properties as Record<string, unknown> | undefined) ?? {}
-  ).length
-
-  const [showTrigger, setShowTrigger] = useState(false)
-  const [showInputs, setShowInputs] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   return (
     <>
@@ -64,37 +57,18 @@ export function Navbar({ onSave, onRun, saving, running }: Props) {
           <span className="text-xs text-amber-400 flex-shrink-0">unsaved</span>
         )}
 
-        {/* Workflow Inputs button */}
+        {/* Settings button */}
         <button
-          onClick={() => setShowInputs(true)}
+          onClick={() => setShowSettings(true)}
           className="
             flex items-center gap-1.5 rounded-md border border-gray-600
             bg-gray-700 hover:bg-gray-600 text-gray-200 px-2.5 py-1.5
             text-xs font-medium transition-colors flex-shrink-0
           "
-          title="Workflow input fields — define what data this workflow expects when run"
-        >
-          <span>⬇</span>
-          <span>Inputs</span>
-          {inputFieldCount > 0 && (
-            <span className="rounded-full bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none">
-              {inputFieldCount}
-            </span>
-          )}
-        </button>
-
-        {/* Trigger button */}
-        <button
-          onClick={() => setShowTrigger(true)}
-          className="
-            flex items-center gap-1.5 rounded-md border border-gray-600
-            bg-gray-700 hover:bg-gray-600 text-gray-200 px-2.5 py-1.5
-            text-xs font-medium transition-colors flex-shrink-0
-          "
-          title="Trigger settings"
+          title="Workflow settings — title, description, trigger, inputs"
         >
           <span>{triggerIcons[trigger.kind] ?? '▶'}</span>
-          <span className="capitalize">{trigger.kind}</span>
+          <span>Settings</span>
         </button>
 
         {/* Eval Suites link — shown only for saved workflows */}
@@ -140,12 +114,11 @@ export function Navbar({ onSave, onRun, saving, running }: Props) {
         </button>
       </header>
 
-      {showInputs && (
-        <InputsPanel onClose={() => setShowInputs(false)} />
-      )}
-
-      {showTrigger && (
-        <TriggerPanel workflowId={workflowId} onClose={() => setShowTrigger(false)} />
+      {showSettings && (
+        <WorkflowSettingsPanel
+          workflowId={workflowId}
+          onClose={() => setShowSettings(false)}
+        />
       )}
     </>
   )

@@ -174,6 +174,7 @@ export function WorkflowEditorPage() {
 
   const buildPayload = () => ({
     name,
+    description: useWorkflowStore.getState().description,
     trigger,
     timeout_seconds: timeoutSeconds,
     initial_data_schema: initialDataSchema,
