@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { TestCaseResult } from '../../api/types'
+import type { TestCaseResult, CompareChangeType } from '../../api/types'
 import { GraderResultRow } from './GraderResultRow'
 
 function WorkflowRunStatusChip({ status }: { status: string }) {
@@ -17,7 +17,15 @@ function WorkflowRunStatusChip({ status }: { status: string }) {
   )
 }
 
-function TestCaseResultRow({ result }: { result: TestCaseResult }) {
+const CHANGE_BADGE: Record<CompareChangeType, { label: string; className: string }> = {
+  regressed: { label: 'regressed', className: 'bg-red-900/50 text-red-300 border border-red-800' },
+  improved:  { label: 'improved',  className: 'bg-green-900/50 text-green-300 border border-green-800' },
+  unchanged: { label: 'unchanged', className: 'bg-gray-700 text-gray-400' },
+  new_case:  { label: 'new',       className: 'bg-indigo-900/50 text-indigo-300' },
+  missing:   { label: 'missing',   className: 'bg-amber-900/40 text-amber-400' },
+}
+
+function TestCaseResultRow({ result, changeType }: { result: TestCaseResult; changeType?: CompareChangeType }) {
   const [expanded, setExpanded] = useState(false)
   const workflowFailed = result.workflow_run_status === 'failed'
 
@@ -42,6 +50,11 @@ function TestCaseResultRow({ result }: { result: TestCaseResult }) {
           {result.test_case_name}
         </span>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {changeType !== undefined && (
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${CHANGE_BADGE[changeType].className}`}>
+              {CHANGE_BADGE[changeType].label}
+            </span>
+          )}
           <WorkflowRunStatusChip status={result.workflow_run_status} />
           <Link
             to={`/runs/${result.workflow_run_id}`}
@@ -87,13 +100,18 @@ function TestCaseResultRow({ result }: { result: TestCaseResult }) {
 
 interface Props {
   results: TestCaseResult[]
+  compareMap?: Map<string, CompareChangeType>
 }
 
-export function EvalRunResultsTable({ results }: Props) {
+export function EvalRunResultsTable({ results, compareMap }: Props) {
   return (
     <div className="space-y-2">
       {results.map(tcr => (
-        <TestCaseResultRow key={tcr.id} result={tcr} />
+        <TestCaseResultRow
+          key={tcr.id}
+          result={tcr}
+          changeType={compareMap?.get(tcr.test_case_id)}
+        />
       ))}
     </div>
   )

@@ -13,6 +13,7 @@ import type {
   EvalRun,
   EvalRunListResponse,
   TriggerEvalRunResponse,
+  EvalRunCompare,
 } from '../api/types'
 
 export const api = {
@@ -109,9 +110,16 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  listEvalRuns: (suiteId: string) =>
-    request<EvalRunListResponse>(`/eval-suites/${suiteId}/runs`),
+  listEvalRuns: (suiteId: string, options?: { limit?: number }) => {
+    const params = options?.limit ? `?limit=${options.limit}` : ''
+    return request<EvalRunListResponse>(`/eval-suites/${suiteId}/runs${params}`)
+  },
 
   getEvalRun: (runId: string) =>
     request<EvalRun>(`/eval-runs/${runId}`),
+
+  compareEvalRuns: (headRunId: string, baselineRunId: string) =>
+    request<EvalRunCompare>(
+      `/eval-runs/${headRunId}/compare?baseline_run_id=${encodeURIComponent(baselineRunId)}`
+    ),
 }

@@ -282,3 +282,27 @@ export interface TriggerEvalRunResponse {
   total_cases: number
   created_at: string
 }
+
+export type CompareChangeType = 'regressed' | 'improved' | 'unchanged' | 'new_case' | 'missing'
+
+export interface TestCaseComparison {
+  test_case_id: string
+  test_case_name: string
+  change_type: CompareChangeType
+  head_passed: boolean | null
+  baseline_passed: boolean | null
+  head_result_id?: string
+  baseline_result_id?: string
+}
+
+export interface EvalRunCompare {
+  head_run_id: string
+  baseline_run_id: string
+  suite_id: string
+  regressed_count: number
+  improved_count: number
+  unchanged_count: number
+  new_case_count: number
+  missing_count: number
+  cases: TestCaseComparison[]
+}
