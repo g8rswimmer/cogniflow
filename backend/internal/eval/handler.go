@@ -723,6 +723,15 @@ const (
 	changeTypeMissing   evalRunCompareChangeType = "missing"
 )
 
+// changeOrder defines the display priority for comparison results (regressions first).
+var changeOrder = map[evalRunCompareChangeType]int{
+	changeTypeRegressed: 0,
+	changeTypeImproved:  1,
+	changeTypeNewCase:   2,
+	changeTypeMissing:   3,
+	changeTypeUnchanged: 4,
+}
+
 type testCaseComparison struct {
 	TestCaseID       string                   `json:"test_case_id"`
 	TestCaseName     string                   `json:"test_case_name"`
@@ -878,19 +887,15 @@ func (h *Handler) CompareRuns(w http.ResponseWriter, r *http.Request) {
 		resp.Cases = append(resp.Cases, comp)
 	}
 
-	changeOrder := map[evalRunCompareChangeType]int{
-		changeTypeRegressed: 0,
-		changeTypeImproved:  1,
-		changeTypeNewCase:   2,
-		changeTypeMissing:   3,
-		changeTypeUnchanged: 4,
-	}
-	sort.Slice(resp.Cases, func(i, j int) bool {
+	sort.SliceStable(resp.Cases, func(i, j int) bool {
 		oi, oj := changeOrder[resp.Cases[i].ChangeType], changeOrder[resp.Cases[j].ChangeType]
 		if oi != oj {
 			return oi < oj
 		}
-		return resp.Cases[i].TestCaseName < resp.Cases[j].TestCaseName
+		if resp.Cases[i].TestCaseName != resp.Cases[j].TestCaseName {
+			return resp.Cases[i].TestCaseName < resp.Cases[j].TestCaseName
+		}
+		return resp.Cases[i].TestCaseID < resp.Cases[j].TestCaseID
 	})
 
 	writeJSON(w, http.StatusOK, resp)

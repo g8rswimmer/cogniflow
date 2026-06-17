@@ -45,10 +45,13 @@ export function EvalRunDetailPage() {
     return () => { alive = false; clearTimeout(id) }
   }, [run, runId, pollTick])
 
-  // Load sibling completed runs for the baseline selector once the suite is known.
+  // Load sibling completed runs for the baseline selector.
+  // Re-fires when run.status changes so a run that completes while the page is
+  // open appears in the selector without requiring a full page reload (C4).
+  // Passes limit=200 so deep-linked baselines beyond the default 50 are included (C3).
   useEffect(() => {
     if (!run?.suite_id || !runId) return
-    api.listEvalRuns(run.suite_id)
+    api.listEvalRuns(run.suite_id, { limit: 200 })
       .then(resp => {
         const siblings = (resp.eval_runs ?? []).filter(
           r => r.status === 'completed' && r.id !== runId
@@ -56,25 +59,29 @@ export function EvalRunDetailPage() {
         setCompletedSiblings(siblings)
       })
       .catch(() => { /* non-critical: selector simply stays empty */ })
-  }, [run?.suite_id, runId])
+  }, [run?.suite_id, runId, run?.status])
 
-  // Fetch comparison data when a baseline is selected and the head run is done.
+  // Fetch comparison data when a baseline is selected and the head run is completed.
+  // Guards against stale fetch results landing in state after the baseline is cleared
+  // by using an alive flag, matching the pattern in the poll effect above (C1).
+  // Only fires for 'completed' runs — a 'failed' head run is rejected by the backend (C2).
   useEffect(() => {
     if (!runId || !baselineRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCompareData(null)
       return
     }
-    const isTerminalNow = run?.status === 'completed' || run?.status === 'failed'
-    if (!isTerminalNow) return
+    if (run?.status !== 'completed') return
 
+    let alive = true
     setCompareLoading(true)
     setCompareData(null)
     setCompareError(null)
     api.compareEvalRuns(runId, baselineRunId)
-      .then(d => setCompareData(d))
-      .catch(err => setCompareError(err instanceof Error ? err.message : 'Compare failed'))
-      .finally(() => setCompareLoading(false))
+      .then(d => { if (alive) setCompareData(d) })
+      .catch(err => { if (alive) setCompareError(err instanceof Error ? err.message : 'Compare failed') })
+      .finally(() => { if (alive) setCompareLoading(false) })
+    return () => { alive = false }
   }, [runId, baselineRunId, run?.status])
 
   if (loading) {
@@ -119,8 +126,8 @@ export function EvalRunDetailPage() {
           )}
         </div>
 
-        {/* Baseline selector */}
-        {isTerminal && completedSiblings.length > 0 && (
+        {/* Baseline selector — only shown for completed runs with available siblings */}
+        {run.status === 'completed' && completedSiblings.length > 0 && (
           <div className="flex items-center gap-2 mb-4">
             <span className="text-xs text-gray-500">Compare to:</span>
             <select

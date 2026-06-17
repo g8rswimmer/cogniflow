@@ -110,8 +110,10 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  listEvalRuns: (suiteId: string) =>
-    request<EvalRunListResponse>(`/eval-suites/${suiteId}/runs`),
+  listEvalRuns: (suiteId: string, options?: { limit?: number }) => {
+    const params = options?.limit ? `?limit=${options.limit}` : ''
+    return request<EvalRunListResponse>(`/eval-suites/${suiteId}/runs${params}`)
+  },
 
   getEvalRun: (runId: string) =>
     request<EvalRun>(`/eval-runs/${runId}`),
