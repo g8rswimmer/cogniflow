@@ -13,6 +13,7 @@ import type {
   EvalRun,
   EvalRunListResponse,
   TriggerEvalRunResponse,
+  EvalRunCompare,
 } from '../api/types'
 
 export const api = {
@@ -114,4 +115,9 @@ export const api = {
 
   getEvalRun: (runId: string) =>
     request<EvalRun>(`/eval-runs/${runId}`),
+
+  compareEvalRuns: (headRunId: string, baselineRunId: string) =>
+    request<EvalRunCompare>(
+      `/eval-runs/${headRunId}/compare?baseline_run_id=${encodeURIComponent(baselineRunId)}`
+    ),
 }

@@ -100,6 +100,7 @@ func NewRouter(
 	mux.HandleFunc("POST /v1/eval-suites/{suite_id}/runs", eh.TriggerRun)
 	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/runs", eh.ListRuns)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}", eh.GetRun)
+	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/compare", eh.CompareRuns)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/test-case-results/{result_id}", eh.GetTestCaseResult)
 	mux.HandleFunc("POST /v1/eval-webhooks/{suite_id}", eh.WebhookTrigger)
 

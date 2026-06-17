@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -708,6 +709,191 @@ func (h *Handler) GetTestCaseResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// ---- Baseline comparison ---------------------------------------------------
+
+type evalRunCompareChangeType string
+
+const (
+	changeTypeRegressed evalRunCompareChangeType = "regressed"
+	changeTypeImproved  evalRunCompareChangeType = "improved"
+	changeTypeUnchanged evalRunCompareChangeType = "unchanged"
+	changeTypeNewCase   evalRunCompareChangeType = "new_case"
+	changeTypeMissing   evalRunCompareChangeType = "missing"
+)
+
+type testCaseComparison struct {
+	TestCaseID       string                   `json:"test_case_id"`
+	TestCaseName     string                   `json:"test_case_name"`
+	ChangeType       evalRunCompareChangeType `json:"change_type"`
+	HeadPassed       *bool                    `json:"head_passed"`
+	BaselinePassed   *bool                    `json:"baseline_passed"`
+	HeadResultID     string                   `json:"head_result_id,omitempty"`
+	BaselineResultID string                   `json:"baseline_result_id,omitempty"`
+}
+
+type evalRunCompareResponse struct {
+	HeadRunID      string               `json:"head_run_id"`
+	BaselineRunID  string               `json:"baseline_run_id"`
+	SuiteID        string               `json:"suite_id"`
+	RegressedCount int                  `json:"regressed_count"`
+	ImprovedCount  int                  `json:"improved_count"`
+	UnchangedCount int                  `json:"unchanged_count"`
+	NewCaseCount   int                  `json:"new_case_count"`
+	MissingCount   int                  `json:"missing_count"`
+	Cases          []testCaseComparison `json:"cases"`
+}
+
+// CompareRuns handles GET /v1/eval-runs/{eval_run_id}/compare?baseline_run_id={id}.
+// Both runs must be completed and belong to the same eval suite.
+func (h *Handler) CompareRuns(w http.ResponseWriter, r *http.Request) {
+	headRunID := r.PathValue("eval_run_id")
+	baselineRunID := r.URL.Query().Get("baseline_run_id")
+	if baselineRunID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "baseline_run_id query parameter is required")
+		return
+	}
+	if headRunID == baselineRunID {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "head and baseline runs must be different")
+		return
+	}
+
+	ctx := r.Context()
+	headRun, err := h.store.GetEvalRun(ctx, headRunID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	baselineRun, err := h.store.GetEvalRun(ctx, baselineRunID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "baseline eval run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	if headRun.SuiteID != baselineRun.SuiteID {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "both runs must belong to the same eval suite")
+		return
+	}
+	if headRun.Status != store.EvalRunCompleted {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "head run must have completed status")
+		return
+	}
+	if baselineRun.Status != store.EvalRunCompleted {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "baseline run must have completed status")
+		return
+	}
+
+	headResults, err := h.store.ListTestCaseResults(ctx, headRunID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	baselineResults, err := h.store.ListTestCaseResults(ctx, baselineRunID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	headByCase := make(map[string]store.TestCaseResult, len(headResults))
+	for _, res := range headResults {
+		headByCase[res.TestCaseID] = res
+	}
+	baseByCase := make(map[string]store.TestCaseResult, len(baselineResults))
+	for _, res := range baselineResults {
+		baseByCase[res.TestCaseID] = res
+	}
+
+	allIDs := make(map[string]struct{}, len(headByCase)+len(baseByCase))
+	for id := range headByCase {
+		allIDs[id] = struct{}{}
+	}
+	for id := range baseByCase {
+		allIDs[id] = struct{}{}
+	}
+
+	resp := evalRunCompareResponse{
+		HeadRunID:     headRunID,
+		BaselineRunID: baselineRunID,
+		SuiteID:       headRun.SuiteID,
+		Cases:         []testCaseComparison{},
+	}
+
+	for id := range allIDs {
+		head, inHead := headByCase[id]
+		base, inBase := baseByCase[id]
+
+		var comp testCaseComparison
+		switch {
+		case inHead && inBase:
+			hp, bp := head.Passed, base.Passed
+			comp = testCaseComparison{
+				TestCaseID:       id,
+				TestCaseName:     head.TestCaseName,
+				HeadPassed:       &hp,
+				BaselinePassed:   &bp,
+				HeadResultID:     head.ID,
+				BaselineResultID: base.ID,
+			}
+			switch {
+			case !hp && bp:
+				comp.ChangeType = changeTypeRegressed
+				resp.RegressedCount++
+			case hp && !bp:
+				comp.ChangeType = changeTypeImproved
+				resp.ImprovedCount++
+			default:
+				comp.ChangeType = changeTypeUnchanged
+				resp.UnchangedCount++
+			}
+		case inHead:
+			hp := head.Passed
+			comp = testCaseComparison{
+				TestCaseID:   id,
+				TestCaseName: head.TestCaseName,
+				ChangeType:   changeTypeNewCase,
+				HeadPassed:   &hp,
+				HeadResultID: head.ID,
+			}
+			resp.NewCaseCount++
+		default:
+			bp := base.Passed
+			comp = testCaseComparison{
+				TestCaseID:       id,
+				TestCaseName:     base.TestCaseName,
+				ChangeType:       changeTypeMissing,
+				BaselinePassed:   &bp,
+				BaselineResultID: base.ID,
+			}
+			resp.MissingCount++
+		}
+		resp.Cases = append(resp.Cases, comp)
+	}
+
+	changeOrder := map[evalRunCompareChangeType]int{
+		changeTypeRegressed: 0,
+		changeTypeImproved:  1,
+		changeTypeNewCase:   2,
+		changeTypeMissing:   3,
+		changeTypeUnchanged: 4,
+	}
+	sort.Slice(resp.Cases, func(i, j int) bool {
+		oi, oj := changeOrder[resp.Cases[i].ChangeType], changeOrder[resp.Cases[j].ChangeType]
+		if oi != oj {
+			return oi < oj
+		}
+		return resp.Cases[i].TestCaseName < resp.Cases[j].TestCaseName
+	})
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---- Validation ------------------------------------------------------------
