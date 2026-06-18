@@ -442,6 +442,7 @@ type edgeWriteRow struct {
 	SourceID    string  `db:"source_id"`
 	TargetID    string  `db:"target_id"`
 	BranchLabel *string `db:"branch_label"`
+	IsLoopBack  bool    `db:"is_loop_back"`
 }
 
 // configWriteRow is the write-side row struct for INSERT into node_configs.
@@ -548,14 +549,15 @@ func insertConfigs(ctx context.Context, tx *sqlx.Tx, workflowID string, n store.
 func insertEdges(ctx context.Context, tx *sqlx.Tx, workflowID string, edges []store.WorkflowEdge) error {
 	for _, e := range edges {
 		_, err := tx.NamedExecContext(ctx,
-			`INSERT INTO workflow_edges (id, workflow_id, source_id, target_id, branch_label)
-			 VALUES (:id, :workflow_id, :source_id, :target_id, :branch_label)`,
+			`INSERT INTO workflow_edges (id, workflow_id, source_id, target_id, branch_label, is_loop_back)
+			 VALUES (:id, :workflow_id, :source_id, :target_id, :branch_label, :is_loop_back)`,
 			edgeWriteRow{
 				ID:          e.ID,
 				WorkflowID:  workflowID,
 				SourceID:    e.SourceID,
 				TargetID:    e.TargetID,
 				BranchLabel: e.BranchLabel,
+				IsLoopBack:  e.IsLoopBack,
 			},
 		)
 		if err != nil {
@@ -684,9 +686,10 @@ func (s *WorkflowStore) loadEdges(ctx context.Context, workflowID string) ([]sto
 		SourceID    string  `db:"source_id"`
 		TargetID    string  `db:"target_id"`
 		BranchLabel *string `db:"branch_label"`
+		IsLoopBack  bool    `db:"is_loop_back"`
 	}
 	if err := s.db.SelectContext(ctx, &rows,
-		`SELECT id, source_id, target_id, branch_label
+		`SELECT id, source_id, target_id, branch_label, is_loop_back
 		 FROM workflow_edges WHERE workflow_id=? ORDER BY id`, workflowID); err != nil {
 		return nil, fmt.Errorf("workflow store: load edges: %w", err)
 	}
@@ -698,6 +701,7 @@ func (s *WorkflowStore) loadEdges(ctx context.Context, workflowID string) ([]sto
 			SourceID:    r.SourceID,
 			TargetID:    r.TargetID,
 			BranchLabel: r.BranchLabel,
+			IsLoopBack:  r.IsLoopBack,
 		})
 	}
 	return edges, nil

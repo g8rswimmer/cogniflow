@@ -55,6 +55,7 @@ type WorkflowEdge struct {
 	SourceID    string  `json:"source_id"`
 	TargetID    string  `json:"target_id"`
 	BranchLabel *string `json:"branch_label"`
+	IsLoopBack  bool    `json:"is_loop_back"`
 }
 
 // Trigger describes how a workflow is activated.

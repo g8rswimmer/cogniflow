@@ -48,6 +48,7 @@ export interface WorkflowEdge {
   source_id: string
   target_id: string
   branch_label?: string | null
+  is_loop_back?: boolean
 }
 
 export type TriggerKind = 'manual' | 'webhook' | 'cron'

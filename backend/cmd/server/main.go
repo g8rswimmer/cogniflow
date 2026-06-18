@@ -22,6 +22,7 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/conditional"
 	datatransform "github.com/g8rswimmer/cogniflow/internal/node/builtin/data_transform"
+	loopcontroller "github.com/g8rswimmer/cogniflow/internal/node/builtin/loop_controller"
 	dbquery "github.com/g8rswimmer/cogniflow/internal/node/builtin/db_query"
 	dbwrite "github.com/g8rswimmer/cogniflow/internal/node/builtin/db_write"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/embedding"
@@ -97,6 +98,7 @@ func run(logLevel *slog.LevelVar) error {
 	registry.Register(llm.NewAnthropic(anthropicClient))
 	registry.Register(embedding.New(openaiClient))
 	registry.Register(conditional.New())
+	registry.Register(loopcontroller.New())
 	registry.Register(datatransform.New())
 	registry.Register(dbquery.New())
 	registry.Register(dbwrite.New())

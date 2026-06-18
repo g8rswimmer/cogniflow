@@ -13,6 +13,7 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/conditional"
+	loopcontroller "github.com/g8rswimmer/cogniflow/internal/node/builtin/loop_controller"
 	"github.com/g8rswimmer/cogniflow/internal/node/outputparser"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
@@ -233,6 +234,7 @@ func (h *workflowHandler) collectValidationErrors(wf *store.Workflow) []FieldVal
 	errs = append(errs, validateOutputParsers(wf.Nodes)...)
 	errs = append(errs, validateCELExpressions(wf.Nodes)...)
 	errs = append(errs, validateEdgeBranchLabels(wf.Nodes, wf.Edges)...)
+	errs = append(errs, validateLoopEdges(wf.Nodes, wf.Edges)...)
 	return errs
 }
 
@@ -434,10 +436,19 @@ func validateOutputParsers(nodes []store.WorkflowNode) []FieldValidationError {
 	return errs
 }
 
-// validateEdgeBranchLabels validates branch labels on edges from conditional nodes.
-// For new-format nodes, labels must match a defined rule label or "fallback".
-// For legacy-format nodes, labels must be "true" or "false".
+// validateEdgeBranchLabels validates branch labels on edges from conditional and
+// loop.controller nodes.
+//   - conditional.branch (new format): labels must match a defined rule label or "fallback".
+//   - conditional.branch (legacy format): labels must be "true" or "false".
+//   - loop.controller: labels must be "loop_body" or "exit" (on forward, non-loop-back edges).
+//   - All other node types: no branch labels permitted.
 func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.WorkflowEdge) []FieldValidationError {
+	// Build a map of node ID → type for quick lookup.
+	nodeTypeOf := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		nodeTypeOf[n.ID] = n.TypeID
+	}
+
 	// Build a map of conditional node ID → allowed branch labels.
 	type nodeFormat struct {
 		isNew  bool
@@ -476,13 +487,29 @@ func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.Workflow
 		if e.BranchLabel == nil {
 			continue
 		}
+		if e.IsLoopBack {
+			// Loop-back edges must not carry a branch label; validated by validateLoopEdges.
+			continue
+		}
 		label := *e.BranchLabel
+
+		// loop.controller forward edges use "loop_body" and "exit" labels.
+		if nodeTypeOf[e.SourceID] == "loop.controller" {
+			if label != "loop_body" && label != "exit" {
+				errs = append(errs, FieldValidationError{
+					NodeID:  e.SourceID,
+					Message: fmt.Sprintf("loop.controller edges must be labelled \"loop_body\" or \"exit\", got %q", label),
+				})
+			}
+			continue
+		}
+
 		nf, isConditional := nodeFormats[e.SourceID]
 		if !isConditional {
-			// Only conditional.branch nodes may have labelled edges; reject any other source.
+			// Only conditional.branch and loop.controller nodes may have labelled edges.
 			errs = append(errs, FieldValidationError{
 				NodeID:  e.SourceID,
-				Message: fmt.Sprintf("branch_label %q on a non-conditional node — only conditional.branch nodes may have labelled edges", label),
+				Message: fmt.Sprintf("branch_label %q on a non-conditional node — only conditional.branch and loop.controller nodes may have labelled edges", label),
 			})
 			continue
 		}
@@ -502,6 +529,55 @@ func validateEdgeBranchLabels(nodes []store.WorkflowNode, edges []store.Workflow
 			}
 		}
 	}
+	return errs
+}
+
+// validateLoopEdges performs save-time validation of loop-back edges and loop.controller
+// node configuration, complementing the structural checks in engine.Build.
+func validateLoopEdges(nodes []store.WorkflowNode, edges []store.WorkflowEdge) []FieldValidationError {
+	nodeTypeOf := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		nodeTypeOf[n.ID] = n.TypeID
+	}
+
+	var errs []FieldValidationError
+
+	for _, e := range edges {
+		if !e.IsLoopBack {
+			continue
+		}
+		// Loop-back edges must not carry a branch label.
+		if e.BranchLabel != nil {
+			errs = append(errs, FieldValidationError{
+				NodeID:  e.SourceID,
+				Message: "loop-back edges must not have a branch_label",
+			})
+		}
+		// Loop-back edges must target a loop.controller node.
+		if nodeTypeOf[e.TargetID] != "loop.controller" {
+			errs = append(errs, FieldValidationError{
+				NodeID:  e.SourceID,
+				Message: fmt.Sprintf("loop-back edge must target a loop.controller node, but targets node %q (type %q)", e.TargetID, nodeTypeOf[e.TargetID]),
+			})
+		}
+	}
+
+	// Validate exit_condition CEL on loop.controller nodes.
+	for _, n := range nodes {
+		if n.TypeID != "loop.controller" {
+			continue
+		}
+		if expr, ok := n.Config["exit_condition"].(string); ok && expr != "" {
+			if err := loopcontroller.ValidateExitCondition(expr); err != nil {
+				errs = append(errs, FieldValidationError{
+					NodeID:  n.ID,
+					Field:   "exit_condition",
+					Message: err.Error(),
+				})
+			}
+		}
+	}
+
 	return errs
 }
 

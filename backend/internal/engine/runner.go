@@ -27,6 +27,15 @@ type nodeResult struct {
 //   - When a node succeeds, its successors whose pending count reaches 0 are dispatched.
 //   - On the first failure, the run context is cancelled and no new goroutines are started.
 //   - The supervisor loop exits once every dispatched goroutine has returned a result.
+//
+// Loop support:
+//   - A loop.controller node drives iteration of a loop body sub-graph.
+//   - When the controller returns action="loop_body", the supervisor resets pending
+//     counts for all body nodes and re-dispatches them, then resets the controller's
+//     pending to the number of loop-back edges so it will be re-dispatched automatically
+//     when all body sinks complete.
+//   - When the controller returns action="exit" (or max_iterations is reached), normal
+//     OutEdge routing fires the "exit" branch and execution continues as a regular DAG.
 func runDAG(
 	ctx context.Context,
 	runID string,
@@ -63,8 +72,16 @@ func runDAG(
 	// live predecessor had already contributed to that count.
 	hasLive := make(map[string]bool)
 
-	// resultCh is sized to total nodes — goroutines never block on send.
-	resultCh := make(chan nodeResult, len(dag.Nodes))
+	// loopIterations tracks how many times a loop.controller has routed to its
+	// loop body. Used to enforce max_iterations limits.
+	loopIterations := make(map[string]int)
+
+	// resultCh is sized to handle re-dispatches from loop iterations.
+	// For looping workflows the channel buffer needs to accommodate body node
+	// re-dispatches across all iterations; a generous upper bound prevents
+	// goroutines from blocking on send under high parallelism.
+	maxDispatches := computeMaxDispatches(dag)
+	resultCh := make(chan nodeResult, maxDispatches)
 
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -128,11 +145,80 @@ func runDAG(
 			continue
 		}
 
+		// For loop controllers: update node results with the latest iteration's output.
+		// The last call (action=exit) is what gets persisted to the run record.
 		nodeResults[result.nodeID] = store.NodeResult{Status: "succeeded", Output: result.output}
 		execCtx.set(result.nodeID, result.output)
 
 		if firstErr != nil {
 			continue // failure already recorded; skip scheduling successors
+		}
+
+		// Loop controller special path: when the controller chooses to iterate,
+		// reset body node pending counts and re-dispatch body roots. Skip normal
+		// OutEdge routing so the "loop_body" forward edge does not double-dispatch.
+		if dag.Nodes[result.nodeID].TypeID == loopControllerTypeID {
+			action, _ := result.routingOutput["action"].(string)
+			maxIter := maxIterFromConfig(dag.Nodes[result.nodeID].Config)
+
+			if action == "loop_body" && loopIterations[result.nodeID] < maxIter {
+				loopIterations[result.nodeID]++
+
+				// Inject iteration state into execCtx so the controller reads the
+				// correct iteration number on its next Execute() call.
+				execCtx.set("_loop_state", map[string]any{
+					"iteration": loopIterations[result.nodeID],
+				})
+				// Ensure "_loop_state" is visible in the controller's mergeUpstream.
+				if !sliceContains(dag.Ancestors[result.nodeID], "_loop_state") {
+					dag.Ancestors[result.nodeID] = append(dag.Ancestors[result.nodeID], "_loop_state")
+				}
+
+				// Add body nodes to the controller's Ancestors so that on subsequent
+				// Execute() calls, mergeUpstream returns the body nodes' latest outputs.
+				// Ancestors is only read by goroutines dispatched after this point so
+				// mutating it here (single-threaded supervisor) is race-free.
+				bodyNodes := dag.LoopBodyNodes[result.nodeID]
+				for bodyID := range bodyNodes {
+					if !sliceContains(dag.Ancestors[result.nodeID], bodyID) {
+						dag.Ancestors[result.nodeID] = append(dag.Ancestors[result.nodeID], bodyID)
+					}
+				}
+
+				// Reset pending counts for all body nodes.
+				for bodyID := range bodyNodes {
+					pending[bodyID] = countBodyInternalPredecessors(dag, bodyID, bodyNodes)
+					delete(skipped, bodyID)
+					delete(hasLive, bodyID)
+				}
+
+				// Reset pending for the controller to the number of loop-back edges
+				// targeting it; when all body sinks complete those edges will fire
+				// and the controller will be re-dispatched automatically.
+				loopBackCount := 0
+				for _, lbe := range dag.LoopBackEdges {
+					if lbe.TargetID == result.nodeID {
+						loopBackCount++
+					}
+				}
+				pending[result.nodeID] = loopBackCount
+
+				// Dispatch root body nodes (those with no in-body predecessors).
+				for bodyID := range bodyNodes {
+					if pending[bodyID] == 0 {
+						hasLive[bodyID] = true
+						dispatch(bodyID)
+					}
+				}
+				continue // skip normal OutEdge routing for this iteration
+			}
+
+			// Loop is exiting (action="exit" or max_iterations reached).
+			// Pre-mark all body nodes as skipped so that propagateSkip for the
+			// suppressed "loop_body" outgoing edge does not re-dispatch them.
+			for bodyID := range dag.LoopBodyNodes[result.nodeID] {
+				skipped[bodyID] = true
+			}
 		}
 
 		for _, outEdge := range dag.OutEdges[result.nodeID] {
@@ -146,6 +232,18 @@ func runDAG(
 			pending[succ]--
 			if pending[succ] == 0 {
 				dispatch(succ)
+			}
+		}
+
+		// Fire loop-back edges originating from this node.
+		// When a body sink completes, decrement the controller's pending so it is
+		// re-dispatched once all body sinks have reported.
+		for _, lbe := range dag.LoopBackEdges {
+			if lbe.SourceID == result.nodeID {
+				pending[lbe.TargetID]--
+				if pending[lbe.TargetID] == 0 {
+					dispatch(lbe.TargetID)
+				}
 			}
 		}
 	}
@@ -171,24 +269,85 @@ func runDAG(
 // branchAllows reports whether the given edge should fire given the completed
 // node's output. Edges without a branch_label always fire.
 //
-// New format (conditional.branch with structured rules): the output contains
-// "matched_rule" (string) and the edge's branch_label must equal that string.
+// loop.controller nodes: the output contains "action" ("loop_body" or "exit");
+// the edge's branch_label must equal that string.
 //
-// Legacy format (raw CEL expression): the output contains "result" (bool) and
-// the edge's branch_label must be "true" or "false" matching that bool.
+// conditional.branch nodes (new format): the output contains "matched_rule"
+// (string) and the edge's branch_label must equal that string.
+//
+// conditional.branch nodes (legacy format): the output contains "result" (bool)
+// and the edge's branch_label must be "true" or "false" matching that bool.
 func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
 	if edge.BranchLabel == nil {
 		return true
 	}
 	label := *edge.BranchLabel
 
-	// New format: string match against matched_rule.
+	// loop.controller routing: match against "action" field.
+	if action, ok := output["action"].(string); ok {
+		return action == label
+	}
+	// New conditional format: string match against matched_rule.
 	if mr, ok := output["matched_rule"].(string); ok {
 		return mr == label
 	}
-	// Legacy format: bool match against "true"/"false" label.
+	// Legacy conditional format: bool match against "true"/"false" label.
 	if res, ok := output["result"].(bool); ok {
 		return (label == "true") == res
+	}
+	return false
+}
+
+// computeMaxDispatches returns a safe upper bound for the resultCh buffer.
+// For workflows with a loop controller, body nodes and the controller itself
+// are dispatched once per iteration, so the total exceeds len(dag.Nodes).
+func computeMaxDispatches(dag *DAG) int {
+	base := len(dag.Nodes)
+	for ctrlID, bodyNodes := range dag.LoopBodyNodes {
+		maxIter := maxIterFromConfig(dag.Nodes[ctrlID].Config)
+		// Each iteration dispatches all body nodes + 1 controller re-dispatch.
+		base += maxIter * (len(bodyNodes) + 1)
+	}
+	if base < 1 {
+		base = 1
+	}
+	return base
+}
+
+// maxIterFromConfig reads max_iterations from a loop.controller config, defaulting to 10.
+func maxIterFromConfig(config map[string]any) int {
+	if v, ok := config["max_iterations"]; ok {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		case int64:
+			return int(n)
+		}
+	}
+	return 10
+}
+
+// countBodyInternalPredecessors counts predecessors of bodyID that are also
+// inside the loop body (i.e., bodyNodes). Used to reset pending counts when
+// re-dispatching the loop body for a new iteration.
+func countBodyInternalPredecessors(dag *DAG, bodyID string, bodyNodes map[string]bool) int {
+	count := 0
+	for _, pred := range dag.Predecessors[bodyID] {
+		if bodyNodes[pred] {
+			count++
+		}
+	}
+	return count
+}
+
+// sliceContains reports whether s is present in the slice.
+func sliceContains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
 	}
 	return false
 }
