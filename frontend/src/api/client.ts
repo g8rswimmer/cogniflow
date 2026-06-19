@@ -1,6 +1,6 @@
 import type { ApiErrorBody, FieldValidationError } from './types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
 export class ApiError extends Error {
   status: number

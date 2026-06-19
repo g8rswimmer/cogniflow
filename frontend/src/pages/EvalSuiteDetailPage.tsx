@@ -4,6 +4,7 @@ import { api } from '../hooks/useApi'
 import { useEvalStore } from '../stores/useEvalStore'
 import { EvalSuiteForm, type SuiteFormData } from '../components/eval/EvalSuiteForm'
 import { WebhookSecretModal } from '../components/eval/WebhookSecretModal'
+import { ImportDatasetModal } from '../components/eval/ImportDatasetModal'
 import { TestCaseList } from '../components/eval/TestCaseList'
 import { TestCaseEditor } from '../components/eval/TestCaseEditor'
 import { EvalRunHistory } from '../components/eval/EvalRunHistory'
@@ -42,6 +43,8 @@ export function EvalSuiteDetailPage() {
 
   const [rotatingSec, setRotatingSec] = useState(false)
   const [pendingSecret, setPendingSecret] = useState<{ webhookUrl: string; secret: string } | null>(null)
+
+  const [showImport, setShowImport] = useState(false)
 
   const loadData = useCallback(async () => {
     if (!suiteId) return
@@ -200,6 +203,18 @@ export function EvalSuiteDetailPage() {
       loadData()
     }
   }
+
+  const handleImported = useCallback(async () => {
+    setShowImport(false)
+    if (!suiteId) return
+    try {
+      const tcResp = await api.listTestCases(suiteId)
+      const sorted = (tcResp.test_cases ?? []).slice().sort((a, b) => a.position - b.position)
+      setTestCases(sorted)
+    } catch {
+      // List refresh is best-effort; page will show stale data until next reload.
+    }
+  }, [suiteId, setTestCases])
 
   const handleRunSuite = async () => {
     if (!suiteId) return
@@ -369,15 +384,24 @@ export function EvalSuiteDetailPage() {
             <h2 className="text-sm font-semibold text-gray-300">
               Test Cases <span className="text-gray-600 font-normal">({testCases.length})</span>
             </h2>
-            <button
-              type="button"
-              onClick={() => openEditor()}
-              disabled={!workflowReady}
-              title={!workflowReady ? 'Loading workflow nodes…' : 'Add a new test case'}
-              className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-semibold px-3 py-1.5 transition-colors"
-            >
-              {workflowReady ? '+ Add Test Case' : 'Loading…'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowImport(true)}
+                className="rounded-md border border-gray-600 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold px-3 py-1.5 transition-colors"
+              >
+                Import Dataset
+              </button>
+              <button
+                type="button"
+                onClick={() => openEditor()}
+                disabled={!workflowReady}
+                title={!workflowReady ? 'Loading workflow nodes…' : 'Add a new test case'}
+                className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-semibold px-3 py-1.5 transition-colors"
+              >
+                {workflowReady ? '+ Add Test Case' : 'Loading…'}
+              </button>
+            </div>
           </div>
 
           <TestCaseList
@@ -430,6 +454,15 @@ export function EvalSuiteDetailPage() {
           webhookUrl={pendingSecret.webhookUrl}
           secret={pendingSecret.secret}
           onClose={() => setPendingSecret(null)}
+        />
+      )}
+
+      {/* Dataset import */}
+      {showImport && activeSuite && (
+        <ImportDatasetModal
+          suiteId={activeSuite.id}
+          onClose={() => setShowImport(false)}
+          onImported={handleImported}
         />
       )}
     </div>
