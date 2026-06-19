@@ -5,6 +5,140 @@ Copy any sample below into a file, then upload it from the **EvalSuite detail pa
 
 ---
 
+## Prerequisites
+
+Dataset import requires a workflow and an eval suite to already exist.
+The import creates TestCases inside a suite; it does not create the suite or the workflow.
+
+Run the setup script below before uploading any sample. It creates everything via the API and prints the IDs you need.
+
+### Setup script — Samples 1–5
+
+Samples 1–5 use a single HTTP GET node that calls `https://httpbin.org/anything` (a public echo endpoint).
+The node ignores the initial data fields; the workflow always succeeds, making it easy to verify the import end-to-end without needing an LLM key or database.
+
+```bash
+#!/usr/bin/env bash
+# Requirements: curl, jq, cogniflow backend on localhost:8080 (or set COGNIFLOW_URL).
+set -euo pipefail
+BASE="${COGNIFLOW_URL:-http://localhost:8080}"
+
+echo "→ Creating demo workflow (Samples 1–5)..."
+WORKFLOW=$(curl -sf -X POST "$BASE/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "EF-03 Demo — Echo Workflow",
+    "description": "Single HTTP GET node for dataset import testing. Accepts any initial data.",
+    "trigger": { "kind": "manual" },
+    "timeout_seconds": 30,
+    "nodes": [
+      {
+        "id": "echo",
+        "type_id": "http.request",
+        "label": "Echo",
+        "position": { "x": 400, "y": 200 },
+        "config": {
+          "method": "GET",
+          "url": "https://httpbin.org/anything"
+        }
+      }
+    ],
+    "edges": []
+  }')
+WF_ID=$(echo "$WORKFLOW" | jq -r '.id')
+echo "  Workflow ID : $WF_ID"
+
+echo "→ Creating eval suite..."
+SUITE=$(curl -sf -X POST "$BASE/v1/workflows/$WF_ID/eval-suites" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "EF-03 Import Demo Suite",
+    "description": "Import any sample dataset from EF03_DEMO.md against this suite.",
+    "pass_threshold": 1.0,
+    "max_concurrency": 1
+  }')
+SUITE_ID=$(echo "$SUITE" | jq -r '.id')
+echo "  Suite ID    : $SUITE_ID"
+
+echo ""
+echo "Copy and run these exports, then use \$SUITE_ID in any import command below:"
+echo ""
+echo "  export WF_ID=$WF_ID"
+echo "  export SUITE_ID=$SUITE_ID"
+```
+
+---
+
+### Setup script — Sample 6 (initial data schema)
+
+Sample 6 matches a workflow that declares `customer_id` and `amount` as typed input fields.
+With the schema set, the **Run** modal and TestCase editor render a typed form instead of a raw JSON textarea.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+BASE="${COGNIFLOW_URL:-http://localhost:8080}"
+
+echo "→ Creating schema workflow (Sample 6)..."
+WORKFLOW=$(curl -sf -X POST "$BASE/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "EF-03 Demo — Schema Workflow",
+    "description": "Echo workflow with declared initial data schema (customer_id + amount).",
+    "trigger": { "kind": "manual" },
+    "timeout_seconds": 30,
+    "initial_data_schema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "title": "Customer ID",
+          "description": "Unique identifier for the customer"
+        },
+        "amount": {
+          "type": "number",
+          "title": "Amount",
+          "description": "Transaction amount in USD"
+        }
+      },
+      "required": ["customer_id", "amount"]
+    },
+    "nodes": [
+      {
+        "id": "echo",
+        "type_id": "http.request",
+        "label": "Echo",
+        "position": { "x": 400, "y": 200 },
+        "config": {
+          "method": "GET",
+          "url": "https://httpbin.org/anything"
+        }
+      }
+    ],
+    "edges": []
+  }')
+WF_ID=$(echo "$WORKFLOW" | jq -r '.id')
+echo "  Workflow ID : $WF_ID"
+
+echo "→ Creating eval suite..."
+SUITE=$(curl -sf -X POST "$BASE/v1/workflows/$WF_ID/eval-suites" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "EF-03 Schema Demo Suite",
+    "description": "Suite for Sample 6 — schema-driven initial data form.",
+    "pass_threshold": 1.0,
+    "max_concurrency": 1
+  }')
+SUITE_ID=$(echo "$SUITE" | jq -r '.id')
+echo "  Suite ID    : $SUITE_ID"
+
+echo ""
+echo "  export WF_ID=$WF_ID"
+echo "  export SUITE_ID=$SUITE_ID"
+```
+
+---
+
 ## Sample 1 — Basic CSV (`sample_basic.csv`)
 
 Minimal case: name column only, no initial data fields.
@@ -114,35 +248,50 @@ If your workflow declares an initial data schema (Workflow Settings → Workflow
 
 ## Backend curl tests
 
-Replace `<suite_id>` with an actual EvalSuite ID from your running instance.
+Run the setup script first and `export SUITE_ID=...` from its output. Then paste any command below.
 
 ```bash
-# Basic CSV import
-printf "name,description,score\nCase A,First,10\nCase B,,20\n,Missing name,30\n" > /tmp/test.csv
-curl -s -X POST http://localhost:8080/v1/eval-suites/<suite_id>/test-cases/import \
-  -F "file=@/tmp/test.csv" | jq .
-# expect: {"created":2,"skipped":1,"errors":[{"row":4,"message":"name is required"}]}
+BASE="${COGNIFLOW_URL:-http://localhost:8080}"
 
-# JSONL import with bad row
-printf '{"name":"Good","initial_data":{"x":1}}\n{"name":"","initial_data":{}}\n{"bad":"json"\n' \
-  > /tmp/test.jsonl
-curl -s -X POST http://localhost:8080/v1/eval-suites/<suite_id>/test-cases/import \
-  -F "file=@/tmp/test.jsonl" | jq .
-# expect: {"created":1,"skipped":2,...}
+# Sample 2 — CSV with initial data fields
+printf 'name,description,customer_id,query,priority\n' > /tmp/sample2.csv
+printf 'Happy path — known customer,Standard lookup,cust-001,What is my balance?,high\n' >> /tmp/sample2.csv
+printf 'Edge case — empty query,Blank message,cust-003,,medium\n' >> /tmp/sample2.csv
+curl -s -X POST "$BASE/v1/eval-suites/$SUITE_ID/test-cases/import" \
+  -F "file=@/tmp/sample2.csv" | jq .
+# expect: {"created":2,"skipped":0,"errors":[]}
 
-# Row limit check (501 rows)
+# Sample 3 — CSV with a bad row
+printf "name,description,score\nCase A,First valid case,10\n,Skipped row,20\nCase C,Third valid case,30\n" \
+  > /tmp/sample3.csv
+curl -s -X POST "$BASE/v1/eval-suites/$SUITE_ID/test-cases/import" \
+  -F "file=@/tmp/sample3.csv" | jq .
+# expect: {"created":2,"skipped":1,"errors":[{"row":3,"message":"name is required"}]}
+
+# Sample 5 — JSONL with mixed valid/invalid rows
+printf '{"name":"Valid case 1","initial_data":{"x":1}}\n' > /tmp/sample5.jsonl
+printf '{bad json}\n' >> /tmp/sample5.jsonl
+printf '{"name":"Valid case 2","initial_data":{"x":2}}\n' >> /tmp/sample5.jsonl
+printf '{"description":"No name field","initial_data":{"x":3}}\n' >> /tmp/sample5.jsonl
+printf '{"name":"Valid case 3","initial_data":{"x":4}}\n' >> /tmp/sample5.jsonl
+curl -s -X POST "$BASE/v1/eval-suites/$SUITE_ID/test-cases/import" \
+  -F "file=@/tmp/sample5.jsonl" | jq .
+# expect: {"created":3,"skipped":2,"errors":[{"row":2,...},{"row":4,...}]}
+
+# Row limit check (501 rows → rejected)
 { printf "name\n"; for i in $(seq 1 501); do echo "Row $i"; done; } > /tmp/big.csv
-curl -s -X POST http://localhost:8080/v1/eval-suites/<suite_id>/test-cases/import \
+curl -s -X POST "$BASE/v1/eval-suites/$SUITE_ID/test-cases/import" \
   -F "file=@/tmp/big.csv" | jq .
 # expect: 400 VALIDATION_FAILED — import exceeds maximum of 500 rows
 
-# Unsupported file type
-curl -s -X POST http://localhost:8080/v1/eval-suites/<suite_id>/test-cases/import \
-  -F "file=@/tmp/test.txt" | jq .
-# expect: 400 VALIDATION_FAILED — unsupported file type
+# Wrong file type
+printf "some content" > /tmp/data.txt
+curl -s -X POST "$BASE/v1/eval-suites/$SUITE_ID/test-cases/import" \
+  -F "file=@/tmp/data.txt" | jq .
+# expect: 400 VALIDATION_FAILED — unsupported file type ".txt"
 
 # Suite not found
-curl -s -X POST http://localhost:8080/v1/eval-suites/does-not-exist/test-cases/import \
-  -F "file=@/tmp/test.csv" | jq .
+curl -s -X POST "$BASE/v1/eval-suites/does-not-exist/test-cases/import" \
+  -F "file=@/tmp/sample3.csv" | jq .
 # expect: 404 NOT_FOUND
 ```
