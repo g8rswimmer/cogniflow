@@ -592,7 +592,7 @@ func TestBranchAllows(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := branchAllows(tc.edge, tc.output)
+			got := branchAllows(tc.edge, tc.output, "")
 			if got != tc.allowed {
 				t.Errorf("want %v, got %v", tc.allowed, got)
 			}
@@ -916,7 +916,7 @@ func TestBranchAllows_ActionKey(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := branchAllows(tc.edge, tc.output)
+			got := branchAllows(tc.edge, tc.output, loopControllerTypeID)
 			if got != tc.allowed {
 				t.Errorf("branchAllows: want %v, got %v", tc.allowed, got)
 			}

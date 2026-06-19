@@ -139,9 +139,16 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     set(s => {
       const targetNode = s.nodes.find(n => n.id === connection.target)
       const isLoopController = targetNode?.data.type_id === 'loop.controller'
-      // If target is a loop.controller and source is already downstream of it
-      // (i.e., target is an ancestor of source), this is a loop-back edge.
-      const isLoopBack = isLoopController && getAncestors(connection.source!, s.edges).includes(connection.target!)
+      // Detect loop-back edges via two complementary checks:
+      //  (A) target is already an ancestor of source via forward edges — the
+      //      classic case where ctrl→body exists before body→ctrl is drawn.
+      //  (B) source is already in the controller's loop body — covers the less
+      //      common case where the user draws body→ctrl before ctrl→body, but
+      //      ctrl already has a loop_body edge to some ancestor of source.
+      const isLoopBack = isLoopController && (
+        getAncestors(connection.source!, s.edges).includes(connection.target!) ||
+        getLoopBodyDescendants(connection.target!, s.edges).includes(connection.source!)
+      )
       return {
         // Supply an explicit UUID so the edge ID fits the DB CHAR(36) column.
         // React Flow's default id is "xy-edge__{source}-{target}" which exceeds
@@ -316,4 +323,27 @@ export function getAncestors(nodeId: string, edges: Edge[]): string[] {
     }
   }
   return [...ancestors]
+}
+
+// Utility: find all node IDs reachable from a loop.controller's loop_body
+// edge via forward edges. Used by onConnect to detect loop-back edges even
+// when the user draws body→ctrl before ctrl→body exists.
+function getLoopBodyDescendants(controllerId: string, edges: Edge[]): string[] {
+  const forwardEdges = edges.filter(e => !e.data?.is_loop_back)
+  const bodyStart = forwardEdges.find(
+    e => e.source === controllerId && e.label === 'loop_body',
+  )?.target
+  if (!bodyStart) return []
+  const visited = new Set<string>([bodyStart])
+  const queue = [bodyStart]
+  while (queue.length > 0) {
+    const curr = queue.shift()!
+    for (const edge of forwardEdges) {
+      if (edge.source === curr && !visited.has(edge.target)) {
+        visited.add(edge.target)
+        queue.push(edge.target)
+      }
+    }
+  }
+  return [...visited]
 }

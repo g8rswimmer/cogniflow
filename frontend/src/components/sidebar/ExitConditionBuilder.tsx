@@ -30,17 +30,23 @@ function emptyCondition(): ExitCondition {
   return { node_id: '', field: '', operator: '==', value: '', value_type: 'string' }
 }
 
+// escapeCEL escapes backslashes and double-quotes so the value is safe to
+// embed inside a CEL double-quoted string literal.
+function escapeCEL(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 // Generates a CEL string from structured conditions. Only includes conditions
 // where both node_id and field are set. Returns '' when nothing is configured.
 function buildCEL(conditions: ExitCondition[], logic: 'AND' | 'OR'): string {
   const valid = conditions.filter(c => c.node_id && c.field)
   if (valid.length === 0) return ''
   const clauses = valid.map(c => {
-    const lhs = `ctx["${c.node_id}"]["${c.field}"]`
+    const lhs = `ctx["${escapeCEL(c.node_id)}"]["${escapeCEL(c.field)}"]`
     if (c.operator === 'contains') {
-      return `${lhs}.contains("${c.value}")`
+      return `${lhs}.contains("${escapeCEL(c.value)}")`
     }
-    const rhs = c.value_type === 'string' ? `"${c.value}"` : c.value
+    const rhs = c.value_type === 'string' ? `"${escapeCEL(c.value)}"` : c.value
     return `${lhs} ${c.operator} ${rhs}`
   })
   return clauses.join(logic === 'AND' ? ' && ' : ' || ')
@@ -202,6 +208,9 @@ export function ExitConditionBuilder({ nodeId, config, onChange, fieldErrors }: 
   // --- Raw / legacy CEL mode ---
   // Present when exit_condition is a non-empty string but no structured data exists.
   const handleSwitchToBuilder = useCallback(() => {
+    if (!window.confirm('Switch to the visual builder? The existing CEL expression will be cleared and cannot be recovered.')) {
+      return
+    }
     onChange({
       ...config,
       exit_conditions: [emptyCondition()],

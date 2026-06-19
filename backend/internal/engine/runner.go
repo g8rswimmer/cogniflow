@@ -51,6 +51,10 @@ func runDAG(
 
 	execCtx := newExecutionContext()
 	execCtx.set("_initial", initData)
+	// Pre-inject _loop_state with iteration 0 so that CEL exit_conditions that
+	// reference ctx["_loop_state"]["iteration"] without an existence guard do not
+	// crash on the very first controller dispatch (before any loop body has run).
+	execCtx.set("_loop_state", map[string]any{"iteration": 0})
 
 	// nodeResults collects the persisted outcome for every dispatched node.
 	// Skipped/pruned nodes are never dispatched and will be absent from the map.
@@ -222,7 +226,7 @@ func runDAG(
 		}
 
 		for _, outEdge := range dag.OutEdges[result.nodeID] {
-			if !branchAllows(outEdge, result.routingOutput) {
+			if !branchAllows(outEdge, result.routingOutput, dag.Nodes[result.nodeID].TypeID) {
 				// Suppressed edge: account for this predecessor without dispatching.
 				propagateSkip(outEdge.TargetID)
 				continue
@@ -269,22 +273,22 @@ func runDAG(
 // branchAllows reports whether the given edge should fire given the completed
 // node's output. Edges without a branch_label always fire.
 //
-// loop.controller nodes: the output contains "action" ("loop_body" or "exit");
-// the edge's branch_label must equal that string.
+// The routing key is selected based on sourceTypeID:
+//   - loop.controller: matches the "action" field ("loop_body" or "exit").
+//   - conditional.branch (new format): matches the "matched_rule" string field.
+//   - conditional.branch (legacy format): matches "result" bool against "true"/"false".
 //
-// conditional.branch nodes (new format): the output contains "matched_rule"
-// (string) and the edge's branch_label must equal that string.
-//
-// conditional.branch nodes (legacy format): the output contains "result" (bool)
-// and the edge's branch_label must be "true" or "false" matching that bool.
-func branchAllows(edge store.WorkflowEdge, output map[string]any) bool {
+// Gating the "action" check on sourceTypeID prevents nodes that legitimately
+// emit an "action" field in their output from being misrouted by the loop path.
+func branchAllows(edge store.WorkflowEdge, output map[string]any, sourceTypeID string) bool {
 	if edge.BranchLabel == nil {
 		return true
 	}
 	label := *edge.BranchLabel
 
-	// loop.controller routing: match against "action" field.
-	if action, ok := output["action"].(string); ok {
+	// loop.controller routing: match against "action" field only for controllers.
+	if sourceTypeID == loopControllerTypeID {
+		action, _ := output["action"].(string)
 		return action == label
 	}
 	// New conditional format: string match against matched_rule.

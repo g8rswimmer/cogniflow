@@ -170,8 +170,20 @@ func validateLoopConstraints(nodes []store.WorkflowNode, _ []store.WorkflowEdge,
 }
 
 // computeLoopBodyNodes returns the set of node IDs reachable from the controller's
-// "loop_body"-labeled successor via forward edges, excluding the controller itself.
+// "loop_body"-labeled successor via forward edges, excluding the controller itself
+// and any nodes that are direct targets of non-loop_body edges from the controller
+// (i.e., exit-path nodes). This prevents post-loop nodes from being incorrectly
+// included in the body set when a body node happens to share a forward edge with
+// a node also targeted by the controller's exit edge.
 func computeLoopBodyNodes(controllerID string, d *DAG) map[string]bool {
+	// Collect immediate exit targets so the BFS does not cross the loop boundary.
+	exitTargets := make(map[string]bool)
+	for _, e := range d.OutEdges[controllerID] {
+		if e.BranchLabel == nil || *e.BranchLabel != "loop_body" {
+			exitTargets[e.TargetID] = true
+		}
+	}
+
 	body := make(map[string]bool)
 	queue := make([]string, 0)
 
@@ -184,12 +196,12 @@ func computeLoopBodyNodes(controllerID string, d *DAG) map[string]bool {
 	for len(queue) > 0 {
 		curr := queue[0]
 		queue = queue[1:]
-		if body[curr] || curr == controllerID {
+		if body[curr] || curr == controllerID || exitTargets[curr] {
 			continue
 		}
 		body[curr] = true
 		for _, succ := range d.Successors[curr] {
-			if !body[succ] && succ != controllerID {
+			if !body[succ] && succ != controllerID && !exitTargets[succ] {
 				queue = append(queue, succ)
 			}
 		}
