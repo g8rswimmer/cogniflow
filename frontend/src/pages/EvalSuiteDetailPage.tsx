@@ -204,7 +204,7 @@ export function EvalSuiteDetailPage() {
     }
   }
 
-  const handleImported = useCallback(async (_count: number) => {
+  const handleImported = useCallback(async () => {
     setShowImport(false)
     if (!suiteId) return
     try {
