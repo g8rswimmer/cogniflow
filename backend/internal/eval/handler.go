@@ -289,7 +289,7 @@ func (h *Handler) ImportTestCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(rows) > maxImportRows {
+	if len(rows)+len(rowErrs) > maxImportRows {
 		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED",
 			fmt.Sprintf("import exceeds maximum of %d rows", maxImportRows))
 		return
@@ -310,7 +310,7 @@ func (h *Handler) ImportTestCases(w http.ResponseWriter, r *http.Request) {
 			Graders:     []store.GraderDef{},
 		}
 		if _, err := h.store.CreateTestCase(r.Context(), tc); err != nil {
-			rowErrs = append(rowErrs, importRowError{Row: -1, Message: "store error: " + err.Error()})
+			rowErrs = append(rowErrs, importRowError{Row: row.RowNum, Message: "store error: " + err.Error()})
 			continue
 		}
 		created++

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,7 @@ type stubStore struct {
 	evalRuns   map[string]store.EvalRun
 	tcResults  map[string]store.TestCaseResult
 	workflows  map[string]store.Workflow
+	idSeq      atomic.Int64
 
 	createSuiteErr error
 	getSuiteErr    error
@@ -187,7 +189,7 @@ func (s *stubStore) CreateTestCase(_ context.Context, tc store.TestCase) (store.
 		return store.TestCase{}, s.createCaseErr
 	}
 	if tc.ID == "" {
-		tc.ID = fmt.Sprintf("tc-%d", time.Now().UnixNano())
+		tc.ID = fmt.Sprintf("tc-%d", s.idSeq.Add(1))
 	}
 	tc.CreatedAt = time.Now()
 	tc.UpdatedAt = tc.CreatedAt

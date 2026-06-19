@@ -140,10 +140,6 @@ export function ImportDatasetModal({ suiteId, onClose, onImported }: Props) {
     const text = await f.text()
     const rows = ext === 'csv' ? parseCSVClient(text) : parseJSONLClient(text)
 
-    if (rows.length === 0) {
-      setParseError('No rows found in file')
-      return
-    }
     if (rows.length > MAX_ROWS) {
       setParseError(`File contains ${rows.length} rows; maximum is ${MAX_ROWS}`)
       return
@@ -162,7 +158,6 @@ export function ImportDatasetModal({ suiteId, onClose, onImported }: Props) {
       const res = await api.importTestCases(suiteId, file)
       setResult(res)
       setStage('done')
-      onImported(res.created)
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Import failed')
       setStage('preview')
@@ -189,7 +184,7 @@ export function ImportDatasetModal({ suiteId, onClose, onImported }: Props) {
         </div>
 
         {/* Stage: idle — file picker */}
-        {(stage === 'idle' || stage === 'preview') && stage !== 'preview' && (
+        {stage === 'idle' && (
           <div className="space-y-4">
             <p className="text-xs text-gray-400">
               Upload a <span className="text-gray-200 font-mono">.csv</span> or{' '}
@@ -356,9 +351,9 @@ export function ImportDatasetModal({ suiteId, onClose, onImported }: Props) {
               </button>
             </>
           )}
-          {stage === 'done' && (
+          {stage === 'done' && result && (
             <button
-              onClick={onClose}
+              onClick={() => onImported(result.created)}
               className="px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
             >
               Close

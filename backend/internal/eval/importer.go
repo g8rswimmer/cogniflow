@@ -19,6 +19,7 @@ type importRow struct {
 	Name        string
 	Description string
 	InitialData map[string]any
+	RowNum      int // source row/line number for error reporting
 }
 
 type importRowError struct {
@@ -110,6 +111,7 @@ func parseCSV(r io.Reader) ([]importRow, []importRowError, error) {
 			Name:        name,
 			Description: desc,
 			InitialData: initialData,
+			RowNum:      rowNum,
 		})
 	}
 
@@ -121,7 +123,9 @@ func parseCSV(r io.Reader) ([]importRow, []importRowError, error) {
 // "description" and "initial_data" fields. Blank lines are skipped silently.
 func parseJSONL(r io.Reader) ([]importRow, []importRowError, error) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	// Initial buffer is 64 KB; max grows to match the file size limit so a
+	// single large JSON line doesn't cause a fatal top-level error.
+	scanner.Buffer(make([]byte, 64*1024), int(maxImportFileBytes))
 
 	type jsonLine struct {
 		Name        string         `json:"name"`
@@ -157,6 +161,7 @@ func parseJSONL(r io.Reader) ([]importRow, []importRowError, error) {
 			Name:        strings.TrimSpace(jl.Name),
 			Description: jl.Description,
 			InitialData: jl.InitialData,
+			RowNum:      lineNum,
 		})
 	}
 	if err := scanner.Err(); err != nil {
