@@ -298,7 +298,7 @@ WF4=$(curl -s -X POST $BASE/workflows \
 
 RUN4=$(curl -s -X POST $BASE/workflows/$WF4/runs \
   -H 'Content-Type: application/json' \
-  -d '{"topic": "cogniflow-loops"}' | jq -r '.run_id')
+  -d '{"initial_data": {"topic": "cogniflow-loops"}}' | jq -r '.run_id')
 
 sleep 10
 curl -s $BASE/runs/$RUN4 | jq '{status, body_url: .node_results.body.output.url}'
