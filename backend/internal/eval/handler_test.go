@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1030,5 +1032,202 @@ func TestHandler_WebhookTrigger_WorkflowDeleted(t *testing.T) {
 	decodeJSON(t, rr.Body.Bytes(), &resp)
 	if code := resp["error"].(map[string]any)["code"]; code != "WORKFLOW_DELETED" {
 		t.Errorf("want WORKFLOW_DELETED, got %v", code)
+	}
+}
+
+// ---- ImportTestCases handler tests -----------------------------------------
+
+// callImport builds a multipart/form-data request and calls ImportTestCases.
+func callImport(h *Handler, suiteID, filename, content string) *httptest.ResponseRecorder {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", filename)
+	_, _ = fw.Write([]byte(content))
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/v1/eval-suites/"+suiteID+"/test-cases/import", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.SetPathValue("suite_id", suiteID)
+
+	rr := httptest.NewRecorder()
+	h.ImportTestCases(rr, req)
+	return rr
+}
+
+func TestHandler_ImportTestCases_SuiteNotFound(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rr := callImport(h, "nonexistent", "data.csv", "name\nAlice\n")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandler_ImportTestCases_NoFileField(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	// Write a field with the wrong name (not "file")
+	_ = mw.WriteField("wrong_field", "value")
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/v1/eval-suites/s1/test-cases/import", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.SetPathValue("suite_id", "s1")
+
+	rr := httptest.NewRecorder()
+	h.ImportTestCases(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandler_ImportTestCases_UnsupportedExtension(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+
+	rr := callImport(h, "s1", "data.txt", "some content")
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandler_ImportTestCases_ValidCSV(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+
+	csv := "name,description,city\nAlice,First,NYC\nBob,Second,LA\nCarol,Third,SF\n"
+	rr := callImport(h, "s1", "data.csv", csv)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if got := int(resp["created"].(float64)); got != 3 {
+		t.Errorf("created: want 3, got %d", got)
+	}
+	if got := int(resp["skipped"].(float64)); got != 0 {
+		t.Errorf("skipped: want 0, got %d", got)
+	}
+	errs := resp["errors"].([]any)
+	if len(errs) != 0 {
+		t.Errorf("errors: want [], got %v", errs)
+	}
+
+	// Verify test cases were actually stored.
+	st.mu.RLock()
+	count := 0
+	for _, tc := range st.testCases {
+		if tc.SuiteID == "s1" {
+			count++
+		}
+	}
+	st.mu.RUnlock()
+	if count != 3 {
+		t.Errorf("stored test cases: want 3, got %d", count)
+	}
+}
+
+func TestHandler_ImportTestCases_CSVWithBadRow(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+
+	// Row 2 is valid, row 3 has empty name, row 4 is valid.
+	csv := "name,description\nAlice,first\n,missing name\nBob,third\n"
+	rr := callImport(h, "s1", "data.csv", csv)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if got := int(resp["created"].(float64)); got != 2 {
+		t.Errorf("created: want 2, got %d", got)
+	}
+	if got := int(resp["skipped"].(float64)); got != 1 {
+		t.Errorf("skipped: want 1, got %d", got)
+	}
+	errs := resp["errors"].([]any)
+	if len(errs) != 1 {
+		t.Fatalf("errors: want 1, got %d", len(errs))
+	}
+	errRow := errs[0].(map[string]any)
+	if errRow["row"].(float64) != 3 {
+		t.Errorf("error row: want 3, got %v", errRow["row"])
+	}
+}
+
+func TestHandler_ImportTestCases_ValidJSONL(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s2", WorkflowID: "wf1"})
+
+	jsonl := `{"name":"Case A","description":"first","initial_data":{"x":1}}` + "\n" +
+		`{"name":"Case B","initial_data":{"y":"hello"}}` + "\n"
+	rr := callImport(h, "s2", "dataset.jsonl", jsonl)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if got := int(resp["created"].(float64)); got != 2 {
+		t.Errorf("created: want 2, got %d", got)
+	}
+}
+
+func TestHandler_ImportTestCases_RowLimitExceeded(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+
+	// Build a CSV with 501 data rows.
+	var sb strings.Builder
+	sb.WriteString("name\n")
+	for i := 0; i < 501; i++ {
+		sb.WriteString("Row\n")
+	}
+	rr := callImport(h, "s1", "big.csv", sb.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandler_ImportTestCases_HeaderOnlyCSV(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+
+	rr := callImport(h, "s1", "empty.csv", "name,description\n")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	if got := int(resp["created"].(float64)); got != 0 {
+		t.Errorf("created: want 0, got %d", got)
+	}
+}
+
+func TestHandler_ImportTestCases_StoreError(t *testing.T) {
+	h, st := newTestHandler(t)
+	st.seedSuite(store.EvalSuite{ID: "s1", WorkflowID: "wf1"})
+	st.createCaseErr = fmt.Errorf("simulated DB error")
+
+	csv := "name\nAlice\nBob\n"
+	rr := callImport(h, "s1", "data.csv", csv)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	decodeJSON(t, rr.Body.Bytes(), &resp)
+	// All rows fail due to store error; created=0, skipped=2.
+	if got := int(resp["created"].(float64)); got != 0 {
+		t.Errorf("created: want 0, got %d", got)
+	}
+	if got := int(resp["skipped"].(float64)); got != 2 {
+		t.Errorf("skipped: want 2, got %d", got)
 	}
 }

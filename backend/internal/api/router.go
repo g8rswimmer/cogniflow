@@ -92,8 +92,9 @@ func NewRouter(
 	mux.HandleFunc("DELETE /v1/eval-suites/{suite_id}", eh.DeleteSuite)
 	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/test-cases", eh.ListCases)
 	mux.HandleFunc("POST /v1/eval-suites/{suite_id}/test-cases", eh.CreateCase)
-	// /order must be registered before /{case_id} so it is matched first.
+	// Literal-segment routes (/order, /import) must be registered before /{case_id}.
 	mux.HandleFunc("PUT /v1/eval-suites/{suite_id}/test-cases/order", eh.ReorderCases)
+	mux.HandleFunc("POST /v1/eval-suites/{suite_id}/test-cases/import", eh.ImportTestCases)
 	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/test-cases/{case_id}", eh.GetCase)
 	mux.HandleFunc("PUT /v1/eval-suites/{suite_id}/test-cases/{case_id}", eh.UpdateCase)
 	mux.HandleFunc("DELETE /v1/eval-suites/{suite_id}/test-cases/{case_id}", eh.DeleteCase)

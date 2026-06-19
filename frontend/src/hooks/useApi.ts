@@ -1,4 +1,4 @@
-import { request } from '../api/client'
+import { request, API_BASE, ApiError } from '../api/client'
 import type {
   Workflow,
   WorkflowListResponse,
@@ -14,6 +14,7 @@ import type {
   EvalRunListResponse,
   TriggerEvalRunResponse,
   EvalRunCompare,
+  ImportTestCasesResponse,
 } from '../api/types'
 
 export const api = {
@@ -122,4 +123,19 @@ export const api = {
     request<EvalRunCompare>(
       `/eval-runs/${headRunId}/compare?baseline_run_id=${encodeURIComponent(baselineRunId)}`
     ),
+
+  importTestCases: async (suiteId: string, file: File): Promise<ImportTestCasesResponse> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    // Do NOT set Content-Type — browser sets multipart/form-data with boundary automatically.
+    const res = await fetch(`${API_BASE}/v1/eval-suites/${suiteId}/test-cases/import`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new ApiError(res.status, body)
+    }
+    return res.json() as Promise<ImportTestCasesResponse>
+  },
 }

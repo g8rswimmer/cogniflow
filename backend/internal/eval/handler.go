@@ -239,6 +239,90 @@ func (h *Handler) DeleteSuite(w http.ResponseWriter, r *http.Request) {
 
 // ---- Test Case endpoints ---------------------------------------------------
 
+// ImportTestCases handles POST /v1/eval-suites/{suite_id}/test-cases/import.
+// Accepts a multipart/form-data upload with a single "file" field (.csv or .jsonl).
+// Valid rows are created as TestCases; row-level errors are reported in the response
+// without aborting the remaining rows (partial success is normal).
+func (h *Handler) ImportTestCases(w http.ResponseWriter, r *http.Request) {
+	suiteID := r.PathValue("suite_id")
+
+	if _, err := h.store.GetEvalSuite(r.Context(), suiteID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "eval suite not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportFileBytes)
+	if err := r.ParseMultipartForm(maxImportFileBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "could not parse multipart form: "+err.Error())
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "file field is required")
+		return
+	}
+	defer file.Close() //nolint:errcheck
+
+	format, err := detectFormat(header.Filename)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	var (
+		rows    []importRow
+		rowErrs []importRowError
+	)
+	switch format {
+	case "csv":
+		rows, rowErrs, err = parseCSV(file)
+	case "jsonl":
+		rows, rowErrs, err = parseJSONL(file)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", "could not parse file: "+err.Error())
+		return
+	}
+
+	if len(rows) > maxImportRows {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED",
+			fmt.Sprintf("import exceeds maximum of %d rows", maxImportRows))
+		return
+	}
+
+	if rowErrs == nil {
+		rowErrs = []importRowError{}
+	}
+
+	created := 0
+	for _, row := range rows {
+		tc := store.TestCase{
+			SuiteID:     suiteID,
+			Name:        row.Name,
+			Description: row.Description,
+			InitialData: row.InitialData,
+			Mocks:       []store.NodeMock{},
+			Graders:     []store.GraderDef{},
+		}
+		if _, err := h.store.CreateTestCase(r.Context(), tc); err != nil {
+			rowErrs = append(rowErrs, importRowError{Row: -1, Message: "store error: " + err.Error()})
+			continue
+		}
+		created++
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"created": created,
+		"skipped": len(rowErrs),
+		"errors":  rowErrs,
+	})
+}
+
 // ListCases handles GET /v1/eval-suites/{suite_id}/test-cases.
 func (h *Handler) ListCases(w http.ResponseWriter, r *http.Request) {
 	suiteID := r.PathValue("suite_id")

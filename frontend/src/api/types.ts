@@ -310,3 +310,9 @@ export interface EvalRunCompare {
   missing_count: number
   cases: TestCaseComparison[]
 }
+
+export interface ImportTestCasesResponse {
+  created: number
+  skipped: number
+  errors: Array<{ row: number; message: string }>
+}
