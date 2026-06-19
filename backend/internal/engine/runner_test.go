@@ -592,9 +592,333 @@ func TestBranchAllows(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := branchAllows(tc.edge, tc.output)
+			got := branchAllows(tc.edge, tc.output, "")
 			if got != tc.allowed {
 				t.Errorf("want %v, got %v", tc.allowed, got)
+			}
+		})
+	}
+}
+
+// ---- loop execution tests --------------------------------------------------
+
+// makeLoopCtrlNode creates a loop.controller WorkflowNode with the given config.
+func makeLoopCtrlNode(id string, maxIter int) store.WorkflowNode {
+	return store.WorkflowNode{
+		ID:     id,
+		TypeID: "loop.controller",
+		Config: map[string]any{"max_iterations": float64(maxIter)},
+	}
+}
+
+// loopBackEdgeR creates an IsLoopBack edge for runner tests.
+func loopBackEdgeR(id, src, tgt string) store.WorkflowEdge {
+	return store.WorkflowEdge{ID: id, SourceID: src, TargetID: tgt, IsLoopBack: true}
+}
+
+// labelEdgeR creates a branch-labelled edge for runner tests.
+func labelEdgeR(id, src, tgt, label string) store.WorkflowEdge {
+	return store.WorkflowEdge{ID: id, SourceID: src, TargetID: tgt, BranchLabel: &label}
+}
+
+// buildLoopDAG builds a simple loop DAG:
+//
+//	upstream → ctrl →(loop_body)→ body →(loop_back)→ ctrl
+//	ctrl →(exit)→ downstream
+func buildLoopDAG(t *testing.T, maxIter int) *DAG {
+	t.Helper()
+	nodes := []store.WorkflowNode{
+		makeNode("upstream", "fixed"),
+		makeLoopCtrlNode("ctrl", maxIter),
+		makeNode("body", "body_type"),
+		makeNode("downstream", "fixed"),
+	}
+	edges := []store.WorkflowEdge{
+		makeEdge("e1", "upstream", "ctrl"),
+		labelEdgeR("e2", "ctrl", "body", "loop_body"),
+		labelEdgeR("e3", "ctrl", "downstream", "exit"),
+		loopBackEdgeR("e4", "body", "ctrl"),
+	}
+	d, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("buildLoopDAG: %v", err)
+	}
+	return d
+}
+
+// TestRunDAG_LoopBodyRunsNTimes verifies that with max_iterations=3 and no exit
+// condition, the body node executes exactly 3 times before the downstream fires.
+func TestRunDAG_LoopBodyRunsNTimes(t *testing.T) {
+	const maxIter = 3
+
+	bodyCounter := &countingHandler{meta: newMeta("body_type")}
+
+	// loop.controller handler: returns loop_body until iteration 3, then exit.
+	ctrlHandler := &funcHandler{
+		meta: newMeta("loop.controller"),
+		execFn: func(_ context.Context, input node.NodeInput) (node.NodeOutput, error) {
+			iter := 0
+			if state, ok := input.UpstreamData["_loop_state"].(map[string]any); ok {
+				if n, ok := state["iteration"].(int); ok {
+					iter = n
+				}
+			}
+			if iter >= maxIter {
+				return node.NodeOutput{Data: map[string]any{"action": "exit", "iteration": iter}}, nil
+			}
+			return node.NodeOutput{Data: map[string]any{"action": "loop_body", "iteration": iter}}, nil
+		},
+	}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("fixed"), output: map[string]any{"ok": true}},
+		ctrlHandler,
+		bodyCounter,
+	)
+
+	d := buildLoopDAG(t, maxIter)
+	bus := NewEventBus()
+	_, nodeResults, err := runDAG(context.Background(), "run-loop", d, nil, registry, bus, nil)
+	if err != nil {
+		t.Fatalf("runDAG failed: %v", err)
+	}
+
+	if int(bodyCounter.calls.Load()) != maxIter {
+		t.Errorf("body should execute %d times, executed %d", maxIter, bodyCounter.calls.Load())
+	}
+	if nodeResults["downstream"].Status != "succeeded" {
+		t.Errorf("downstream should have succeeded, got %v", nodeResults["downstream"])
+	}
+}
+
+// TestRunDAG_LoopExitsImmediately verifies that when the controller returns
+// action=exit on the first call, the body node never executes.
+func TestRunDAG_LoopExitsImmediately(t *testing.T) {
+	bodyCounter := &countingHandler{meta: newMeta("body_type")}
+	ctrlHandler := &fixedHandler{
+		meta:   newMeta("loop.controller"),
+		output: map[string]any{"action": "exit", "iteration": 0},
+	}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("fixed"), output: map[string]any{"ok": true}},
+		ctrlHandler,
+		bodyCounter,
+	)
+
+	d := buildLoopDAG(t, 10)
+	bus := NewEventBus()
+	_, _, err := runDAG(context.Background(), "run-noop", d, nil, registry, bus, nil)
+	if err != nil {
+		t.Fatalf("runDAG failed: %v", err)
+	}
+
+	if bodyCounter.calls.Load() != 0 {
+		t.Errorf("body should not execute when ctrl exits immediately, got %d calls", bodyCounter.calls.Load())
+	}
+}
+
+// TestRunDAG_LoopBodyOutputVisibleToController verifies that after each body
+// iteration, the controller can read the body's output from UpstreamData.
+func TestRunDAG_LoopBodyOutputVisibleToController(t *testing.T) {
+	const maxIter = 2
+	var lastSeenBodyOutput map[string]any
+
+	ctrlHandler := &funcHandler{
+		meta: newMeta("loop.controller"),
+		execFn: func(_ context.Context, input node.NodeInput) (node.NodeOutput, error) {
+			iter := 0
+			if state, ok := input.UpstreamData["_loop_state"].(map[string]any); ok {
+				if n, ok := state["iteration"].(int); ok {
+					iter = n
+				}
+			}
+			// Save what the controller sees from the body.
+			if bodyOut, ok := input.UpstreamData["body"].(map[string]any); ok {
+				lastSeenBodyOutput = bodyOut
+			}
+			if iter >= maxIter {
+				return node.NodeOutput{Data: map[string]any{"action": "exit", "iteration": iter}}, nil
+			}
+			return node.NodeOutput{Data: map[string]any{"action": "loop_body", "iteration": iter}}, nil
+		},
+	}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("fixed"), output: map[string]any{"ok": true}},
+		ctrlHandler,
+		&fixedHandler{meta: newMeta("body_type"), output: map[string]any{"body_result": "hello"}},
+	)
+
+	d := buildLoopDAG(t, maxIter)
+	bus := NewEventBus()
+	if _, _, err := runDAG(context.Background(), "run-vis", d, nil, registry, bus, nil); err != nil {
+		t.Fatalf("runDAG failed: %v", err)
+	}
+
+	if lastSeenBodyOutput == nil || lastSeenBodyOutput["body_result"] != "hello" {
+		t.Errorf("controller should see body output; got %v", lastSeenBodyOutput)
+	}
+}
+
+// TestRunDAG_LoopBodyFailurePropagates verifies that a failing body node causes
+// the overall run to fail.
+func TestRunDAG_LoopBodyFailurePropagates(t *testing.T) {
+	ctrlHandler := &fixedHandler{
+		meta:   newMeta("loop.controller"),
+		output: map[string]any{"action": "loop_body", "iteration": 0},
+	}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("fixed"), output: map[string]any{"ok": true}},
+		ctrlHandler,
+		&failHandler{meta: newMeta("body_type")},
+	)
+
+	d := buildLoopDAG(t, 3)
+	bus := NewEventBus()
+	_, _, err := runDAG(context.Background(), "run-fail", d, nil, registry, bus, nil)
+	if err == nil {
+		t.Fatal("expected error from failing body node")
+	}
+}
+
+// TestRunDAG_LoopPrePostNodesRunOnce verifies that nodes before and after the
+// loop execute exactly once regardless of iteration count.
+func TestRunDAG_LoopPrePostNodesRunOnce(t *testing.T) {
+	const maxIter = 3
+
+	upstreamCounter := &countingHandler{meta: newMeta("upstream_type")}
+	downstreamCounter := &countingHandler{meta: newMeta("downstream_type")}
+	bodyCounter := &countingHandler{meta: newMeta("body_type")}
+
+	ctrlHandler := &funcHandler{
+		meta: newMeta("loop.controller"),
+		execFn: func(_ context.Context, input node.NodeInput) (node.NodeOutput, error) {
+			iter := 0
+			if state, ok := input.UpstreamData["_loop_state"].(map[string]any); ok {
+				if n, ok := state["iteration"].(int); ok {
+					iter = n
+				}
+			}
+			if iter >= maxIter {
+				return node.NodeOutput{Data: map[string]any{"action": "exit", "iteration": iter}}, nil
+			}
+			return node.NodeOutput{Data: map[string]any{"action": "loop_body", "iteration": iter}}, nil
+		},
+	}
+
+	// Use distinct type IDs for each node so they get distinct handlers.
+	nodes := []store.WorkflowNode{
+		{ID: "upstream", TypeID: "upstream_type"},
+		makeLoopCtrlNode("ctrl", maxIter),
+		{ID: "body", TypeID: "body_type"},
+		{ID: "downstream", TypeID: "downstream_type"},
+	}
+	edges := []store.WorkflowEdge{
+		makeEdge("e1", "upstream", "ctrl"),
+		labelEdgeR("e2", "ctrl", "body", "loop_body"),
+		labelEdgeR("e3", "ctrl", "downstream", "exit"),
+		loopBackEdgeR("e4", "body", "ctrl"),
+	}
+	d, err := Build(nodes, edges)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	registry := newTestRegistry(upstreamCounter, ctrlHandler, bodyCounter, downstreamCounter)
+	bus := NewEventBus()
+	if _, _, err := runDAG(context.Background(), "run-counts", d, nil, registry, bus, nil); err != nil {
+		t.Fatalf("runDAG: %v", err)
+	}
+
+	if upstreamCounter.calls.Load() != 1 {
+		t.Errorf("upstream should run exactly once, got %d", upstreamCounter.calls.Load())
+	}
+	if downstreamCounter.calls.Load() != 1 {
+		t.Errorf("downstream should run exactly once, got %d", downstreamCounter.calls.Load())
+	}
+	if int(bodyCounter.calls.Load()) != maxIter {
+		t.Errorf("body should run %d times, got %d", maxIter, bodyCounter.calls.Load())
+	}
+}
+
+// TestRunDAG_LoopContextCancellation verifies that context cancellation during
+// a loop body causes the run to terminate cleanly.
+func TestRunDAG_LoopContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	// Body handler blocks until context is cancelled.
+	ctrlHandler := &fixedHandler{
+		meta:   newMeta("loop.controller"),
+		output: map[string]any{"action": "loop_body", "iteration": 0},
+	}
+	blockingBody := &funcHandler{
+		meta: newMeta("body_type"),
+		execFn: func(ctx context.Context, _ node.NodeInput) (node.NodeOutput, error) {
+			<-ctx.Done()
+			return node.NodeOutput{}, ctx.Err()
+		},
+	}
+
+	registry := newTestRegistry(
+		&fixedHandler{meta: newMeta("fixed"), output: map[string]any{"ok": true}},
+		ctrlHandler,
+		blockingBody,
+	)
+
+	d := buildLoopDAG(t, 10)
+	bus := NewEventBus()
+	_, _, err := runDAG(ctx, "run-cancel", d, nil, registry, bus, nil)
+	if err == nil {
+		t.Fatal("expected error from context cancellation")
+	}
+}
+
+// TestBranchAllows_ActionKey verifies that "action" values in node output route
+// edges correctly for loop.controller-style labelled edges.
+func TestBranchAllows_ActionKey(t *testing.T) {
+	loopBodyLabel := "loop_body"
+	exitLabel := "exit"
+
+	tests := []struct {
+		name    string
+		edge    store.WorkflowEdge
+		output  map[string]any
+		allowed bool
+	}{
+		{
+			name:    "loop_body label matches action=loop_body",
+			edge:    store.WorkflowEdge{BranchLabel: &loopBodyLabel},
+			output:  map[string]any{"action": "loop_body"},
+			allowed: true,
+		},
+		{
+			name:    "exit label matches action=exit",
+			edge:    store.WorkflowEdge{BranchLabel: &exitLabel},
+			output:  map[string]any{"action": "exit"},
+			allowed: true,
+		},
+		{
+			name:    "loop_body label blocked when action=exit",
+			edge:    store.WorkflowEdge{BranchLabel: &loopBodyLabel},
+			output:  map[string]any{"action": "exit"},
+			allowed: false,
+		},
+		{
+			name:    "exit label blocked when action=loop_body",
+			edge:    store.WorkflowEdge{BranchLabel: &exitLabel},
+			output:  map[string]any{"action": "loop_body"},
+			allowed: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := branchAllows(tc.edge, tc.output, loopControllerTypeID)
+			if got != tc.allowed {
+				t.Errorf("branchAllows: want %v, got %v", tc.allowed, got)
 			}
 		})
 	}

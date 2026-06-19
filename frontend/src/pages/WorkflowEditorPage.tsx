@@ -191,6 +191,7 @@ export function WorkflowEditorPage() {
       source_id: e.source,
       target_id: e.target,
       branch_label: (e.label as string | undefined) ?? null,
+      is_loop_back: (e.data?.is_loop_back as boolean) ?? false,
     })),
   })
 

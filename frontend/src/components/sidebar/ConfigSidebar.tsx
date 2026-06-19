@@ -7,6 +7,7 @@ import { TemplateVariablePicker } from './TemplateVariablePicker'
 import { UpstreamNodeReferences } from './UpstreamNodeReferences'
 import { OutputParserPanel } from './OutputParserPanel'
 import { ConditionalRuleBuilder } from './ConditionalRuleBuilder'
+import { LoopControllerPanel } from './LoopControllerPanel'
 import { InitialDataSchemaEditor } from './InitialDataSchemaEditor'
 
 export function ConfigSidebar() {
@@ -96,7 +97,7 @@ export function ConfigSidebar() {
           />
         </div>
 
-        {/* Config form — conditional.branch gets a visual rule builder; all other nodes use SchemaForm */}
+        {/* Config form — special panels for conditional.branch and loop.controller; all others use SchemaForm */}
         {type_id === 'conditional.branch' ? (
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-1">
@@ -109,6 +110,13 @@ export function ConfigSidebar() {
               fieldErrors={currentFieldErrors}
             />
           </div>
+        ) : type_id === 'loop.controller' ? (
+          <LoopControllerPanel
+            nodeId={selectedNodeId}
+            config={config}
+            onChange={data => updateNodeConfig(selectedNodeId, data)}
+            fieldErrors={currentFieldErrors}
+          />
         ) : (
           meta && Object.keys(schema).length > 0 && (
             <div>

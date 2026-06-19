@@ -40,11 +40,12 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
 );
 
 CREATE TABLE IF NOT EXISTS workflow_edges (
-    id           TEXT NOT NULL,
-    workflow_id  TEXT NOT NULL,
-    source_id    TEXT NOT NULL,
-    target_id    TEXT NOT NULL,
+    id           TEXT    NOT NULL,
+    workflow_id  TEXT    NOT NULL,
+    source_id    TEXT    NOT NULL,
+    target_id    TEXT    NOT NULL,
     branch_label TEXT,
+    is_loop_back INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (workflow_id, id)
 );
 

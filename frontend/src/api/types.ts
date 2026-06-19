@@ -23,6 +23,9 @@ export interface ConditionalRule {
   conditions: ConditionalCondition[]
 }
 
+// ExitCondition is structurally identical to ConditionalCondition; aliased for clarity.
+export type ExitCondition = ConditionalCondition
+
 // ---------------------------------------------------------------------------
 
 export type OutputParserKind = 'json_path' | 'regex'
@@ -48,6 +51,7 @@ export interface WorkflowEdge {
   source_id: string
   target_id: string
   branch_label?: string | null
+  is_loop_back?: boolean
 }
 
 export type TriggerKind = 'manual' | 'webhook' | 'cron'

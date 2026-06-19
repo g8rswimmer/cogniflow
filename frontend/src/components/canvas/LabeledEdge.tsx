@@ -12,11 +12,14 @@ export function LabeledEdge({
   targetY,
   targetPosition,
   label,
+  data,
 }: EdgeProps) {
   const updateEdgeLabel = useWorkflowStore(s => s.updateEdgeLabel)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const isLoopBack = data?.is_loop_back === true
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -40,6 +43,31 @@ export function LabeledEdge({
     setEditing(false)
     updateEdgeLabel(id, draft.trim() || null)
   }, [id, draft, updateEdgeLabel])
+
+  // Loop-back edges render with dashed amber styling and a non-editable label.
+  if (isLoopBack) {
+    return (
+      <>
+        <BaseEdge
+          path={edgePath}
+          style={{ stroke: '#f59e0b', strokeWidth: 2, strokeDasharray: '5 5' }}
+        />
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              pointerEvents: 'none',
+            }}
+          >
+            <span className="text-xs px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-600">
+              ↩ loop back
+            </span>
+          </div>
+        </EdgeLabelRenderer>
+      </>
+    )
+  }
 
   return (
     <>

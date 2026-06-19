@@ -136,13 +136,30 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     }),
 
   onConnect: (connection) =>
-    set(s => ({
-      // Supply an explicit UUID so the edge ID fits the DB CHAR(36) column.
-      // React Flow's default id is "xy-edge__{source}-{target}" which exceeds
-      // 36 chars when node IDs are long.
-      edges: addEdge({ ...connection, id: crypto.randomUUID(), type: 'labeled' }, s.edges),
-      isDirty: true,
-    })),
+    set(s => {
+      const targetNode = s.nodes.find(n => n.id === connection.target)
+      const isLoopController = targetNode?.data.type_id === 'loop.controller'
+      // Detect loop-back edges via two complementary checks:
+      //  (A) target is already an ancestor of source via forward edges — the
+      //      classic case where ctrl→body exists before body→ctrl is drawn.
+      //  (B) source is already in the controller's loop body — covers the less
+      //      common case where the user draws body→ctrl before ctrl→body, but
+      //      ctrl already has a loop_body edge to some ancestor of source.
+      const isLoopBack = isLoopController && (
+        getAncestors(connection.source!, s.edges).includes(connection.target!) ||
+        getLoopBodyDescendants(connection.target!, s.edges).includes(connection.source!)
+      )
+      return {
+        // Supply an explicit UUID so the edge ID fits the DB CHAR(36) column.
+        // React Flow's default id is "xy-edge__{source}-{target}" which exceeds
+        // 36 chars when node IDs are long.
+        edges: addEdge(
+          { ...connection, id: crypto.randomUUID(), type: 'labeled', data: { is_loop_back: isLoopBack } },
+          s.edges,
+        ),
+        isDirty: true,
+      }
+    }),
 
   setName: (name) => set({ name, isDirty: true }),
   setDescription: (description) => set({ description, isDirty: true }),
@@ -241,6 +258,7 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       source: e.source_id,
       target: e.target_id,
       label: e.branch_label ?? undefined,
+      data: { is_loop_back: e.is_loop_back ?? false },
     }))
 
     const configs: Record<string, Record<string, unknown>> = {}
@@ -287,13 +305,17 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   markClean: (id) => set({ workflowId: id, isDirty: false, nodeErrors: {}, fieldErrors: {} }),
 }))
 
-// Utility: find all ancestor node IDs for a given node
+// Utility: find all ancestor node IDs for a given node via forward edges only.
+// Loop-back edges are excluded so that the loop controller does not appear as
+// an ancestor of post-loop downstream nodes, avoiding incorrect template variable
+// suggestions and preventing false cycle detection in onConnect.
 export function getAncestors(nodeId: string, edges: Edge[]): string[] {
+  const forwardEdges = edges.filter(e => !e.data?.is_loop_back)
   const ancestors = new Set<string>()
   const queue = [nodeId]
   while (queue.length > 0) {
     const current = queue.shift()!
-    for (const edge of edges) {
+    for (const edge of forwardEdges) {
       if (edge.target === current && !ancestors.has(edge.source)) {
         ancestors.add(edge.source)
         queue.push(edge.source)
@@ -301,4 +323,27 @@ export function getAncestors(nodeId: string, edges: Edge[]): string[] {
     }
   }
   return [...ancestors]
+}
+
+// Utility: find all node IDs reachable from a loop.controller's loop_body
+// edge via forward edges. Used by onConnect to detect loop-back edges even
+// when the user draws body→ctrl before ctrl→body exists.
+function getLoopBodyDescendants(controllerId: string, edges: Edge[]): string[] {
+  const forwardEdges = edges.filter(e => !e.data?.is_loop_back)
+  const bodyStart = forwardEdges.find(
+    e => e.source === controllerId && e.label === 'loop_body',
+  )?.target
+  if (!bodyStart) return []
+  const visited = new Set<string>([bodyStart])
+  const queue = [bodyStart]
+  while (queue.length > 0) {
+    const curr = queue.shift()!
+    for (const edge of forwardEdges) {
+      if (edge.source === curr && !visited.has(edge.target)) {
+        visited.add(edge.target)
+        queue.push(edge.target)
+      }
+    }
+  }
+  return [...visited]
 }
