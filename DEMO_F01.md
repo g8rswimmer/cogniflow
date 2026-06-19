@@ -125,7 +125,7 @@ WF2=$(curl -s -X POST $BASE/workflows \
         "position": {"x": 0, "y": 0},
         "config": {
           "max_iterations": 10,
-          "exit_condition": "has(ctx[\"_loop_state\"]) && ctx[\"_loop_state\"][\"iteration\"] >= 2"
+          "exit_condition": "\"_loop_state\" in ctx && ctx[\"_loop_state\"][\"iteration\"] >= 2"
         }
       },
       {
