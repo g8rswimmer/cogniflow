@@ -1,3 +1,5 @@
+import { ExitConditionBuilder } from './ExitConditionBuilder'
+
 interface Props {
   nodeId: string
   config: Record<string, unknown>
@@ -5,22 +7,16 @@ interface Props {
   fieldErrors?: Record<string, string>
 }
 
-export function LoopControllerPanel({ config, onChange, fieldErrors = {} }: Props) {
+export function LoopControllerPanel({ nodeId, config, onChange, fieldErrors = {} }: Props) {
   const maxIter = (config.max_iterations as number | undefined) ?? 10
-  const exitCondition = (config.exit_condition as string | undefined) ?? ''
-
-  const update = (patch: Record<string, unknown>) => {
-    onChange({ ...config, ...patch })
-  }
 
   return (
     <div className="space-y-4">
+      {/* Max iterations */}
       <div>
         <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-2">
           Loop Configuration
         </label>
-
-        {/* Max iterations */}
         <div className="mb-3">
           <label className="block text-xs text-gray-300 mb-1">
             Max Iterations <span className="text-red-400">*</span>
@@ -30,7 +26,9 @@ export function LoopControllerPanel({ config, onChange, fieldErrors = {} }: Prop
             min={1}
             max={100}
             value={maxIter}
-            onChange={e => update({ max_iterations: parseInt(e.target.value, 10) || 1 })}
+            onChange={e =>
+              onChange({ ...config, max_iterations: parseInt(e.target.value, 10) || 1 })
+            }
             className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
           />
           {fieldErrors.max_iterations && (
@@ -40,27 +38,22 @@ export function LoopControllerPanel({ config, onChange, fieldErrors = {} }: Prop
             Hard cap on iterations (1–100). The loop exits gracefully when reached.
           </p>
         </div>
+      </div>
 
-        {/* Exit condition */}
-        <div>
-          <label className="block text-xs text-gray-300 mb-1">
-            Exit Condition (CEL) <span className="text-gray-500">optional</span>
-          </label>
-          <textarea
-            rows={3}
-            value={exitCondition}
-            onChange={e => update({ exit_condition: e.target.value })}
-            placeholder={`ctx["body_node"]["done"] == true`}
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500 resize-none"
-          />
-          {fieldErrors.exit_condition && (
-            <p className="text-xs text-red-400 mt-1">{fieldErrors.exit_condition}</p>
-          )}
-          <p className="text-xs text-gray-500 mt-1">
-            CEL expression evaluated against upstream data each iteration. Loop exits early when true.
-            Use <code className="text-amber-400">ctx["nodeId"]["field"]</code> to reference node outputs.
-          </p>
-        </div>
+      {/* Exit condition builder */}
+      <div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-gray-400 block mb-2">
+          Exit Condition <span className="text-gray-600 font-normal normal-case">(optional)</span>
+        </label>
+        <p className="text-[10px] text-gray-500 mb-2">
+          Loop exits early when all conditions match. Leave empty to always run max iterations.
+        </p>
+        <ExitConditionBuilder
+          nodeId={nodeId}
+          config={config}
+          onChange={onChange}
+          fieldErrors={fieldErrors}
+        />
       </div>
 
       {/* Wiring guide */}

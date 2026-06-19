@@ -23,6 +23,9 @@ export interface ConditionalRule {
   conditions: ConditionalCondition[]
 }
 
+// ExitCondition is structurally identical to ConditionalCondition; aliased for clarity.
+export type ExitCondition = ConditionalCondition
+
 // ---------------------------------------------------------------------------
 
 export type OutputParserKind = 'json_path' | 'regex'
