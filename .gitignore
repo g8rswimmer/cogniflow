@@ -16,3 +16,4 @@ frontend/dist/
 .vscode/
 *.swp
 backend/demos
+datasets
