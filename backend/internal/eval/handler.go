@@ -36,11 +36,12 @@ type Handler struct {
 	registry  *node.NodeRegistry
 	runner    evalRunnerI    // nil when eval execution not yet wired (safe: TriggerRun guards nil)
 	scheduler *EvalScheduler // nil-safe; arms/disarms cron jobs on suite CRUD
+	bus       *EvalEventBus  // nil disables streaming (StreamEvalRunEvents returns 501)
 }
 
 // NewHandler creates a Handler.
-func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI, scheduler *EvalScheduler) *Handler {
-	return &Handler{store: st, vault: vault, registry: registry, runner: runner, scheduler: scheduler}
+func NewHandler(st store.Store, vault *GraderVault, registry *node.NodeRegistry, runner evalRunnerI, scheduler *EvalScheduler, bus *EvalEventBus) *Handler {
+	return &Handler{store: st, vault: vault, registry: registry, runner: runner, scheduler: scheduler, bus: bus}
 }
 
 // ---- Suite endpoints -------------------------------------------------------

@@ -32,6 +32,7 @@ type EvalRunner struct {
 	engine     engineRunner
 	vault      *GraderVault
 	llmFactory LLMFactory
+	bus        *EvalEventBus // nil disables streaming; all Publish calls are no-ops
 	ctx        context.Context // server-lifetime context; cancelled on shutdown
 }
 
@@ -39,8 +40,10 @@ type EvalRunner struct {
 // so that background eval goroutines are cancelled when the server shuts down.
 // factory provides LLMClient instances for llm_judge and checklist graders; pass nil
 // to disable LLM graders (they will return an error verdict at evaluation time).
-func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault, factory LLMFactory) *EvalRunner {
-	return &EvalRunner{store: st, engine: eng, vault: vault, llmFactory: factory, ctx: ctx}
+// bus is the EvalEventBus used to stream live events to WebSocket clients; pass nil
+// to disable streaming.
+func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault, factory LLMFactory, bus *EvalEventBus) *EvalRunner {
+	return &EvalRunner{store: st, engine: eng, vault: vault, llmFactory: factory, bus: bus, ctx: ctx}
 }
 
 // Execute creates an EvalRun record, starts async execution, and returns the run ID immediately.
@@ -114,16 +117,35 @@ func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store
 			defer wg.Done()
 			defer func() { <-sem }()
 
+			r.bus.Publish(EvalEvent{
+				EvalRunID:    evalRunID,
+				Type:         EvalEventTestCaseStarted,
+				Timestamp:    time.Now().UTC(),
+				TestCaseName: tc.Name,
+			})
+
 			result, passed, isErr := r.executeTestCase(ctx, evalRunID, tc, suite)
 			outcomes[idx] = outcome{passed: passed, isErr: isErr}
 
-			if _, err := r.store.CreateTestCaseResult(ctx, result); err != nil {
+			persisted := result
+			if stored, err := r.store.CreateTestCaseResult(ctx, result); err != nil {
 				slog.Error("eval runner: persist test case result",
 					"eval_run_id", evalRunID,
 					"test_case_id", tc.ID,
 					"error", err,
 				)
+			} else {
+				persisted = stored
 			}
+
+			resultCopy := persisted
+			r.bus.Publish(EvalEvent{
+				EvalRunID:    evalRunID,
+				Type:         EvalEventTestCaseCompleted,
+				Timestamp:    time.Now().UTC(),
+				TestCaseName: tc.Name,
+				Result:       &resultCopy,
+			})
 		}(i, tc)
 	}
 	wg.Wait()
@@ -144,6 +166,18 @@ func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store
 	if err := r.store.UpdateEvalRunStatus(ctx, evalRunID, store.EvalRunCompleted, finalCounts); err != nil {
 		slog.Error("eval runner: update status to completed", "eval_run_id", evalRunID, "error", err)
 	}
+
+	r.bus.Publish(EvalEvent{
+		EvalRunID: evalRunID,
+		Type:      EvalEventRunCompleted,
+		Timestamp: time.Now().UTC(),
+		Summary: &EvalRunSummary{
+			TotalCases:  len(testCases),
+			PassedCount: passed,
+			FailedCount: failed,
+			ErrorCount:  errCount,
+		},
+	})
 }
 
 // executeTestCase runs one test case and returns its result, whether it passed, and whether it errored.

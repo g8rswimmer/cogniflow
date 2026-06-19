@@ -73,7 +73,8 @@ func NewRouter(
 
 	// Eval routes — suite CRUD, test case CRUD, and run execution.
 	vault := eval.NewGraderVault(cipher)
-	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory())
+	evalBus := eval.NewEvalEventBus()
+	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory(), evalBus)
 
 	evalSched := eval.NewEvalScheduler(srvCtx, runner)
 	if cronSuites, err := st.ListEvalSuitesByCronTrigger(srvCtx); err != nil {
@@ -83,7 +84,7 @@ func NewRouter(
 	}
 	evalSched.Start()
 
-	eh := eval.NewHandler(st, vault, registry, runner, evalSched)
+	eh := eval.NewHandler(st, vault, registry, runner, evalSched, evalBus)
 
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}/eval-suites", eh.ListByWorkflow)
 	mux.HandleFunc("POST /v1/workflows/{workflow_id}/eval-suites", eh.CreateSuite)
@@ -101,6 +102,7 @@ func NewRouter(
 	mux.HandleFunc("POST /v1/eval-suites/{suite_id}/runs", eh.TriggerRun)
 	mux.HandleFunc("GET /v1/eval-suites/{suite_id}/runs", eh.ListRuns)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}", eh.GetRun)
+	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/events", eh.StreamEvalRunEvents)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/compare", eh.CompareRuns)
 	mux.HandleFunc("GET /v1/eval-runs/{eval_run_id}/test-case-results/{result_id}", eh.GetTestCaseResult)
 	mux.HandleFunc("POST /v1/eval-webhooks/{suite_id}", eh.WebhookTrigger)
