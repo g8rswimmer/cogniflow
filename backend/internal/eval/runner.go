@@ -127,25 +127,24 @@ func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store
 			result, passed, isErr := r.executeTestCase(ctx, evalRunID, tc, suite)
 			outcomes[idx] = outcome{passed: passed, isErr: isErr}
 
-			persisted := result
 			if stored, err := r.store.CreateTestCaseResult(ctx, result); err != nil {
 				slog.Error("eval runner: persist test case result",
 					"eval_run_id", evalRunID,
 					"test_case_id", tc.ID,
 					"error", err,
 				)
+				// Do not publish the event: the UUID was never written to the DB, so
+				// any REST lookup using it from a WS client would return 404.
 			} else {
-				persisted = stored
+				resultCopy := stored
+				r.bus.Publish(EvalEvent{
+					EvalRunID:    evalRunID,
+					Type:         EvalEventTestCaseCompleted,
+					Timestamp:    time.Now().UTC(),
+					TestCaseName: tc.Name,
+					Result:       &resultCopy,
+				})
 			}
-
-			resultCopy := persisted
-			r.bus.Publish(EvalEvent{
-				EvalRunID:    evalRunID,
-				Type:         EvalEventTestCaseCompleted,
-				Timestamp:    time.Now().UTC(),
-				TestCaseName: tc.Name,
-				Result:       &resultCopy,
-			})
 		}(i, tc)
 	}
 	wg.Wait()
@@ -163,13 +162,17 @@ func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store
 	}
 
 	finalCounts := store.EvalRunCounts{PassedCount: passed, FailedCount: failed, ErrorCount: errCount}
-	if err := r.store.UpdateEvalRunStatus(ctx, evalRunID, store.EvalRunCompleted, finalCounts); err != nil {
+	// Use context.Background() so a server-shutdown cancellation of r.ctx does not prevent
+	// the final status update — leaving the run permanently stuck at 'running' in the DB.
+	terminalEvtType := EvalEventRunCompleted
+	if err := r.store.UpdateEvalRunStatus(context.Background(), evalRunID, store.EvalRunCompleted, finalCounts); err != nil {
 		slog.Error("eval runner: update status to completed", "eval_run_id", evalRunID, "error", err)
+		terminalEvtType = EvalEventRunFailed
 	}
 
 	r.bus.Publish(EvalEvent{
 		EvalRunID: evalRunID,
-		Type:      EvalEventRunCompleted,
+		Type:      terminalEvtType,
 		Timestamp: time.Now().UTC(),
 		Summary: &EvalRunSummary{
 			TotalCases:  len(testCases),

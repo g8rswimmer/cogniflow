@@ -33,6 +33,7 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
   useEffect(() => {
     if (!evalRunId) return
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLiveResults([])
     setSummary(null)
     setIsTerminal(false)
@@ -42,6 +43,9 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
     // terminalReceived is a closure-local flag so onclose can check it without
     // depending on the isTerminal React state (which may not have flushed yet).
     let terminalReceived = false
+    // stale is set in the cleanup function so that an async onclose fired by the
+    // cleanup's ws.close() does not set connectionLost on the *new* run's effect.
+    let stale = false
 
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${scheme}://${location.host}/v1/eval-runs/${evalRunId}/events`)
@@ -77,12 +81,16 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
       setIsConnected(false)
       // If the connection dropped before we received a terminal event, signal the
       // page so it can fall back to polling rather than staying stuck.
-      if (!terminalReceived) {
+      // Guard with stale: when evalRunId changes, cleanup calls ws.close() and
+      // the async onclose fires after the new effect has already reset state —
+      // without the guard, connectionLost would be set for the wrong run.
+      if (!terminalReceived && !stale) {
         setConnectionLost(true)
       }
     }
 
     return () => {
+      stale = true
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close()
       }

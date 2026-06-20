@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
@@ -87,6 +88,10 @@ func (b *EvalEventBus) Publish(event EvalEvent) {
 		select {
 		case ch <- event:
 		default:
+			slog.Warn("eval event bus: subscriber channel full, dropping event",
+				"eval_run_id", event.EvalRunID,
+				"type", event.Type,
+			)
 		}
 	}
 }

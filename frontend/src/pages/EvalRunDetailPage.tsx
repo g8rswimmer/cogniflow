@@ -15,6 +15,7 @@ export function EvalRunDetailPage() {
   const [run, setRun] = useState<EvalRun | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [pollRetryTick, setPollRetryTick] = useState(0)
 
   const [completedSiblings, setCompletedSiblings] = useState<EvalRun[]>([])
   const [compareData, setCompareData] = useState<EvalRunCompare | null>(null)
@@ -27,6 +28,7 @@ export function EvalRunDetailPage() {
   // Initial fetch.
   useEffect(() => {
     if (!runId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     api.getEvalRun(runId)
       .then(r => setRun(r))
@@ -57,10 +59,10 @@ export function EvalRunDetailPage() {
       if (!alive || !runId) return
       api.getEvalRun(runId)
         .then(r => { if (alive) setRun(r) })
-        .catch(() => {})
+        .catch(() => { if (alive) setPollRetryTick(t => t + 1) })
     }, 2000)
     return () => { alive = false; clearTimeout(id) }
-  }, [connectionLost, run, runId, wsTerminal])
+  }, [connectionLost, run, runId, wsTerminal, pollRetryTick])
 
   // Load sibling completed runs for the baseline selector.
   // Re-fires when run.status changes so a newly completed run appears in the
@@ -80,6 +82,7 @@ export function EvalRunDetailPage() {
   // Fetch comparison data when a baseline is selected and the head run is completed.
   useEffect(() => {
     if (!runId || !baselineRunId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCompareData(null)
       return
     }
@@ -121,8 +124,14 @@ export function EvalRunDetailPage() {
 
   // While streaming, compute live counts from received results so the summary
   // updates progressively rather than staying at zero until terminal.
+  // isLiveError mirrors the backend's isErr logic: workflow failed OR all graders errored
+  // (evaluableCount == 0). A result with workflow_run_status='succeeded' but all
+  // grader verdicts='error' is an error, not a failure.
+  const isLiveError = (r: TestCaseResult) =>
+    r.workflow_run_status === 'failed' ||
+    (r.grader_results.length > 0 && r.grader_results.every(gr => gr.verdict === 'error'))
   const livePassedCount = liveResults.filter(r => r.passed).length
-  const liveErrorCount = liveResults.filter(r => r.workflow_run_status === 'failed').length
+  const liveErrorCount = liveResults.filter(isLiveError).length
   const liveFailedCount = liveResults.length - livePassedCount - liveErrorCount
 
   const displayTotalCases = run.total_cases
