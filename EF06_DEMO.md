@@ -48,22 +48,159 @@ EvalRunDetailPage
 
 ### Prerequisites
 
-- Stack running: `docker-compose up --build`
-- A workflow that makes an HTTP call (e.g., `GET https://httpbin.org/get`)
-- An EvalSuite with at least 3 test cases on that workflow, each with a string-match grader
+**1. Start the stack**
+
+```bash
+docker-compose up --build
+```
+
+**2. Create a workflow with one HTTP Request node**
+
+```bash
+WF_ID=$(curl -s -X POST http://localhost:8080/v1/workflows \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "EF-06 Demo Workflow",
+    "trigger": {"kind": "manual"},
+    "timeout_seconds": 30,
+    "nodes": [
+      {
+        "id": "n1",
+        "type_id": "http.request",
+        "label": "Call httpbin",
+        "position": {"x": 100, "y": 100},
+        "config": {
+          "url": "https://httpbin.org/get",
+          "method": "GET"
+        }
+      }
+    ],
+    "edges": []
+  }' | jq -r '.id')
+echo "Workflow ID: $WF_ID"
+```
+
+**3. Verify the workflow runs successfully**
+
+```bash
+RUN_ID=$(curl -s -X POST http://localhost:8080/v1/workflows/$WF_ID/runs \
+  -H 'Content-Type: application/json' \
+  -d '{}' | jq -r '.run_id')
+sleep 3
+curl -s http://localhost:8080/v1/runs/$RUN_ID | jq '{status, "n1_status": .final_output.n1.status_code}'
+# → {"status": "succeeded", "n1_status": 200}
+```
+
+**4. Create an EvalSuite linked to the workflow**
+
+```bash
+SUITE_ID=$(curl -s -X POST http://localhost:8080/v1/workflows/$WF_ID/eval-suites \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "EF-06 Demo Suite",
+    "description": "Three test cases to demonstrate live streaming",
+    "pass_threshold": 1.0,
+    "max_concurrency": 1
+  }' | jq -r '.id')
+echo "Suite ID: $SUITE_ID"
+```
+
+**5. Add three test cases with string-match graders**
+
+```bash
+# Test case 1 — check HTTP 200 status code
+curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/test-cases \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Status is 200",
+    "description": "Verifies the HTTP response status code is 200",
+    "initial_data": {},
+    "mocks": [],
+    "graders": [
+      {
+        "id": "'"$(uuidgen | tr '[:upper:]' '[:lower:]')"'",
+        "name": "status_code check",
+        "type": "string_match",
+        "scope": "node",
+        "node_id": "n1",
+        "config": {
+          "field_path": "status_code",
+          "match_type": "exact",
+          "expected_value": "200"
+        }
+      }
+    ]
+  }' | jq '{id, name}'
+
+# Test case 2 — check that the response body contains "httpbin"
+curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/test-cases \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Body contains httpbin",
+    "description": "Verifies the response body mentions the httpbin domain",
+    "initial_data": {},
+    "mocks": [],
+    "graders": [
+      {
+        "id": "'"$(uuidgen | tr '[:upper:]' '[:lower:]')"'",
+        "name": "body domain check",
+        "type": "string_match",
+        "scope": "node",
+        "node_id": "n1",
+        "config": {
+          "field_path": "body",
+          "match_type": "contains",
+          "expected_value": "httpbin"
+        }
+      }
+    ]
+  }' | jq '{id, name}'
+
+# Test case 3 — regex check that body contains a quoted "url" key
+curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/test-cases \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Body has url field",
+    "description": "Verifies the JSON response body includes a url key",
+    "initial_data": {},
+    "mocks": [],
+    "graders": [
+      {
+        "id": "'"$(uuidgen | tr '[:upper:]' '[:lower:]')"'",
+        "name": "url key regex",
+        "type": "string_match",
+        "scope": "node",
+        "node_id": "n1",
+        "config": {
+          "field_path": "body",
+          "match_type": "regex",
+          "expected_value": "\"url\"\\s*:"
+        }
+      }
+    ]
+  }' | jq '{id, name}'
+```
+
+**6. Confirm the suite has 3 test cases**
+
+```bash
+curl -s http://localhost:8080/v1/eval-suites/$SUITE_ID \
+  | jq '{name, test_case_count: (.test_cases | length)}'
+# → {"name": "EF-06 Demo Suite", "test_case_count": 3}
+```
 
 ### Steps
 
-**1. Trigger the run and open DevTools before results appear**
+**1. Trigger the run and open the page before results appear**
 
 ```bash
-# In one terminal — trigger a run and capture the ID
-SUITE_ID="<your-suite-id>"
-curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/runs | jq .
-# → {"id": "<eval-run-id>"}
+# $SUITE_ID must be set from the Prerequisites above
+EVAL_RUN_ID=$(curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/runs \
+  -H 'Content-Type: application/json' | jq -r '.id')
+echo "Eval Run ID: $EVAL_RUN_ID"
 ```
 
-Open the EvalRun detail page in the browser:
+Immediately open the EvalRun detail page in the browser (before the run finishes):
 ```
 http://localhost:3000/eval-runs/<eval-run-id>
 ```
@@ -143,8 +280,9 @@ http://localhost:3000/eval-runs/<completed-eval-run-id>
 ```bash
 npm install -g wscat   # if not installed
 
-# Live run (trigger first, then connect immediately):
-EVAL_RUN_ID="<id>"
+# Trigger a run, then immediately connect (use $SUITE_ID from Prerequisites):
+EVAL_RUN_ID=$(curl -s -X POST http://localhost:8080/v1/eval-suites/$SUITE_ID/runs \
+  -H 'Content-Type: application/json' | jq -r '.id')
 wscat -c "ws://localhost:8080/v1/eval-runs/$EVAL_RUN_ID/events"
 
 # Expected output (one frame per event):
