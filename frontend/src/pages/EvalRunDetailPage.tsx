@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { api } from '../hooks/useApi'
-import type { EvalRun, EvalRunCompare, CompareChangeType } from '../api/types'
+import type { EvalRun, EvalRunCompare, CompareChangeType, TestCaseResult } from '../api/types'
 import { EvalRunResultsTable } from '../components/eval/EvalRunResultsTable'
 import { EvalRunStatusBadge } from '../components/eval/EvalRunStatusBadge'
 import { formatDuration } from '../utils/formatDuration'
+import { useEvalRunEvents } from '../hooks/useEvalRunEvents'
 
 export function EvalRunDetailPage() {
   const { run_id: runId } = useParams<{ run_id: string }>()
@@ -14,13 +15,17 @@ export function EvalRunDetailPage() {
   const [run, setRun] = useState<EvalRun | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [pollTick, setPollTick] = useState(0)
+  const [pollRetryTick, setPollRetryTick] = useState(0)
 
   const [completedSiblings, setCompletedSiblings] = useState<EvalRun[]>([])
   const [compareData, setCompareData] = useState<EvalRunCompare | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
 
+  // WebSocket streaming — always connects; fast-path for terminal runs.
+  const { liveResults, summary: wsSummary, isTerminal: wsTerminal, isConnected, connectionLost } = useEvalRunEvents(runId ?? null)
+
+  // Initial fetch.
   useEffect(() => {
     if (!runId) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -31,24 +36,37 @@ export function EvalRunDetailPage() {
       .finally(() => setLoading(false))
   }, [runId])
 
-  // Poll while running — increment pollTick on error so the effect re-triggers
-  // even when run hasn't changed, keeping the polling chain alive.
+  // When the WebSocket declares the run terminal, do a final REST fetch to get
+  // the authoritative summary counts and updated status from the DB.
   useEffect(() => {
-    if (!run || run.status === 'completed' || run.status === 'failed') return
+    if (!wsTerminal || !runId) return
+    api.getEvalRun(runId)
+      .then(r => setRun(r))
+      .catch(() => { /* non-critical: UI already has WS summary */ })
+  }, [wsTerminal, runId])
+
+  // Fallback poll: if the WS closed before a terminal event was received (e.g.
+  // a race where the run completed just before the server subscribed the client),
+  // poll every 2 s until the run reaches a terminal state. This mirrors the old
+  // polling behaviour and ensures the page never stays stuck.
+  useEffect(() => {
+    if (!connectionLost || !runId || wsTerminal) return
+    const isAlreadyTerminal = run?.status === 'completed' || run?.status === 'failed'
+    if (isAlreadyTerminal) return
+
     let alive = true
     const id = setTimeout(() => {
-      if (!runId) return
+      if (!alive || !runId) return
       api.getEvalRun(runId)
         .then(r => { if (alive) setRun(r) })
-        .catch(() => { if (alive) setPollTick(t => t + 1) })
+        .catch(() => { if (alive) setPollRetryTick(t => t + 1) })
     }, 2000)
     return () => { alive = false; clearTimeout(id) }
-  }, [run, runId, pollTick])
+  }, [connectionLost, run, runId, wsTerminal, pollRetryTick])
 
   // Load sibling completed runs for the baseline selector.
-  // Re-fires when run.status changes so a run that completes while the page is
-  // open appears in the selector without requiring a full page reload (C4).
-  // Passes limit=200 so deep-linked baselines beyond the default 50 are included (C3).
+  // Re-fires when run.status changes so a newly completed run appears in the
+  // selector without a full page reload.
   useEffect(() => {
     if (!run?.suite_id || !runId) return
     api.listEvalRuns(run.suite_id, { limit: 200 })
@@ -62,9 +80,6 @@ export function EvalRunDetailPage() {
   }, [run?.suite_id, runId, run?.status])
 
   // Fetch comparison data when a baseline is selected and the head run is completed.
-  // Guards against stale fetch results landing in state after the baseline is cleared
-  // by using an alive flag, matching the pattern in the poll effect above (C1).
-  // Only fires for 'completed' runs — a 'failed' head run is rejected by the backend (C2).
   useEffect(() => {
     if (!runId || !baselineRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -101,7 +116,29 @@ export function EvalRunDetailPage() {
   }
 
   const isTerminal = run.status === 'completed' || run.status === 'failed'
-  const results = run.test_case_results ?? []
+
+  // Prefer live-streamed results; fall back to whatever the REST fetch returned.
+  const displayResults: TestCaseResult[] = liveResults.length > 0
+    ? liveResults
+    : (run.test_case_results ?? [])
+
+  // While streaming, compute live counts from received results so the summary
+  // updates progressively rather than staying at zero until terminal.
+  // isLiveError mirrors the backend's isErr logic: workflow failed OR all graders errored
+  // (evaluableCount == 0). A result with workflow_run_status='succeeded' but all
+  // grader verdicts='error' is an error, not a failure.
+  const isLiveError = (r: TestCaseResult) =>
+    r.workflow_run_status === 'failed' ||
+    (r.grader_results.length > 0 && r.grader_results.every(gr => gr.verdict === 'error'))
+  const livePassedCount = liveResults.filter(r => r.passed).length
+  const liveErrorCount = liveResults.filter(isLiveError).length
+  const liveFailedCount = liveResults.length - livePassedCount - liveErrorCount
+
+  const displayTotalCases = run.total_cases
+  const displayPassedCount = isTerminal ? (wsSummary?.passed_count ?? run.passed_count) : livePassedCount
+  const displayFailedCount = isTerminal ? (wsSummary?.failed_count ?? run.failed_count) : liveFailedCount
+  const displayErrorCount  = isTerminal ? (wsSummary?.error_count  ?? run.error_count)  : liveErrorCount
+
   const duration = formatDuration(run.started_at, run.finished_at)
 
   const compareMap: Map<string, CompareChangeType> | undefined = compareData
@@ -121,8 +158,13 @@ export function EvalRunDetailPage() {
           </Link>
           <h1 className="text-xl font-bold text-gray-100">Eval Run</h1>
           <EvalRunStatusBadge status={run.status} />
-          {!isTerminal && (
-            <span className="text-xs text-amber-400 animate-pulse">Polling every 2s…</span>
+          {!isTerminal && isConnected && (
+            <span className="text-xs text-green-400 animate-pulse">
+              Live · {liveResults.length}/{displayTotalCases} complete
+            </span>
+          )}
+          {!isTerminal && !isConnected && (
+            <span className="text-xs text-amber-400">Connecting…</span>
           )}
         </div>
 
@@ -165,19 +207,19 @@ export function EvalRunDetailPage() {
         <div className="rounded-lg bg-gray-800 border border-gray-700 px-5 py-4 mb-4">
           <div className="grid grid-cols-4 gap-4 text-center">
             <div>
-              <div className="text-2xl font-bold text-gray-100">{run.total_cases}</div>
+              <div className="text-2xl font-bold text-gray-100">{displayTotalCases}</div>
               <div className="text-xs text-gray-500 mt-0.5">Total</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-green-400">{run.passed_count}</div>
+              <div className="text-2xl font-bold text-green-400">{displayPassedCount}</div>
               <div className="text-xs text-gray-500 mt-0.5">Passed</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-red-400">{run.failed_count}</div>
+              <div className="text-2xl font-bold text-red-400">{displayFailedCount}</div>
               <div className="text-xs text-gray-500 mt-0.5">Failed</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-amber-400">{run.error_count}</div>
+              <div className="text-2xl font-bold text-amber-400">{displayErrorCount}</div>
               <div className="text-xs text-gray-500 mt-0.5">Errors</div>
             </div>
           </div>
@@ -225,12 +267,12 @@ export function EvalRunDetailPage() {
           </div>
         )}
 
-        {/* Test case results */}
-        {results.length > 0 ? (
-          <EvalRunResultsTable results={results} compareMap={compareMap} />
+        {/* Test case results — appear progressively during streaming */}
+        {displayResults.length > 0 ? (
+          <EvalRunResultsTable results={displayResults} compareMap={compareMap} />
         ) : !isTerminal ? (
           <p className="text-center text-gray-500 text-sm py-8">
-            Test cases are running… results will appear here.
+            Waiting for first test case to complete…
           </p>
         ) : null}
       </div>

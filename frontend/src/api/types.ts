@@ -316,3 +316,29 @@ export interface ImportTestCasesResponse {
   skipped: number
   errors: Array<{ row: number; message: string }>
 }
+
+// ---------------------------------------------------------------------------
+// Eval WebSocket streaming
+// ---------------------------------------------------------------------------
+
+export type EvalEventType =
+  | 'eval.test_case.started'
+  | 'eval.test_case.completed'
+  | 'eval.run.completed'
+  | 'eval.run.failed'
+
+export interface EvalRunSummary {
+  total_cases: number
+  passed_count: number
+  failed_count: number
+  error_count: number
+}
+
+export interface EvalEvent {
+  eval_run_id: string
+  type: EvalEventType
+  timestamp: string
+  test_case_name?: string
+  result?: TestCaseResult
+  summary?: EvalRunSummary
+}
