@@ -11,6 +11,9 @@ interface EvalRunEventState {
   isTerminal: boolean
   // True while the WebSocket connection is open.
   isConnected: boolean
+  // True if the connection closed before a terminal event was received.
+  // The page should fall back to polling when this is set.
+  connectionLost: boolean
 }
 
 // useEvalRunEvents connects to GET /v1/eval-runs/{evalRunId}/events and streams
@@ -25,6 +28,7 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
   const [summary, setSummary] = useState<EvalRunSummary | null>(null)
   const [isTerminal, setIsTerminal] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
+  const [connectionLost, setConnectionLost] = useState(false)
 
   useEffect(() => {
     if (!evalRunId) return
@@ -33,6 +37,11 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
     setSummary(null)
     setIsTerminal(false)
     setIsConnected(false)
+    setConnectionLost(false)
+
+    // terminalReceived is a closure-local flag so onclose can check it without
+    // depending on the isTerminal React state (which may not have flushed yet).
+    let terminalReceived = false
 
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${scheme}://${location.host}/v1/eval-runs/${evalRunId}/events`)
@@ -55,6 +64,7 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
           return [...prev, result]
         })
       } else if (event.type === 'eval.run.completed' || event.type === 'eval.run.failed') {
+        terminalReceived = true
         if (event.summary) setSummary(event.summary)
         setIsTerminal(true)
         ws.close()
@@ -62,7 +72,15 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
     }
 
     ws.onerror = () => setIsConnected(false)
-    ws.onclose = () => setIsConnected(false)
+
+    ws.onclose = () => {
+      setIsConnected(false)
+      // If the connection dropped before we received a terminal event, signal the
+      // page so it can fall back to polling rather than staying stuck.
+      if (!terminalReceived) {
+        setConnectionLost(true)
+      }
+    }
 
     return () => {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
@@ -71,5 +89,5 @@ export function useEvalRunEvents(evalRunId: string | null): EvalRunEventState {
     }
   }, [evalRunId])
 
-  return { liveResults, summary, isTerminal, isConnected }
+  return { liveResults, summary, isTerminal, isConnected, connectionLost }
 }

@@ -22,7 +22,7 @@ export function EvalRunDetailPage() {
   const [compareError, setCompareError] = useState<string | null>(null)
 
   // WebSocket streaming — always connects; fast-path for terminal runs.
-  const { liveResults, summary: wsSummary, isTerminal: wsTerminal, isConnected } = useEvalRunEvents(runId ?? null)
+  const { liveResults, summary: wsSummary, isTerminal: wsTerminal, isConnected, connectionLost } = useEvalRunEvents(runId ?? null)
 
   // Initial fetch.
   useEffect(() => {
@@ -42,6 +42,25 @@ export function EvalRunDetailPage() {
       .then(r => setRun(r))
       .catch(() => { /* non-critical: UI already has WS summary */ })
   }, [wsTerminal, runId])
+
+  // Fallback poll: if the WS closed before a terminal event was received (e.g.
+  // a race where the run completed just before the server subscribed the client),
+  // poll every 2 s until the run reaches a terminal state. This mirrors the old
+  // polling behaviour and ensures the page never stays stuck.
+  useEffect(() => {
+    if (!connectionLost || !runId || wsTerminal) return
+    const isAlreadyTerminal = run?.status === 'completed' || run?.status === 'failed'
+    if (isAlreadyTerminal) return
+
+    let alive = true
+    const id = setTimeout(() => {
+      if (!alive || !runId) return
+      api.getEvalRun(runId)
+        .then(r => { if (alive) setRun(r) })
+        .catch(() => {})
+    }, 2000)
+    return () => { alive = false; clearTimeout(id) }
+  }, [connectionLost, run, runId, wsTerminal])
 
   // Load sibling completed runs for the baseline selector.
   // Re-fires when run.status changes so a newly completed run appears in the

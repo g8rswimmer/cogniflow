@@ -24,11 +24,29 @@ var evalWSUpgrader = websocket.Upgrader{
 //
 // For already-terminal runs, synthetic events are sent immediately from the DB
 // (one eval.test_case.completed per stored result, then the terminal event).
-// For live runs, Subscribe is called before the WebSocket upgrade to avoid
-// missing events published during the handshake.
+//
+// Subscribe is called BEFORE the terminal-status check to eliminate the race
+// where runAsync publishes eval.run.completed between the GetEvalRun call and
+// the Subscribe call — which would cause the live-path select to wait forever.
+// If the run is already terminal when we re-check after subscribing, we clean
+// up the subscription and fall back to the DB fast path.
 func (h *Handler) StreamEvalRunEvents(w http.ResponseWriter, r *http.Request) {
 	evalRunID := r.PathValue("eval_run_id")
 
+	if h.bus == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval event streaming not available")
+		return
+	}
+
+	// Subscribe FIRST so we cannot miss a publish that races with the terminal check.
+	events, cleanup := h.bus.Subscribe(evalRunID)
+	defer cleanup()
+
+	// Check terminal status AFTER subscribing.  If the run completed between the
+	// Subscribe call and this read, the terminal event is either:
+	//   (a) already in our channel (publish happened after subscribe), or
+	//   (b) was sent before subscribe (publish happened before subscribe) →
+	//       the DB is updated, so GetEvalRun returns terminal → fast path.
 	run, err := h.store.GetEvalRun(r.Context(), evalRunID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -51,7 +69,7 @@ func (h *Handler) StreamEvalRunEvents(w http.ResponseWriter, r *http.Request) {
 
 		conn, err := evalWSUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			slog.Error("eval ws: upgrade failed", "eval_run_id", evalRunID, "error", err)
+			slog.Error("eval ws: upgrade failed (terminal fast path)", "eval_run_id", evalRunID, "error", err)
 			return
 		}
 		defer conn.Close() //nolint:errcheck
@@ -59,15 +77,8 @@ func (h *Handler) StreamEvalRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Live run: subscribe BEFORE upgrading to avoid missing events published
-	// during the WebSocket handshake.
-	if h.bus == nil {
-		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "eval event streaming not available")
-		return
-	}
-	events, cleanup := h.bus.Subscribe(evalRunID)
-	defer cleanup()
-
+	// Live run: upgrade the connection now.  Subscription is already active, so
+	// events published during the upgrade handshake are buffered in `events`.
 	conn, err := evalWSUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("eval ws: upgrade failed", "eval_run_id", evalRunID, "error", err)
