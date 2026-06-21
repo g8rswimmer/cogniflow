@@ -105,6 +105,17 @@ func (m *fullMockStore) GetTestCaseResult(_ context.Context, _ string) (store.Te
 func (m *fullMockStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
 	return nil, nil
 }
+func (m *fullMockStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (m *fullMockStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
+	return nil, nil
+}
+func (m *fullMockStore) GetWorkflowVersion(_ context.Context, _ string, _ int) (store.WorkflowVersion, error) {
+	return store.WorkflowVersion{}, store.ErrNotFound
+}
+func (m *fullMockStore) DeleteWorkflowVersions(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
+	return store.Workflow{}, store.ErrNotFound
+}
 
 // ---- LoadAll tests ----------------------------------------------------------
 

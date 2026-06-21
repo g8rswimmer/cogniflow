@@ -90,6 +90,24 @@ type WorkflowSummary struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// WorkflowVersionSummary is a lightweight view of a workflow version for list responses.
+type WorkflowVersionSummary struct {
+	ID            string    `json:"id"`
+	WorkflowID    string    `json:"workflow_id"`
+	VersionNumber int       `json:"version_number"`
+	NodeCount     int       `json:"node_count"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// WorkflowVersion is a full point-in-time snapshot of a workflow definition.
+type WorkflowVersion struct {
+	ID            string    `json:"id"`
+	WorkflowID    string    `json:"workflow_id"`
+	VersionNumber int       `json:"version_number"`
+	Definition    Workflow  `json:"definition"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // RunStatus represents the lifecycle state of a workflow run.
 type RunStatus string
 
@@ -194,6 +212,13 @@ type Store interface {
 	ListWorkflows(ctx context.Context) ([]WorkflowSummary, error)
 	UpdateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error
+
+	// Workflow Versions
+	CreateWorkflowVersion(ctx context.Context, w Workflow) error
+	ListWorkflowVersions(ctx context.Context, workflowID string) ([]WorkflowVersionSummary, error)
+	GetWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (WorkflowVersion, error)
+	DeleteWorkflowVersions(ctx context.Context, workflowID string) error
+	RestoreWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (Workflow, error)
 
 	// Runs
 	CreateRun(ctx context.Context, r Run) (Run, error)

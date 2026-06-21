@@ -148,6 +148,15 @@ CREATE TABLE IF NOT EXISTS grader_registrations (
     config_schema TEXT     NOT NULL DEFAULT '{}',
     registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS workflow_versions (
+    id             TEXT     NOT NULL PRIMARY KEY,
+    workflow_id    TEXT     NOT NULL,
+    version_number INTEGER  NOT NULL,
+    node_count     INTEGER  NOT NULL DEFAULT 0,
+    definition     TEXT     NOT NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 // openTestDB opens an in-memory SQLite database, applies the test schema, and

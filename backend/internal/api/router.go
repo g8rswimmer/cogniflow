@@ -54,6 +54,13 @@ func NewRouter(
 	mux.HandleFunc("PUT /v1/workflows/{id}", wh.update)
 	mux.HandleFunc("DELETE /v1/workflows/{id}", wh.delete)
 
+	wvh := &workflowVersionHandler{store: st, triggers: tm}
+	// Literal-segment routes (/versions) must be registered before /{id} wildcards.
+	mux.HandleFunc("GET /v1/workflows/{id}/versions", wvh.listVersions)
+	// Restore must be registered before the plain version GET to avoid ambiguity.
+	mux.HandleFunc("POST /v1/workflows/{id}/versions/{version_number}/restore", wvh.restoreVersion)
+	mux.HandleFunc("GET /v1/workflows/{id}/versions/{version_number}", wvh.getVersion)
+
 	nth := &nodeTypeHandler{registry: registry}
 	mux.HandleFunc("GET /v1/node-types", nth.list)
 

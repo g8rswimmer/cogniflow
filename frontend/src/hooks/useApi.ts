@@ -2,6 +2,8 @@ import { request, API_BASE, ApiError } from '../api/client'
 import type {
   Workflow,
   WorkflowListResponse,
+  WorkflowVersionListResponse,
+  WorkflowVersionResponse,
   NodeTypesResponse,
   Run,
   RunListResponse,
@@ -40,6 +42,18 @@ export const api = {
 
   deleteWorkflow: (id: string) =>
     request<void>(`/workflows/${id}`, { method: 'DELETE' }),
+
+  // Workflow Version endpoints
+  listWorkflowVersions: (workflowId: string) =>
+    request<WorkflowVersionListResponse>(`/workflows/${workflowId}/versions`),
+
+  getWorkflowVersion: (workflowId: string, versionNumber: number) =>
+    request<WorkflowVersionResponse>(`/workflows/${workflowId}/versions/${versionNumber}`),
+
+  restoreWorkflowVersion: (workflowId: string, versionNumber: number) =>
+    request<Workflow>(`/workflows/${workflowId}/versions/${versionNumber}/restore`, {
+      method: 'POST',
+    }),
 
   listNodeTypes: () =>
     request<NodeTypesResponse>('/node-types'),

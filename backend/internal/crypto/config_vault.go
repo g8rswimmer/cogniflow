@@ -55,6 +55,9 @@ func (v *ConfigVault) ListWorkflows(ctx context.Context) ([]store.WorkflowSummar
 // If a sensitive field arrives with the masked sentinel "***", the existing
 // encrypted ciphertext is fetched from the inner store and preserved so that
 // a re-save without re-entering the key does not overwrite it with garbage.
+// After a successful inner store write, a version snapshot is created with the
+// encrypted-at-rest state (before decryption) so that sensitive values survive
+// a future restore without re-entry.
 func (v *ConfigVault) UpdateWorkflow(ctx context.Context, w store.Workflow) (store.Workflow, error) {
 	existing, err := v.inner.GetWorkflow(ctx, w.ID)
 	if err != nil {
@@ -65,7 +68,18 @@ func (v *ConfigVault) UpdateWorkflow(ctx context.Context, w store.Workflow) (sto
 		existingByID[existing.Nodes[i].ID] = &existing.Nodes[i]
 	}
 	v.encryptNodesPreserving(w.Nodes, existingByID)
-	return v.inner.UpdateWorkflow(ctx, w)
+	updated, err := v.inner.UpdateWorkflow(ctx, w)
+	if err != nil {
+		return store.Workflow{}, err
+	}
+	// Snapshot the encrypted-at-rest state as a version. Best-effort: a failure
+	// here is logged but does not fail the save. updated still has []byte ciphertexts
+	// at this point, which is exactly what CreateWorkflowVersion needs.
+	if vErr := v.inner.CreateWorkflowVersion(ctx, updated); vErr != nil {
+		slog.WarnContext(ctx, "config vault: workflow version snapshot failed",
+			"workflow_id", w.ID, "error", vErr)
+	}
+	return updated, nil
 }
 
 // encryptNodesPreserving encrypts like encryptNodes but, for any sensitive
@@ -123,6 +137,49 @@ func (v *ConfigVault) encryptNodesPreserving(nodes []store.WorkflowNode, existin
 // DeleteWorkflow delegates directly.
 func (v *ConfigVault) DeleteWorkflow(ctx context.Context, id string) error {
 	return v.inner.DeleteWorkflow(ctx, id)
+}
+
+// Workflow Version methods.
+
+// CreateWorkflowVersion delegates directly — the inner store is called with the
+// encrypted-at-rest workflow, so no re-encryption is needed here.
+func (v *ConfigVault) CreateWorkflowVersion(ctx context.Context, w store.Workflow) error {
+	return v.inner.CreateWorkflowVersion(ctx, w)
+}
+
+// ListWorkflowVersions delegates directly — summaries contain no sensitive config.
+func (v *ConfigVault) ListWorkflowVersions(ctx context.Context, workflowID string) ([]store.WorkflowVersionSummary, error) {
+	return v.inner.ListWorkflowVersions(ctx, workflowID)
+}
+
+// GetWorkflowVersion returns the version with sensitive config values decrypted.
+func (v *ConfigVault) GetWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (store.WorkflowVersion, error) {
+	ver, err := v.inner.GetWorkflowVersion(ctx, workflowID, versionNum)
+	if err != nil {
+		return store.WorkflowVersion{}, err
+	}
+	if err := v.decryptNodes(ver.Definition.Nodes); err != nil {
+		return store.WorkflowVersion{}, fmt.Errorf("config vault: decrypt version %d for workflow %s: %w", versionNum, workflowID, err)
+	}
+	return ver, nil
+}
+
+// DeleteWorkflowVersions delegates directly.
+func (v *ConfigVault) DeleteWorkflowVersions(ctx context.Context, workflowID string) error {
+	return v.inner.DeleteWorkflowVersions(ctx, workflowID)
+}
+
+// RestoreWorkflowVersion restores the workflow to a previous version and returns
+// the restored workflow with sensitive config values decrypted.
+func (v *ConfigVault) RestoreWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (store.Workflow, error) {
+	restored, err := v.inner.RestoreWorkflowVersion(ctx, workflowID, versionNum)
+	if err != nil {
+		return store.Workflow{}, err
+	}
+	if err := v.decryptNodes(restored.Nodes); err != nil {
+		return store.Workflow{}, fmt.Errorf("config vault: decrypt restored workflow %s: %w", workflowID, err)
+	}
+	return restored, nil
 }
 
 func (v *ConfigVault) GetWorkflowSchema(ctx context.Context, id string) (json.RawMessage, error) {

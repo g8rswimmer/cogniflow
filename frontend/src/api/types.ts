@@ -103,6 +103,30 @@ export interface WorkflowListResponse {
   workflows: WorkflowSummary[]
 }
 
+export interface WorkflowVersionSummary {
+  id: string
+  workflow_id: string
+  version_number: number
+  node_count: number
+  created_at: string
+}
+
+export interface WorkflowVersion {
+  id: string
+  workflow_id: string
+  version_number: number
+  definition: Workflow
+  created_at: string
+}
+
+export interface WorkflowVersionListResponse {
+  versions: WorkflowVersionSummary[]
+}
+
+export interface WorkflowVersionResponse {
+  version: WorkflowVersion
+}
+
 export interface FieldValidationError {
   node_id?: string
   field?: string

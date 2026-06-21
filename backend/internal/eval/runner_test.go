@@ -239,6 +239,17 @@ func (s *runnerStore) GetTestCaseResult(_ context.Context, id string) (store.Tes
 func (s *runnerStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
 	return nil, nil
 }
+func (s *runnerStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (s *runnerStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
+	return nil, nil
+}
+func (s *runnerStore) GetWorkflowVersion(_ context.Context, _ string, _ int) (store.WorkflowVersion, error) {
+	return store.WorkflowVersion{}, store.ErrNotFound
+}
+func (s *runnerStore) DeleteWorkflowVersions(_ context.Context, _ string) error { return nil }
+func (s *runnerStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
+	return store.Workflow{}, store.ErrNotFound
+}
 
 // ---- helpers ---------------------------------------------------------------
 
