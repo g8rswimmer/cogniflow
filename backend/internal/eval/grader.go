@@ -50,13 +50,16 @@ func BuildGrader(def store.GraderDef, factory LLMFactory, registry *grader_plugi
 			return nil, fmt.Errorf("checklist: %w", err)
 		}
 		return graders.NewChecklist(def, client)
-	default:
-		if registry != nil {
-			g, err := grader_plugin.NewPluginGrader(registry, def.Type, def.Config)
-			if err == nil {
-				return g, nil
-			}
+	case "plugin":
+		if registry == nil {
+			return nil, fmt.Errorf("plugin grader requires a grader registry")
 		}
+		typeID, _ := def.Config["plugin_type_id"].(string)
+		if typeID == "" {
+			return nil, fmt.Errorf("plugin grader: plugin_type_id must be set in config")
+		}
+		return grader_plugin.NewPluginGrader(registry, typeID, def.Config)
+	default:
 		return nil, fmt.Errorf("unknown grader type %q", def.Type)
 	}
 }

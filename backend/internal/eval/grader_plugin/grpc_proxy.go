@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -85,9 +86,21 @@ func (p *grpcProxy) grade(ctx context.Context, data map[string]any, config map[s
 		}
 	}
 
+	verdict := store.GraderVerdict(strings.ToLower(strings.TrimSpace(gr.GetVerdict())))
+	switch verdict {
+	case store.VerdictPass, store.VerdictFail, store.VerdictError:
+		// valid
+	default:
+		return store.GraderResult{
+			GraderType:  "plugin",
+			Verdict:     store.VerdictError,
+			Explanation: fmt.Sprintf("grader plugin %s: invalid verdict %q (must be \"pass\", \"fail\", or \"error\")", p.meta.TypeID, gr.GetVerdict()),
+		}
+	}
+
 	result := store.GraderResult{
 		GraderType:  "plugin",
-		Verdict:     store.GraderVerdict(gr.GetVerdict()),
+		Verdict:     verdict,
 		Explanation: gr.GetExplanation(),
 	}
 

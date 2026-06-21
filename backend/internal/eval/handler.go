@@ -1075,6 +1075,14 @@ func validateGraderConfigs(graders []store.GraderDef) []fieldValidationError {
 				})
 			}
 			errs = append(errs, validateLLMProvider(g.Config, prefix)...)
+		case "plugin":
+			typeID, _ := g.Config["plugin_type_id"].(string)
+			if typeID == "" {
+				errs = append(errs, fieldValidationError{
+					Field:   prefix + ".config.plugin_type_id",
+					Message: "plugin_type_id is required for plugin grader",
+				})
+			}
 		}
 	}
 	return errs

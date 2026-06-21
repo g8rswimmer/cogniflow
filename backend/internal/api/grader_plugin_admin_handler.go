@@ -107,7 +107,9 @@ func (h *graderPluginAdminHandler) update(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.store.SaveGraderRegistration(r.Context(), reg); err != nil {
-		_ = h.registry.Unregister(reg.TypeID)
+		// The new connection is already live in the registry via Replace; leave it
+		// so the grader continues to work. Do not call Unregister here — that would
+		// close the only working connection and leave the registry slot empty.
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR",
 			fmt.Sprintf("persisting registration: %s", err.Error()))
 		return
@@ -129,13 +131,16 @@ func (h *graderPluginAdminHandler) deregister(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := h.registry.Unregister(typeID); err != nil && !errors.Is(err, grader_plugin.ErrGraderNotFound) {
+	// Delete from DB first. If this fails, the in-memory proxy is still live and
+	// the grader remains usable — a cleaner failure mode than removing the proxy
+	// first and then failing to clean up the DB row.
+	if err := h.store.DeleteGraderRegistration(r.Context(), typeID); err != nil &&
+		!errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 
-	if err := h.store.DeleteGraderRegistration(r.Context(), typeID); err != nil &&
-		!errors.Is(err, store.ErrNotFound) {
+	if err := h.registry.Unregister(typeID); err != nil && !errors.Is(err, grader_plugin.ErrGraderNotFound) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
