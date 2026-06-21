@@ -33,6 +33,7 @@ export function GraderPluginAdminPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [])
 
   const handleRegister = async (e: React.FormEvent) => {
