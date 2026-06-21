@@ -30,7 +30,7 @@ func TestBuildGrader_StringMatch(t *testing.T) {
 	g, err := BuildGrader(store.GraderDef{
 		ID: "g1", Type: "string_match",
 		Config: map[string]any{"field_path": "x", "match_type": "exact", "expected_value": "ok"},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildGrader: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestBuildGrader_NumericThreshold(t *testing.T) {
 	g, err := BuildGrader(store.GraderDef{
 		ID: "g1", Type: "numeric_threshold",
 		Config: map[string]any{"field_path": "n", "operator": "==", "threshold": float64(42)},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildGrader: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestBuildGrader_JSONSchema(t *testing.T) {
 	g, err := BuildGrader(store.GraderDef{
 		ID: "g1", Type: "json_schema",
 		Config: map[string]any{"schema": map[string]any{"type": "object"}},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildGrader: %v", err)
 	}
@@ -69,14 +69,14 @@ func TestBuildGrader_JSONSchema(t *testing.T) {
 }
 
 func TestBuildGrader_LLMJudge_NilFactory(t *testing.T) {
-	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "llm_judge", Config: map[string]any{"rubric": "test"}}, nil)
+	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "llm_judge", Config: map[string]any{"rubric": "test"}}, nil, nil)
 	if err == nil {
 		t.Error("expected error for llm_judge with nil factory")
 	}
 }
 
 func TestBuildGrader_Checklist_NilFactory(t *testing.T) {
-	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "checklist", Config: map[string]any{"criteria": []any{"c1"}}}, nil)
+	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "checklist", Config: map[string]any{"criteria": []any{"c1"}}}, nil, nil)
 	if err == nil {
 		t.Error("expected error for checklist with nil factory")
 	}
@@ -93,7 +93,7 @@ func TestBuildGrader_LLMJudge_WithFactory(t *testing.T) {
 			"api_key":  "key",
 			"rubric":   "Is it good?",
 		},
-	}, okFactory(client))
+	}, okFactory(client), nil)
 	if err != nil {
 		t.Fatalf("BuildGrader: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestBuildGrader_Checklist_WithFactory(t *testing.T) {
 			"api_key":  "key",
 			"criteria": []any{"Is good"},
 		},
-	}, okFactory(client))
+	}, okFactory(client), nil)
 	if err != nil {
 		t.Fatalf("BuildGrader: %v", err)
 	}
@@ -135,15 +135,23 @@ func TestBuildGrader_LLMJudge_FactoryError(t *testing.T) {
 			"provider": "unknown_provider",
 			"rubric":   "test",
 		},
-	}, badFactory)
+	}, badFactory, nil)
 	if err == nil {
 		t.Error("expected error when factory fails")
 	}
 }
 
 func TestBuildGrader_Unknown(t *testing.T) {
-	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "bogus", Config: map[string]any{}}, nil)
+	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "bogus", Config: map[string]any{}}, nil, nil)
 	if err == nil {
 		t.Error("expected error for unknown grader type")
+	}
+}
+
+func TestBuildGrader_Unknown_NilRegistryFallsThrough(t *testing.T) {
+	// nil registry should not panic; unknown type must still error.
+	_, err := BuildGrader(store.GraderDef{ID: "g1", Type: "custom.grader", Config: map[string]any{}}, nil, nil)
+	if err == nil {
+		t.Error("expected error for unknown grader type with nil registry")
 	}
 }

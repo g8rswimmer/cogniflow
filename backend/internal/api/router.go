@@ -14,6 +14,7 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
 	"github.com/g8rswimmer/cogniflow/internal/eval"
+	"github.com/g8rswimmer/cogniflow/internal/eval/grader_plugin"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -34,6 +35,7 @@ func NewRouter(
 	eng *engine.WorkflowEngine,
 	cipher *crypto.Cipher,
 	tm *trigger.Manager,
+	graderRegistry *grader_plugin.GraderRegistry,
 	level *slog.LevelVar,
 ) http.Handler {
 	mux := http.NewServeMux()
@@ -71,10 +73,16 @@ func NewRouter(
 	mux.HandleFunc("PUT /v1/admin/plugins/{type_id}", pah.update)
 	mux.HandleFunc("DELETE /v1/admin/plugins/{type_id}", pah.deregister)
 
+	gpah := &graderPluginAdminHandler{store: st, registry: graderRegistry, registerFn: grader_plugin.RegisterOne}
+	mux.HandleFunc("GET /v1/admin/grader-plugins", gpah.list)
+	mux.HandleFunc("POST /v1/admin/grader-plugins", gpah.register)
+	mux.HandleFunc("PUT /v1/admin/grader-plugins/{type_id}", gpah.update)
+	mux.HandleFunc("DELETE /v1/admin/grader-plugins/{type_id}", gpah.deregister)
+
 	// Eval routes — suite CRUD, test case CRUD, and run execution.
 	vault := eval.NewGraderVault(cipher)
 	evalBus := eval.NewEvalEventBus()
-	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory(), evalBus)
+	runner := eval.NewEvalRunner(srvCtx, st, eng, vault, newLLMFactory(), graderRegistry, evalBus)
 
 	evalSched := eval.NewEvalScheduler(srvCtx, runner)
 	if cronSuites, err := st.ListEvalSuitesByCronTrigger(srvCtx); err != nil {

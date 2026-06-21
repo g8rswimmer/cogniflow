@@ -157,6 +157,16 @@ type RAGChunkResult struct {
 	Score     float32 `json:"score"`
 }
 
+// GraderRegistration is a persisted out-of-process gRPC grader plugin registration.
+type GraderRegistration struct {
+	TypeID       string          `json:"type_id"`
+	Address      string          `json:"address"`
+	DisplayName  string          `json:"display_name"`
+	Description  string          `json:"description,omitempty"`
+	ConfigSchema json.RawMessage `json:"config_schema"`
+	RegisteredAt time.Time       `json:"registered_at"`
+}
+
 // PluginRegistration is a persisted out-of-process gRPC plugin registration.
 // Plugins registered via PLUGIN_ADDRESSES (ephemeral) are not stored here.
 type PluginRegistration struct {
@@ -206,6 +216,12 @@ type Store interface {
 	GetPluginRegistration(ctx context.Context, typeID string) (PluginRegistration, error)
 	ListPluginRegistrations(ctx context.Context) ([]PluginRegistration, error)
 	DeletePluginRegistration(ctx context.Context, typeID string) error
+
+	// Grader Plugin Registrations
+	SaveGraderRegistration(ctx context.Context, reg GraderRegistration) error
+	GetGraderRegistration(ctx context.Context, typeID string) (GraderRegistration, error)
+	ListGraderRegistrations(ctx context.Context) ([]GraderRegistration, error)
+	DeleteGraderRegistration(ctx context.Context, typeID string) error
 
 	// Eval Suites
 	CreateEvalSuite(ctx context.Context, s EvalSuite) (EvalSuite, error)

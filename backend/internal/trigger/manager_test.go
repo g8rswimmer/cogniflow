@@ -36,6 +36,16 @@ func (m *fullMockStore) ListPluginRegistrations(_ context.Context) ([]store.Plug
 	return nil, nil
 }
 func (m *fullMockStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) SaveGraderRegistration(_ context.Context, _ store.GraderRegistration) error {
+	return nil
+}
+func (m *fullMockStore) GetGraderRegistration(_ context.Context, _ string) (store.GraderRegistration, error) {
+	return store.GraderRegistration{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRegistration, error) {
+	return nil, nil
+}
+func (m *fullMockStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
 func (m *fullMockStore) SaveRunNodeResults(_ context.Context, _ string, _ map[string]store.NodeResult) error {
 	return nil
 }

@@ -508,5 +508,5 @@ The following decisions were made during requirements authoring and are reflecte
 | ~~EF-02~~ | ~~CI webhook trigger — call `POST /v1/eval-suites/{id}/runs` from a pipeline with a token~~ |
 | ~~EF-03~~ | ~~Dataset import — generate TestCases from a CSV or JSONL file~~ |
 | ~~EF-04~~ | ~~Baseline comparison — diff two EvalRun results to surface regressions~~ |
-| EF-05 | Custom grader plugins via gRPC (mirrors node plugin protocol) |
+| ~~EF-05~~ | ~~Custom grader plugins via gRPC (mirrors node plugin protocol)~~ |
 | ~~EF-06~~ | ~~Eval result streaming via WebSocket for suites with many test cases~~ |

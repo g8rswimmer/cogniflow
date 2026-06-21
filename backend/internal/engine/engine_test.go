@@ -104,6 +104,16 @@ func (m *mockEngineStore) ListPluginRegistrations(_ context.Context) ([]store.Pl
 	return nil, nil
 }
 func (m *mockEngineStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (m *mockEngineStore) SaveGraderRegistration(_ context.Context, _ store.GraderRegistration) error {
+	return nil
+}
+func (m *mockEngineStore) GetGraderRegistration(_ context.Context, _ string) (store.GraderRegistration, error) {
+	return store.GraderRegistration{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRegistration, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
 func (m *mockEngineStore) CreateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
 	return v, nil
 }

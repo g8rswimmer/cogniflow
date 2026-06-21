@@ -15,6 +15,8 @@ import type {
   TriggerEvalRunResponse,
   EvalRunCompare,
   ImportTestCasesResponse,
+  GraderRegistration,
+  GraderPluginsResponse,
 } from '../api/types'
 
 export const api = {
@@ -123,6 +125,25 @@ export const api = {
     request<EvalRunCompare>(
       `/eval-runs/${headRunId}/compare?baseline_run_id=${encodeURIComponent(baselineRunId)}`
     ),
+
+  // Grader plugin admin
+  listGraderPlugins: () =>
+    request<GraderPluginsResponse>('/admin/grader-plugins'),
+
+  registerGraderPlugin: (address: string) =>
+    request<GraderRegistration>('/admin/grader-plugins', {
+      method: 'POST',
+      body: JSON.stringify({ address }),
+    }),
+
+  updateGraderPlugin: (typeId: string, address: string) =>
+    request<GraderRegistration>(`/admin/grader-plugins/${encodeURIComponent(typeId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ address }),
+    }),
+
+  deleteGraderPlugin: (typeId: string) =>
+    request<void>(`/admin/grader-plugins/${encodeURIComponent(typeId)}`, { method: 'DELETE' }),
 
   importTestCases: async (suiteId: string, file: File): Promise<ImportTestCasesResponse> => {
     const formData = new FormData()

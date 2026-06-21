@@ -12,10 +12,11 @@ import (
 
 // mockStore is an in-memory store.Store implementation for handler tests.
 type mockStore struct {
-	mu        sync.RWMutex
-	workflows map[string]store.Workflow
-	runs      map[string]store.Run
-	plugins   map[string]store.PluginRegistration
+	mu            sync.RWMutex
+	workflows     map[string]store.Workflow
+	runs          map[string]store.Run
+	plugins       map[string]store.PluginRegistration
+	graderPlugins map[string]store.GraderRegistration
 
 	// Per-method error overrides.
 	createErr        error
@@ -32,9 +33,10 @@ type mockStore struct {
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		workflows: make(map[string]store.Workflow),
-		runs:      make(map[string]store.Run),
-		plugins:   make(map[string]store.PluginRegistration),
+		workflows:     make(map[string]store.Workflow),
+		runs:          make(map[string]store.Run),
+		plugins:       make(map[string]store.PluginRegistration),
+		graderPlugins: make(map[string]store.GraderRegistration),
 	}
 }
 
@@ -236,6 +238,41 @@ func (m *mockStore) DeletePluginRegistration(_ context.Context, typeID string) e
 		return store.ErrNotFound
 	}
 	delete(m.plugins, typeID)
+	return nil
+}
+
+// Grader plugin registration methods — in-memory implementations.
+func (m *mockStore) SaveGraderRegistration(_ context.Context, reg store.GraderRegistration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.graderPlugins[reg.TypeID] = reg
+	return nil
+}
+func (m *mockStore) GetGraderRegistration(_ context.Context, typeID string) (store.GraderRegistration, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	r, ok := m.graderPlugins[typeID]
+	if !ok {
+		return store.GraderRegistration{}, store.ErrNotFound
+	}
+	return r, nil
+}
+func (m *mockStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRegistration, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	regs := make([]store.GraderRegistration, 0, len(m.graderPlugins))
+	for _, r := range m.graderPlugins {
+		regs = append(regs, r)
+	}
+	return regs, nil
+}
+func (m *mockStore) DeleteGraderRegistration(_ context.Context, typeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.graderPlugins[typeID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.graderPlugins, typeID)
 	return nil
 }
 

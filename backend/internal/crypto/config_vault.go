@@ -189,6 +189,21 @@ func (v *ConfigVault) DeletePluginRegistration(ctx context.Context, typeID strin
 	return v.inner.DeletePluginRegistration(ctx, typeID)
 }
 
+// Grader plugin registration methods — no sensitive fields; delegate directly.
+
+func (v *ConfigVault) SaveGraderRegistration(ctx context.Context, reg store.GraderRegistration) error {
+	return v.inner.SaveGraderRegistration(ctx, reg)
+}
+func (v *ConfigVault) GetGraderRegistration(ctx context.Context, typeID string) (store.GraderRegistration, error) {
+	return v.inner.GetGraderRegistration(ctx, typeID)
+}
+func (v *ConfigVault) ListGraderRegistrations(ctx context.Context) ([]store.GraderRegistration, error) {
+	return v.inner.ListGraderRegistrations(ctx)
+}
+func (v *ConfigVault) DeleteGraderRegistration(ctx context.Context, typeID string) error {
+	return v.inner.DeleteGraderRegistration(ctx, typeID)
+}
+
 // Eval methods — no sensitive fields; delegate directly.
 
 func (v *ConfigVault) CreateEvalSuite(ctx context.Context, s store.EvalSuite) (store.EvalSuite, error) {
