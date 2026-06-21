@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import type { GraderType } from '../../api/types'
+import { useState, useEffect } from 'react'
+import type { GraderType, GraderRegistration } from '../../api/types'
+import { api } from '../../hooks/useApi'
 
 const inputCls =
   'w-full rounded-md bg-gray-900 border border-gray-600 px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500'
@@ -343,6 +344,79 @@ function ChecklistFields({ config, onChange, errors }: ChecklistProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Plugin Grader
+// ---------------------------------------------------------------------------
+
+interface PluginGraderProps {
+  config: Record<string, unknown>
+  onChange: (config: Record<string, unknown>) => void
+  errors?: Record<string, string>
+}
+
+function PluginGraderFields({ config, onChange, errors }: PluginGraderProps) {
+  const [plugins, setPlugins] = useState<GraderRegistration[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const set = (k: string, v: unknown) => onChange({ ...config, [k]: v })
+
+  useEffect(() => {
+    api.listGraderPlugins()
+      .then(r => setPlugins(r.grader_plugins ?? []))
+      .catch(e => setLoadError(e instanceof Error ? e.message : 'Failed to load plugins'))
+  }, [])
+
+  return (
+    <div className="space-y-3">
+      <Field label="Plugin type" error={errors?.plugin_type_id}>
+        {loadError ? (
+          <p className="text-xs text-red-400">{loadError}</p>
+        ) : plugins.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            No grader plugins registered.{' '}
+            <a href="/admin/grader-plugins" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+              Register one
+            </a>
+          </p>
+        ) : (
+          <select
+            className={selectCls}
+            value={(config.plugin_type_id as string) ?? ''}
+            onChange={e => set('plugin_type_id', e.target.value)}
+          >
+            <option value="">— select plugin —</option>
+            {plugins.map(p => (
+              <option key={p.type_id} value={p.type_id}>{p.display_name} ({p.type_id})</option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <Field label="Config (JSON)" error={errors?.config}>
+        <textarea
+          rows={4}
+          className={`${inputCls} resize-y font-mono`}
+          placeholder="{}"
+          value={typeof config.plugin_config === 'string' ? config.plugin_config : JSON.stringify(config.plugin_config ?? {}, null, 2)}
+          onChange={e => {
+            try {
+              set('plugin_config', JSON.parse(e.target.value))
+            } catch {
+              set('plugin_config', e.target.value)
+            }
+          }}
+        />
+      </Field>
+      <Field label="Field path (optional)" error={errors?.field_path}>
+        <input
+          className={inputCls}
+          placeholder="n1.completion"
+          value={(config.field_path as string) ?? ''}
+          onChange={e => set('field_path', e.target.value)}
+        />
+      </Field>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -365,5 +439,7 @@ export function GraderTypeFields({ type, config, onChange, errors }: Props) {
       return <JSONSchemaFields config={config} onChange={onChange} errors={errors} />
     case 'checklist':
       return <ChecklistFields config={config} onChange={onChange} errors={errors} />
+    case 'plugin':
+      return <PluginGraderFields config={config} onChange={onChange} errors={errors} />
   }
 }

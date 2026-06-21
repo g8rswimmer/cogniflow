@@ -139,6 +139,15 @@ CREATE TABLE IF NOT EXISTS eval_test_case_results (
     passed              INTEGER  NOT NULL DEFAULT 0,
     created_at          DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS grader_registrations (
+    type_id       TEXT     NOT NULL PRIMARY KEY,
+    address       TEXT     NOT NULL,
+    display_name  TEXT     NOT NULL,
+    description   TEXT,
+    config_schema TEXT     NOT NULL DEFAULT '{}',
+    registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 // openTestDB opens an in-memory SQLite database, applies the test schema, and

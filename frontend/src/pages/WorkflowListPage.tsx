@@ -54,12 +54,21 @@ export function WorkflowListPage() {
       {/* Top bar */}
       <header className="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-gray-100">cogniflow</h1>
-        <Link
-          to="/workflows/new"
-          className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 transition-colors"
-        >
-          + New Workflow
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            to="/admin/grader-plugins"
+            className="rounded-lg border border-gray-600 hover:border-gray-500 text-gray-300 hover:text-gray-100 text-sm font-medium px-3 py-1.5 transition-colors"
+            title="Manage custom grader plugins"
+          >
+            ⚗ Grader Plugins
+          </Link>
+          <Link
+            to="/workflows/new"
+            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 transition-colors"
+          >
+            + New Workflow
+          </Link>
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">

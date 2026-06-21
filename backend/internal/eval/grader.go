@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
+	"github.com/g8rswimmer/cogniflow/internal/eval/grader_plugin"
 	"github.com/g8rswimmer/cogniflow/internal/eval/graders"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
@@ -20,7 +21,8 @@ type LLMFactory func(provider string) (aiprovider.LLMClient, error)
 
 // BuildGrader constructs the appropriate Grader for the given definition.
 // factory is required for llm_judge and checklist; pass nil for deterministic graders.
-func BuildGrader(def store.GraderDef, factory LLMFactory) (Grader, error) {
+// registry is required for plugin graders; pass nil to disable plugin grader support.
+func BuildGrader(def store.GraderDef, factory LLMFactory, registry *grader_plugin.GraderRegistry) (Grader, error) {
 	switch def.Type {
 	case "string_match":
 		return graders.NewStringMatch(def)
@@ -49,6 +51,12 @@ func BuildGrader(def store.GraderDef, factory LLMFactory) (Grader, error) {
 		}
 		return graders.NewChecklist(def, client)
 	default:
+		if registry != nil {
+			g, err := grader_plugin.NewPluginGrader(registry, def.Type, def.Config)
+			if err == nil {
+				return g, nil
+			}
+		}
 		return nil, fmt.Errorf("unknown grader type %q", def.Type)
 	}
 }

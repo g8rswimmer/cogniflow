@@ -68,6 +68,16 @@ func (s *vaultStubStore) ListPluginRegistrations(_ context.Context) ([]store.Plu
 	return nil, nil
 }
 func (s *vaultStubStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) SaveGraderRegistration(_ context.Context, _ store.GraderRegistration) error {
+	return nil
+}
+func (s *vaultStubStore) GetGraderRegistration(_ context.Context, _ string) (store.GraderRegistration, error) {
+	return store.GraderRegistration{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRegistration, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
 func (s *vaultStubStore) CreateEvalSuite(_ context.Context, v store.EvalSuite) (store.EvalSuite, error) {
 	return v, nil
 }

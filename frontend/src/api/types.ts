@@ -174,7 +174,7 @@ export interface TriggerRunResponse {
 
 export type EvalTriggerKind = 'none' | 'cron' | 'webhook'
 
-export type GraderType = 'string_match' | 'numeric_threshold' | 'llm_judge' | 'json_schema' | 'checklist'
+export type GraderType = 'string_match' | 'numeric_threshold' | 'llm_judge' | 'json_schema' | 'checklist' | 'plugin'
 export type GraderScope = 'workflow' | 'node'
 export type EvalRunStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type VerdictType = 'pass' | 'fail' | 'error'
@@ -315,6 +315,23 @@ export interface ImportTestCasesResponse {
   created: number
   skipped: number
   errors: Array<{ row: number; message: string }>
+}
+
+// ---------------------------------------------------------------------------
+// Grader Plugin Registrations
+// ---------------------------------------------------------------------------
+
+export interface GraderRegistration {
+  type_id: string
+  address: string
+  display_name: string
+  description?: string
+  config_schema: Record<string, unknown>
+  registered_at: string
+}
+
+export interface GraderPluginsResponse {
+  grader_plugins: GraderRegistration[]
 }
 
 // ---------------------------------------------------------------------------

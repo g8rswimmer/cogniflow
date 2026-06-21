@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/g8rswimmer/cogniflow/internal/engine"
+	"github.com/g8rswimmer/cogniflow/internal/eval/grader_plugin"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -28,22 +29,24 @@ type engineRunner interface {
 // EvalRunner orchestrates async execution of an EvalSuite: one workflow run per
 // test case, mock interception, grader evaluation, and result persistence.
 type EvalRunner struct {
-	store      store.Store
-	engine     engineRunner
-	vault      *GraderVault
-	llmFactory LLMFactory
-	bus        *EvalEventBus // nil disables streaming; all Publish calls are no-ops
-	ctx        context.Context // server-lifetime context; cancelled on shutdown
+	store          store.Store
+	engine         engineRunner
+	vault          *GraderVault
+	llmFactory     LLMFactory
+	graderRegistry *grader_plugin.GraderRegistry // nil disables plugin grader support
+	bus            *EvalEventBus                 // nil disables streaming; all Publish calls are no-ops
+	ctx            context.Context               // server-lifetime context; cancelled on shutdown
 }
 
 // NewEvalRunner creates an EvalRunner. ctx should be a server-lifetime context
 // so that background eval goroutines are cancelled when the server shuts down.
 // factory provides LLMClient instances for llm_judge and checklist graders; pass nil
 // to disable LLM graders (they will return an error verdict at evaluation time).
+// graderRegistry provides plugin grader lookups; pass nil to disable plugin grader support.
 // bus is the EvalEventBus used to stream live events to WebSocket clients; pass nil
 // to disable streaming.
-func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault, factory LLMFactory, bus *EvalEventBus) *EvalRunner {
-	return &EvalRunner{store: st, engine: eng, vault: vault, llmFactory: factory, bus: bus, ctx: ctx}
+func NewEvalRunner(ctx context.Context, st store.Store, eng *engine.WorkflowEngine, vault *GraderVault, factory LLMFactory, graderRegistry *grader_plugin.GraderRegistry, bus *EvalEventBus) *EvalRunner {
+	return &EvalRunner{store: st, engine: eng, vault: vault, llmFactory: factory, graderRegistry: graderRegistry, bus: bus, ctx: ctx}
 }
 
 // Execute creates an EvalRun record, starts async execution, and returns the run ID immediately.
@@ -300,7 +303,7 @@ func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc s
 			data = finalOutput
 		}
 
-		grader, err := BuildGrader(g, r.llmFactory)
+		grader, err := BuildGrader(g, r.llmFactory, r.graderRegistry)
 		if err != nil {
 			graderResults = append(graderResults, store.GraderResult{
 				GraderID:    g.ID,

@@ -9,6 +9,7 @@ const GRADER_TYPES: { value: GraderType; label: string }[] = [
   { value: 'llm_judge', label: 'LLM Judge' },
   { value: 'json_schema', label: 'JSON Schema' },
   { value: 'checklist', label: 'Checklist' },
+  { value: 'plugin', label: 'Custom Plugin' },
 ]
 
 const selectCls =

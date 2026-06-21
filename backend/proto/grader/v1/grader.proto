@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package grader.v1;
+
+option go_package = "github.com/g8rswimmer/cogniflow/proto/grader/v1;graderv1";
+
+// GraderPlugin is the service contract every out-of-process grader extension must implement.
+service GraderPlugin {
+  // Meta returns the static descriptor for this grader type.
+  // Called once at registration time.
+  rpc Meta(MetaRequest) returns (MetaResponse);
+
+  // Grade evaluates data against the grader's criteria and returns a verdict.
+  rpc Grade(GradeRequest) returns (GradeResponse);
+}
+
+message MetaRequest {}
+
+message MetaResponse {
+  string type_id      = 1;
+  string display_name = 2;
+  string description  = 3;
+  // JSON Schema (UTF-8 encoded) for the grader's config form fields.
+  bytes  config_schema = 4;
+}
+
+message GradeRequest {
+  // data is a JSON object (map[string]any) — the output to evaluate.
+  bytes data       = 1;
+  // config is a JSON object of the grader's configuration values.
+  bytes config     = 2;
+  // timeout_ms is the remaining evaluation budget in milliseconds.
+  int64 timeout_ms = 3;
+}
+
+message GradeResponse {
+  oneof result {
+    GradeResult  grade_result = 1;
+    GraderError  error        = 2;
+  }
+}
+
+message GradeResult {
+  // verdict is one of "pass", "fail", or "error".
+  string verdict     = 1;
+  string explanation = 2;
+  // score is optional; used by checklist-style graders (0.0–1.0).
+  optional double score = 3;
+  // criteria_results is optional JSON array of per-criterion objects:
+  // [{"criterion":"...","met":true,"explanation":"..."}]
+  bytes criteria_results = 4;
+  // actual_value is optional JSON of the resolved value that was inspected.
+  bytes actual_value = 5;
+}
+
+message GraderError {
+  string message = 1;
+  string code    = 2;
+}

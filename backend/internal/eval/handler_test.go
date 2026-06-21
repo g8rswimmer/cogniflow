@@ -395,6 +395,16 @@ func (s *stubStore) ListPluginRegistrations(_ context.Context) ([]store.PluginRe
 	return nil, nil
 }
 func (s *stubStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (s *stubStore) SaveGraderRegistration(_ context.Context, _ store.GraderRegistration) error {
+	return nil
+}
+func (s *stubStore) GetGraderRegistration(_ context.Context, _ string) (store.GraderRegistration, error) {
+	return store.GraderRegistration{}, store.ErrNotFound
+}
+func (s *stubStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRegistration, error) {
+	return nil, nil
+}
+func (s *stubStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
 
 // ---- Suite handler tests ---------------------------------------------------
 

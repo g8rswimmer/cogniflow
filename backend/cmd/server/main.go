@@ -31,6 +31,7 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/merge"
 	ragingest "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_ingest"
 	ragretrieve "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_retrieve"
+	"github.com/g8rswimmer/cogniflow/internal/eval/grader_plugin"
 	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
@@ -132,6 +133,10 @@ func run(logLevel *slog.LevelVar) error {
 	bus := engine.NewEventBus()
 	wfEngine := engine.NewWorkflowEngine(vault, registry, bus)
 
+	graderRegistry := grader_plugin.NewGraderRegistry()
+	defer graderRegistry.Shutdown()
+	grader_plugin.LoadFromStore(context.Background(), rawStore, graderRegistry)
+
 	triggerMgr := trigger.NewManager(vault, wfEngine)
 	loadCtx, loadCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer loadCancel()
@@ -150,7 +155,7 @@ func run(logLevel *slog.LevelVar) error {
 	// background goroutines (e.g. EvalRunner) to stop cleanly.
 	srvCtx, srvCancel := context.WithCancel(context.Background())
 
-	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, logLevel)
+	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, graderRegistry, logLevel)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)

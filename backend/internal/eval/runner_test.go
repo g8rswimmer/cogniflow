@@ -180,6 +180,16 @@ func (s *runnerStore) ListPluginRegistrations(_ context.Context) ([]store.Plugin
 	return nil, nil
 }
 func (s *runnerStore) DeletePluginRegistration(_ context.Context, _ string) error { return nil }
+func (s *runnerStore) SaveGraderRegistration(_ context.Context, _ store.GraderRegistration) error {
+	return nil
+}
+func (s *runnerStore) GetGraderRegistration(_ context.Context, _ string) (store.GraderRegistration, error) {
+	return store.GraderRegistration{}, store.ErrNotFound
+}
+func (s *runnerStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRegistration, error) {
+	return nil, nil
+}
+func (s *runnerStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
 func (s *runnerStore) CreateEvalSuite(_ context.Context, suite store.EvalSuite) (store.EvalSuite, error) {
 	return suite, nil
 }

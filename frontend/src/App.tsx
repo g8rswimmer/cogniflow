@@ -7,6 +7,7 @@ import { RunDetailPage } from './pages/RunDetailPage'
 import { EvalSuiteListPage } from './pages/EvalSuiteListPage'
 import { EvalSuiteDetailPage } from './pages/EvalSuiteDetailPage'
 import { EvalRunDetailPage } from './pages/EvalRunDetailPage'
+import { GraderPluginAdminPage } from './pages/GraderPluginAdminPage'
 import { ToastContainer } from './components/shared/ToastContainer'
 
 export default function App() {
@@ -67,6 +68,14 @@ export default function App() {
           element={
             <ErrorBoundary label="eval run detail">
               <EvalRunDetailPage />
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/admin/grader-plugins"
+          element={
+            <ErrorBoundary label="grader plugin admin">
+              <GraderPluginAdminPage />
             </ErrorBoundary>
           }
         />
