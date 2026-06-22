@@ -406,6 +406,9 @@ func (s *stubStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRe
 }
 func (s *stubStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
 func (s *stubStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (s *stubStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
 func (s *stubStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
 	return nil, nil
 }

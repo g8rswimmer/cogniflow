@@ -133,7 +133,7 @@ export function EvalRunDetailPage() {
     (r.grader_results.length > 0 && r.grader_results.every(gr => gr.verdict === 'error'))
   const livePassedCount = liveResults.filter(r => r.passed).length
   const liveErrorCount = liveResults.filter(isLiveError).length
-  const liveFailedCount = liveResults.length - livePassedCount - liveErrorCount
+  const liveFailedCount = Math.max(0, liveResults.length - livePassedCount - liveErrorCount)
 
   const displayTotalCases = run.total_cases
   const displayPassedCount = isTerminal ? (wsSummary?.passed_count ?? run.passed_count) : livePassedCount

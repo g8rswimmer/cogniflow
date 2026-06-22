@@ -135,6 +135,9 @@ func (s *vaultStubStore) ListTestCaseResults(_ context.Context, _ string) ([]sto
 	return nil, nil
 }
 func (s *vaultStubStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (s *vaultStubStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
 func (s *vaultStubStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
 	return nil, nil
 }

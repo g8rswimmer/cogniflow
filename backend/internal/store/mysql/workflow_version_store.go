@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -119,28 +118,18 @@ func snapshotToWorkflow(snap versionSnapshot) (store.Workflow, error) {
 
 // ---- Store methods ----------------------------------------------------------
 
-// CreateWorkflowVersion snapshots the supplied workflow (which must have []byte
-// ciphertexts in Config for any sensitive fields) as the next version number.
-// Called by ConfigVault.UpdateWorkflow after the inner store write succeeds,
-// before decryption, so the snapshot captures the encrypted-at-rest representation.
-func (s *WorkflowStore) CreateWorkflowVersion(ctx context.Context, w store.Workflow) error {
+// createWorkflowVersionInTx inserts the next version snapshot within an existing
+// transaction. SELECT MAX + INSERT are both within the caller's tx, so the version
+// number is assigned atomically with whatever else the tx is doing (e.g. a restore).
+func (s *WorkflowStore) createWorkflowVersionInTx(ctx context.Context, tx interface {
+	GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}, w store.Workflow) error {
 	snap := workflowToSnapshot(w)
 	defJSON, err := json.Marshal(snap)
 	if err != nil {
 		return fmt.Errorf("workflow version store: marshal definition: %w", err)
 	}
-
-	// Wrap SELECT MAX + INSERT in a transaction so the version_number is assigned
-	// atomically. The UNIQUE constraint on (workflow_id, version_number) provides a
-	// second layer of protection: if two concurrent saves race through this transaction,
-	// the losing INSERT fails with a unique-key error rather than silently inserting a
-	// duplicate version number.
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("workflow version store: begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	var maxVer sql.NullInt32
 	if err := tx.GetContext(ctx, &maxVer,
 		`SELECT MAX(version_number) FROM workflow_versions WHERE workflow_id=?`, w.ID); err != nil {
@@ -150,7 +139,6 @@ func (s *WorkflowStore) CreateWorkflowVersion(ctx context.Context, w store.Workf
 	if maxVer.Valid {
 		nextVer = int(maxVer.Int32) + 1
 	}
-
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_versions (id, workflow_id, version_number, node_count, definition, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -158,7 +146,40 @@ func (s *WorkflowStore) CreateWorkflowVersion(ctx context.Context, w store.Workf
 	); err != nil {
 		return fmt.Errorf("workflow version store: insert version: %w", err)
 	}
+	return nil
+}
+
+// CreateWorkflowVersion snapshots the supplied workflow (which must have []byte
+// ciphertexts in Config for any sensitive fields) as the next version number.
+// Called by ConfigVault after a successful inner store write, before decryption,
+// so the snapshot captures the encrypted-at-rest representation.
+func (s *WorkflowStore) CreateWorkflowVersion(ctx context.Context, w store.Workflow) error {
+	// Wrap in a transaction so the version_number is assigned atomically.
+	// The UNIQUE constraint on (workflow_id, version_number) is a second guard.
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("workflow version store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := s.createWorkflowVersionInTx(ctx, tx, w); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// GetLatestWorkflowVersionNumber returns the highest version number for a workflow,
+// or nil if no versions exist. Uses MAX(version_number) — O(1) with the index.
+func (s *WorkflowStore) GetLatestWorkflowVersionNumber(ctx context.Context, workflowID string) (*int, error) {
+	var v sql.NullInt32
+	if err := s.db.GetContext(ctx, &v,
+		`SELECT MAX(version_number) FROM workflow_versions WHERE workflow_id=?`, workflowID); err != nil {
+		return nil, fmt.Errorf("workflow version store: get latest version number: %w", err)
+	}
+	if !v.Valid {
+		return nil, nil
+	}
+	n := int(v.Int32)
+	return &n, nil
 }
 
 // ListWorkflowVersions returns all version summaries for a workflow, newest first.
@@ -217,6 +238,9 @@ func (s *WorkflowStore) GetWorkflowVersion(ctx context.Context, workflowID strin
 	if err != nil {
 		return store.WorkflowVersion{}, err
 	}
+	// Override the embedded ID with the authoritative workflow_id from the row,
+	// guarding against a snapshot that carries a stale or mismatched ID.
+	wf.ID = workflowID
 	return store.WorkflowVersion{
 		ID:            row.ID,
 		WorkflowID:    row.WorkflowID,
@@ -237,13 +261,20 @@ func (s *WorkflowStore) DeleteWorkflowVersions(ctx context.Context, workflowID s
 }
 
 // RestoreWorkflowVersion replaces the current workflow state with a prior snapshot.
-// It reconstructs the nodes (decoding base64 ciphertexts back to []byte) and
-// writes them via replaceNodesAndEdges so the encrypted_value column is populated
-// correctly — identical to a normal UpdateWorkflow write. After committing,
-// the restored state is snapshotted as the next version number (best-effort).
+// The definition fetch, node/edge replacement, workflow UPDATE, created_at read,
+// and the post-restore version snapshot all execute within a single transaction so
+// the restore is fully atomic — either everything commits or nothing does.
 func (s *WorkflowStore) RestoreWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (store.Workflow, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return store.Workflow{}, fmt.Errorf("workflow version store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Fetch the definition inside the tx so a concurrent DeleteWorkflowVersions
+	// cannot delete the row between our read and the subsequent writes.
 	var defStr string
-	err := s.db.GetContext(ctx, &defStr,
+	err = tx.GetContext(ctx, &defStr,
 		`SELECT definition FROM workflow_versions WHERE workflow_id=? AND version_number=?`,
 		workflowID, versionNum)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -268,12 +299,6 @@ func (s *WorkflowStore) RestoreWorkflowVersion(ctx context.Context, workflowID s
 		return store.Workflow{}, fmt.Errorf("workflow version store: marshal trigger: %w", err)
 	}
 
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return store.Workflow{}, fmt.Errorf("workflow version store: begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	if err := replaceNodesAndEdges(ctx, tx, workflowID, wf.Nodes, wf.Edges); err != nil {
 		return store.Workflow{}, err
 	}
@@ -291,24 +316,22 @@ func (s *WorkflowStore) RestoreWorkflowVersion(ctx context.Context, workflowID s
 		return store.Workflow{}, fmt.Errorf("workflow version store: workflow %q: %w", workflowID, store.ErrNotFound)
 	}
 
+	// Read created_at inside the tx — it is not stored in the snapshot.
+	var createdAt time.Time
+	if err := tx.GetContext(ctx, &createdAt, `SELECT created_at FROM workflows WHERE id=?`, workflowID); err != nil {
+		return store.Workflow{}, fmt.Errorf("workflow version store: read created_at: %w", err)
+	}
+	wf.UpdatedAt = now
+	wf.CreatedAt = createdAt
+
+	// Snapshot the restored state as the next version within the same transaction
+	// so the restore and its version record are committed atomically.
+	if err := s.createWorkflowVersionInTx(ctx, tx, wf); err != nil {
+		return store.Workflow{}, fmt.Errorf("workflow version store: post-restore snapshot: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow version store: commit restore: %w", err)
-	}
-
-	wf.UpdatedAt = now
-
-	// Re-read the workflow's created_at from the DB so the restore response carries
-	// the correct original creation timestamp (it is not stored in the version snapshot).
-	var createdAt time.Time
-	if err := s.db.GetContext(ctx, &createdAt, `SELECT created_at FROM workflows WHERE id=?`, workflowID); err == nil {
-		wf.CreatedAt = createdAt
-	}
-
-	// Snapshot the restored state as the next version. The restore is already committed
-	// so this is best-effort; a failure here is logged but does not roll back the restore.
-	if vErr := s.CreateWorkflowVersion(ctx, wf); vErr != nil {
-		slog.WarnContext(ctx, "workflow version store: post-restore snapshot failed",
-			"workflow_id", workflowID, "restored_from", versionNum, "error", vErr)
 	}
 
 	return wf, nil

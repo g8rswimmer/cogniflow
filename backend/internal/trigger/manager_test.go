@@ -106,6 +106,9 @@ func (m *fullMockStore) ListTestCaseResults(_ context.Context, _ string) ([]stor
 	return nil, nil
 }
 func (m *fullMockStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (m *fullMockStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
 func (m *fullMockStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
 	return nil, nil
 }

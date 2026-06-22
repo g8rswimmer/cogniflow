@@ -336,6 +336,9 @@ func (m *mockStore) ListTestCaseResults(_ context.Context, _ string) ([]store.Te
 	return nil, nil
 }
 func (m *mockStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (m *mockStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
 func (m *mockStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
 	return nil, nil
 }

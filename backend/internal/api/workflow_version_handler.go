@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
@@ -14,9 +15,31 @@ type workflowVersionHandler struct {
 	triggers triggerManager
 }
 
+// workflowVersionResponse is the response shape for a single version, with the
+// definition rendered through toWorkflowResponse so webhook_url is included and
+// nil nodes/edges are normalised to empty arrays.
+type workflowVersionResponse struct {
+	ID            string           `json:"id"`
+	WorkflowID    string           `json:"workflow_id"`
+	VersionNumber int              `json:"version_number"`
+	Definition    workflowResponse `json:"definition"`
+	CreatedAt     time.Time        `json:"created_at"`
+}
+
 // listVersions handles GET /v1/workflows/{id}/versions
 func (h *workflowVersionHandler) listVersions(w http.ResponseWriter, r *http.Request) {
 	workflowID := r.PathValue("id")
+
+	// Verify the workflow exists; return 404 rather than an empty list for unknown IDs.
+	if _, err := h.store.GetWorkflow(r.Context(), workflowID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "workflow not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
 	summaries, err := h.store.ListWorkflowVersions(r.Context(), workflowID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
@@ -48,7 +71,13 @@ func (h *workflowVersionHandler) getVersion(w http.ResponseWriter, r *http.Reque
 	}
 
 	maskSensitiveConfig(ver.Definition.Nodes)
-	writeJSON(w, http.StatusOK, map[string]any{"version": ver})
+	writeJSON(w, http.StatusOK, map[string]any{"version": workflowVersionResponse{
+		ID:            ver.ID,
+		WorkflowID:    ver.WorkflowID,
+		VersionNumber: ver.VersionNumber,
+		Definition:    toWorkflowResponse(ver.Definition),
+		CreatedAt:     ver.CreatedAt,
+	}})
 }
 
 // restoreVersion handles POST /v1/workflows/{id}/versions/{version_number}/restore

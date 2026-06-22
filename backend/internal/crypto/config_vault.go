@@ -157,6 +157,11 @@ func (v *ConfigVault) CreateWorkflowVersion(ctx context.Context, w store.Workflo
 	return v.inner.CreateWorkflowVersion(ctx, w)
 }
 
+// GetLatestWorkflowVersionNumber delegates directly — version numbers contain no sensitive data.
+func (v *ConfigVault) GetLatestWorkflowVersionNumber(ctx context.Context, workflowID string) (*int, error) {
+	return v.inner.GetLatestWorkflowVersionNumber(ctx, workflowID)
+}
+
 // ListWorkflowVersions delegates directly — summaries contain no sensitive config.
 func (v *ConfigVault) ListWorkflowVersions(ctx context.Context, workflowID string) ([]store.WorkflowVersionSummary, error) {
 	return v.inner.ListWorkflowVersions(ctx, workflowID)

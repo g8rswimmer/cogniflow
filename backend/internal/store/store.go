@@ -216,6 +216,7 @@ type Store interface {
 
 	// Workflow Versions
 	CreateWorkflowVersion(ctx context.Context, w Workflow) error
+	GetLatestWorkflowVersionNumber(ctx context.Context, workflowID string) (*int, error)
 	ListWorkflowVersions(ctx context.Context, workflowID string) ([]WorkflowVersionSummary, error)
 	GetWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (WorkflowVersion, error)
 	DeleteWorkflowVersions(ctx context.Context, workflowID string) error
