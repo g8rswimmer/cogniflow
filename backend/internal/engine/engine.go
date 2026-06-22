@@ -54,12 +54,21 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 		return RunHandle{}, fmt.Errorf("engine: build dag: %w", err)
 	}
 
+	// Capture the current workflow version so the run history can show which
+	// definition was active. Best-effort: a lookup failure leaves it nil.
+	var workflowVersionNumber *int
+	if versions, vErr := e.store.ListWorkflowVersions(ctx, wf.ID); vErr == nil && len(versions) > 0 {
+		n := versions[0].VersionNumber
+		workflowVersionNumber = &n
+	}
+
 	now := time.Now().UTC()
 	run, err := e.store.CreateRun(ctx, store.Run{
-		WorkflowID:  wf.ID,
-		TriggeredBy: req.TriggeredBy,
-		Status:      store.RunStatusRunning,
-		StartedAt:   &now,
+		WorkflowID:            wf.ID,
+		TriggeredBy:           req.TriggeredBy,
+		Status:                store.RunStatusRunning,
+		WorkflowVersionNumber: workflowVersionNumber,
+		StartedAt:             &now,
 	})
 	if err != nil {
 		return RunHandle{}, fmt.Errorf("engine: create run: %w", err)

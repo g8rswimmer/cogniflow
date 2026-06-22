@@ -173,6 +173,7 @@ export interface Run {
   workflow_id: string
   status: RunStatus
   triggered_by: 'manual' | 'webhook' | 'cron'
+  workflow_version_number: number | null
   started_at: string
   finished_at?: string
   final_output?: Record<string, Record<string, unknown>>

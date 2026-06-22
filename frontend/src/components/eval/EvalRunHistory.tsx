@@ -60,6 +60,9 @@ export function EvalRunHistory({ suiteId }: Props) {
                   >
                     <div className="min-w-0">
                       <span className="text-xs font-mono text-gray-400">{run.id.slice(0, 8)}…</span>
+                      {run.workflow_version_number != null && (
+                        <span className="text-xs font-medium text-indigo-400 ml-2">v{run.workflow_version_number}</span>
+                      )}
                       <span className="text-xs text-gray-600 ml-2">
                         {run.started_at
                           ? new Date(run.started_at).toLocaleString()

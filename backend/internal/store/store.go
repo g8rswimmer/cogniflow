@@ -127,15 +127,16 @@ type NodeResult struct {
 
 // Run is one execution instance of a workflow.
 type Run struct {
-	ID          string                `json:"run_id"`
-	WorkflowID  string                `json:"workflow_id"`
-	TriggeredBy string                `json:"triggered_by"`
-	Status      RunStatus             `json:"status"`
-	StartedAt   *time.Time            `json:"started_at,omitempty"`
-	FinishedAt  *time.Time            `json:"finished_at,omitempty"`
-	FinalOutput map[string]any        `json:"final_output,omitempty"`
-	ErrorDetail map[string]any        `json:"error_detail,omitempty"`
-	NodeResults map[string]NodeResult `json:"node_results,omitempty"`
+	ID                    string                `json:"run_id"`
+	WorkflowID            string                `json:"workflow_id"`
+	TriggeredBy           string                `json:"triggered_by"`
+	Status                RunStatus             `json:"status"`
+	WorkflowVersionNumber *int                  `json:"workflow_version_number"`
+	StartedAt             *time.Time            `json:"started_at,omitempty"`
+	FinishedAt            *time.Time            `json:"finished_at,omitempty"`
+	FinalOutput           map[string]any        `json:"final_output,omitempty"`
+	ErrorDetail           map[string]any        `json:"error_detail,omitempty"`
+	NodeResults           map[string]NodeResult `json:"node_results,omitempty"`
 }
 
 // RunFilter constrains ListRuns queries.

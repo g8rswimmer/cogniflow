@@ -61,15 +61,16 @@ CREATE TABLE IF NOT EXISTS node_configs (
 );
 
 CREATE TABLE IF NOT EXISTS runs (
-    id           TEXT     NOT NULL PRIMARY KEY,
-    workflow_id  TEXT     NOT NULL,
-    triggered_by TEXT     NOT NULL DEFAULT '',
-    status       TEXT     NOT NULL DEFAULT 'running',
-    started_at   DATETIME,
-    finished_at  DATETIME,
-    final_output TEXT,
-    error_detail TEXT,
-    node_results TEXT
+    id                      TEXT     NOT NULL PRIMARY KEY,
+    workflow_id             TEXT     NOT NULL,
+    triggered_by            TEXT     NOT NULL DEFAULT '',
+    status                  TEXT     NOT NULL DEFAULT 'running',
+    workflow_version_number INTEGER,
+    started_at              DATETIME,
+    finished_at             DATETIME,
+    final_output            TEXT,
+    error_detail            TEXT,
+    node_results            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS rag_documents (

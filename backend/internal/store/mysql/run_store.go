@@ -39,14 +39,15 @@ func (s *WorkflowStore) CreateRun(ctx context.Context, r store.Run) (store.Run, 
 	}
 
 	if _, err := tx.NamedExecContext(ctx,
-		`INSERT INTO runs (id, workflow_id, triggered_by, status, started_at)
-		 VALUES (:id, :workflow_id, :triggered_by, :status, :started_at)`,
+		`INSERT INTO runs (id, workflow_id, triggered_by, status, workflow_version_number, started_at)
+		 VALUES (:id, :workflow_id, :triggered_by, :status, :workflow_version_number, :started_at)`,
 		runWriteRow{
-			ID:          r.ID,
-			WorkflowID:  r.WorkflowID,
-			TriggeredBy: string(r.TriggeredBy),
-			Status:      string(r.Status),
-			StartedAt:   r.StartedAt,
+			ID:                    r.ID,
+			WorkflowID:            r.WorkflowID,
+			TriggeredBy:           string(r.TriggeredBy),
+			Status:                string(r.Status),
+			WorkflowVersionNumber: r.WorkflowVersionNumber,
+			StartedAt:             r.StartedAt,
 		},
 	); err != nil {
 		return store.Run{}, fmt.Errorf("run store: create run: %w", err)
@@ -96,8 +97,8 @@ func (s *WorkflowStore) UpdateRunStatus(ctx context.Context, runID string, statu
 func (s *WorkflowStore) GetRun(ctx context.Context, runID string) (store.Run, error) {
 	var row dbRun
 	err := s.db.GetContext(ctx, &row,
-		`SELECT id, workflow_id, triggered_by, status, started_at, finished_at,
-		        final_output, error_detail, node_results
+		`SELECT id, workflow_id, triggered_by, status, workflow_version_number,
+		        started_at, finished_at, final_output, error_detail, node_results
 		 FROM runs WHERE id=?`, runID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Run{}, store.ErrNotFound
@@ -124,8 +125,8 @@ func (s *WorkflowStore) SaveRunNodeResults(ctx context.Context, runID string, re
 func (s *WorkflowStore) ListRuns(ctx context.Context, f store.RunFilter) ([]store.Run, error) {
 	// node_results is intentionally excluded from list queries — it can be large
 	// and is only needed by the detail endpoint (GetRun).
-	q := `SELECT id, workflow_id, triggered_by, status, started_at, finished_at,
-	             final_output, error_detail
+	q := `SELECT id, workflow_id, triggered_by, status, workflow_version_number,
+	             started_at, finished_at, final_output, error_detail
 	      FROM runs WHERE workflow_id=?`
 	args := []any{f.WorkflowID}
 
@@ -165,23 +166,25 @@ func (s *WorkflowStore) ListRuns(ctx context.Context, f store.RunFilter) ([]stor
 // ---- row types -----------------------------------------------------------
 
 type dbRun struct {
-	ID          string     `db:"id"`
-	WorkflowID  string     `db:"workflow_id"`
-	TriggeredBy string     `db:"triggered_by"`
-	Status      string     `db:"status"`
-	StartedAt   *time.Time `db:"started_at"`
-	FinishedAt  *time.Time `db:"finished_at"`
-	FinalOutput []byte     `db:"final_output"`
-	ErrorDetail []byte     `db:"error_detail"`
-	NodeResults []byte     `db:"node_results"` // nullable; populated by SaveRunNodeResults
+	ID                    string     `db:"id"`
+	WorkflowID            string     `db:"workflow_id"`
+	TriggeredBy           string     `db:"triggered_by"`
+	Status                string     `db:"status"`
+	WorkflowVersionNumber *int       `db:"workflow_version_number"`
+	StartedAt             *time.Time `db:"started_at"`
+	FinishedAt            *time.Time `db:"finished_at"`
+	FinalOutput           []byte     `db:"final_output"`
+	ErrorDetail           []byte     `db:"error_detail"`
+	NodeResults           []byte     `db:"node_results"` // nullable; populated by SaveRunNodeResults
 }
 
 type runWriteRow struct {
-	ID          string     `db:"id"`
-	WorkflowID  string     `db:"workflow_id"`
-	TriggeredBy string     `db:"triggered_by"`
-	Status      string     `db:"status"`
-	StartedAt   *time.Time `db:"started_at"`
+	ID                    string     `db:"id"`
+	WorkflowID            string     `db:"workflow_id"`
+	TriggeredBy           string     `db:"triggered_by"`
+	Status                string     `db:"status"`
+	WorkflowVersionNumber *int       `db:"workflow_version_number"`
+	StartedAt             *time.Time `db:"started_at"`
 }
 
 type runUpdateRow struct {
@@ -194,12 +197,13 @@ type runUpdateRow struct {
 
 func rowToRun(row dbRun) (store.Run, error) {
 	r := store.Run{
-		ID:          row.ID,
-		WorkflowID:  row.WorkflowID,
-		TriggeredBy: row.TriggeredBy,
-		Status:      store.RunStatus(row.Status),
-		StartedAt:   row.StartedAt,
-		FinishedAt:  row.FinishedAt,
+		ID:                    row.ID,
+		WorkflowID:            row.WorkflowID,
+		TriggeredBy:           row.TriggeredBy,
+		Status:                store.RunStatus(row.Status),
+		WorkflowVersionNumber: row.WorkflowVersionNumber,
+		StartedAt:             row.StartedAt,
+		FinishedAt:            row.FinishedAt,
 	}
 	if len(row.FinalOutput) > 0 {
 		if err := json.Unmarshal(row.FinalOutput, &r.FinalOutput); err != nil {
