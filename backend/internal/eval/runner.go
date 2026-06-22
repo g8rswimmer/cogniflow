@@ -77,24 +77,39 @@ func (r *EvalRunner) Execute(ctx context.Context, suiteID string, triggeredBy st
 	if triggeredBy == "" {
 		triggeredBy = "manual"
 	}
+
+	// Record the workflow version active at the moment the run is triggered.
+	// This lets users correlate eval results with the exact workflow definition
+	// that was tested, especially useful for baseline comparisons.
+	// The resolved version is also passed into each engine.Run call via RunRequest
+	// so the engine does not re-query the DB for every test case (N+1 prevention).
+	var workflowVersionNumber *int
+	if vn, vErr := r.store.GetLatestWorkflowVersionNumber(ctx, suite.WorkflowID); vErr != nil {
+		slog.WarnContext(ctx, "eval runner: could not determine workflow version number",
+			"workflow_id", suite.WorkflowID, "error", vErr)
+	} else {
+		workflowVersionNumber = vn
+	}
+
 	evalRun, err := r.store.CreateEvalRun(ctx, store.EvalRun{
-		ID:          uuid.New().String(),
-		SuiteID:     suiteID,
-		TriggeredBy: triggeredBy,
-		Status:      store.EvalRunPending,
-		TotalCases:  len(testCases),
+		ID:                    uuid.New().String(),
+		SuiteID:               suiteID,
+		TriggeredBy:           triggeredBy,
+		Status:                store.EvalRunPending,
+		TotalCases:            len(testCases),
+		WorkflowVersionNumber: workflowVersionNumber,
 	})
 	if err != nil {
 		return "", fmt.Errorf("eval runner: create eval run: %w", err)
 	}
 
-	go r.runAsync(r.ctx, evalRun.ID, suite, testCases)
+	go r.runAsync(r.ctx, evalRun.ID, suite, testCases, workflowVersionNumber)
 
 	return evalRun.ID, nil
 }
 
 // runAsync drives the full eval run in a background goroutine.
-func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store.EvalSuite, testCases []store.TestCase) {
+func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store.EvalSuite, testCases []store.TestCase, workflowVersionNumber *int) {
 	if err := r.store.UpdateEvalRunStatus(ctx, evalRunID, store.EvalRunRunning, store.EvalRunCounts{}); err != nil {
 		slog.Error("eval runner: update status to running", "eval_run_id", evalRunID, "error", err)
 	}
@@ -127,7 +142,7 @@ func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store
 				TestCaseName: tc.Name,
 			})
 
-			result, passed, isErr := r.executeTestCase(ctx, evalRunID, tc, suite)
+			result, passed, isErr := r.executeTestCase(ctx, evalRunID, tc, suite, workflowVersionNumber)
 			outcomes[idx] = outcome{passed: passed, isErr: isErr}
 
 			if stored, err := r.store.CreateTestCaseResult(ctx, result); err != nil {
@@ -187,7 +202,7 @@ func (r *EvalRunner) runAsync(ctx context.Context, evalRunID string, suite store
 }
 
 // executeTestCase runs one test case and returns its result, whether it passed, and whether it errored.
-func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc store.TestCase, suite store.EvalSuite) (store.TestCaseResult, bool, bool) {
+func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc store.TestCase, suite store.EvalSuite, workflowVersionNumber *int) (store.TestCaseResult, bool, bool) {
 	// Build node mocks map.
 	nodeMocks := make(map[string]map[string]any, len(tc.Mocks))
 	for _, m := range tc.Mocks {
@@ -203,10 +218,11 @@ func (r *EvalRunner) executeTestCase(ctx context.Context, evalRunID string, tc s
 	}
 
 	req := trigger.RunRequest{
-		WorkflowID:  suite.WorkflowID,
-		InitialData: tc.InitialData,
-		TriggeredBy: "eval",
-		NodeMocks:   nodeMocks,
+		WorkflowID:            suite.WorkflowID,
+		InitialData:           tc.InitialData,
+		TriggeredBy:           "eval",
+		NodeMocks:             nodeMocks,
+		WorkflowVersionNumber: workflowVersionNumber,
 	}
 
 	handle, err := r.engine.Run(ctx, req)

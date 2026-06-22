@@ -405,6 +405,20 @@ func (s *stubStore) ListGraderRegistrations(_ context.Context) ([]store.GraderRe
 	return nil, nil
 }
 func (s *stubStore) DeleteGraderRegistration(_ context.Context, _ string) error { return nil }
+func (s *stubStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (s *stubStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
+func (s *stubStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
+	return nil, nil
+}
+func (s *stubStore) GetWorkflowVersion(_ context.Context, _ string, _ int) (store.WorkflowVersion, error) {
+	return store.WorkflowVersion{}, store.ErrNotFound
+}
+func (s *stubStore) DeleteWorkflowVersions(_ context.Context, _ string) error { return nil }
+func (s *stubStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
+	return store.Workflow{}, store.ErrNotFound
+}
 
 // ---- Suite handler tests ---------------------------------------------------
 

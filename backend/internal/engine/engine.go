@@ -54,12 +54,26 @@ func (e *WorkflowEngine) Run(ctx context.Context, req trigger.RunRequest) (RunHa
 		return RunHandle{}, fmt.Errorf("engine: build dag: %w", err)
 	}
 
+	// Capture the workflow version for the run record. If the caller already
+	// resolved it (e.g. the eval runner), use that value directly to avoid a
+	// redundant DB query per test case. Otherwise look up the latest version.
+	workflowVersionNumber := req.WorkflowVersionNumber
+	if workflowVersionNumber == nil {
+		if vn, vErr := e.store.GetLatestWorkflowVersionNumber(ctx, wf.ID); vErr != nil {
+			slog.WarnContext(ctx, "engine: could not determine workflow version number",
+				"workflow_id", wf.ID, "error", vErr)
+		} else {
+			workflowVersionNumber = vn
+		}
+	}
+
 	now := time.Now().UTC()
 	run, err := e.store.CreateRun(ctx, store.Run{
-		WorkflowID:  wf.ID,
-		TriggeredBy: req.TriggeredBy,
-		Status:      store.RunStatusRunning,
-		StartedAt:   &now,
+		WorkflowID:            wf.ID,
+		TriggeredBy:           req.TriggeredBy,
+		Status:                store.RunStatusRunning,
+		WorkflowVersionNumber: workflowVersionNumber,
+		StartedAt:             &now,
 	})
 	if err != nil {
 		return RunHandle{}, fmt.Errorf("engine: create run: %w", err)

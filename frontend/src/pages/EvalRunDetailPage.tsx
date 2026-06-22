@@ -18,6 +18,7 @@ export function EvalRunDetailPage() {
   const [pollRetryTick, setPollRetryTick] = useState(0)
 
   const [completedSiblings, setCompletedSiblings] = useState<EvalRun[]>([])
+  const [versionFilter, setVersionFilter] = useState<number | null>(null)
   const [compareData, setCompareData] = useState<EvalRunCompare | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
@@ -132,7 +133,7 @@ export function EvalRunDetailPage() {
     (r.grader_results.length > 0 && r.grader_results.every(gr => gr.verdict === 'error'))
   const livePassedCount = liveResults.filter(r => r.passed).length
   const liveErrorCount = liveResults.filter(isLiveError).length
-  const liveFailedCount = liveResults.length - livePassedCount - liveErrorCount
+  const liveFailedCount = Math.max(0, liveResults.length - livePassedCount - liveErrorCount)
 
   const displayTotalCases = run.total_cases
   const displayPassedCount = isTerminal ? (wsSummary?.passed_count ?? run.passed_count) : livePassedCount
@@ -169,39 +170,67 @@ export function EvalRunDetailPage() {
         </div>
 
         {/* Baseline selector — only shown for completed runs with available siblings */}
-        {run.status === 'completed' && completedSiblings.length > 0 && (
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-xs text-gray-500">Compare to:</span>
-            <select
-              value={baselineRunId}
-              onChange={e => {
-                const val = e.target.value
-                if (val) {
-                  setSearchParams({ baseline_run_id: val })
-                } else {
-                  setSearchParams({})
-                }
-              }}
-              className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-gray-400"
-            >
-              <option value="">— no baseline —</option>
-              {completedSiblings.map(r => (
-                <option key={r.id} value={r.id}>
-                  {r.id.slice(0, 8)}… ({new Date(r.created_at).toLocaleDateString()})
-                </option>
-              ))}
-            </select>
-            {baselineRunId && (
-              <button
-                type="button"
-                onClick={() => setSearchParams({})}
-                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        {run.status === 'completed' && completedSiblings.length > 0 && (() => {
+          const distinctVersions = Array.from(
+            new Set(completedSiblings.map(r => r.workflow_version_number).filter((v): v is number => v != null))
+          ).sort((a, b) => b - a)
+          const visibleSiblings = versionFilter == null
+            ? completedSiblings
+            : completedSiblings.filter(r => r.workflow_version_number === versionFilter)
+          return (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              {distinctVersions.length > 0 && (
+                <>
+                  <span className="text-xs text-gray-500">Version:</span>
+                  <select
+                    value={versionFilter ?? ''}
+                    onChange={e => {
+                      const val = e.target.value
+                      setVersionFilter(val === '' ? null : Number(val))
+                      setSearchParams({})
+                    }}
+                    className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-gray-400"
+                  >
+                    <option value="">All versions</option>
+                    {distinctVersions.map(v => (
+                      <option key={v} value={v}>v{v}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              <span className="text-xs text-gray-500">Compare to:</span>
+              <select
+                value={baselineRunId}
+                onChange={e => {
+                  const val = e.target.value
+                  if (val) {
+                    setSearchParams({ baseline_run_id: val })
+                  } else {
+                    setSearchParams({})
+                  }
+                }}
+                className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-gray-400"
               >
-                Clear
-              </button>
-            )}
-          </div>
-        )}
+                <option value="">— no baseline —</option>
+                {visibleSiblings.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.workflow_version_number != null ? `v${r.workflow_version_number} · ` : ''}
+                    {r.id.slice(0, 8)}… ({new Date(r.created_at).toLocaleDateString()})
+                  </option>
+                ))}
+              </select>
+              {baselineRunId && (
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({})}
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Summary */}
         <div className="rounded-lg bg-gray-800 border border-gray-700 px-5 py-4 mb-4">
@@ -223,12 +252,14 @@ export function EvalRunDetailPage() {
               <div className="text-xs text-gray-500 mt-0.5">Errors</div>
             </div>
           </div>
-          {run.started_at && (
-            <p className="text-xs text-gray-600 text-center mt-3">
-              Started {new Date(run.started_at).toLocaleString()}
-              {duration && <> · {duration}</>}
-            </p>
-          )}
+          <p className="text-xs text-gray-600 text-center mt-3">
+            {run.workflow_version_number != null && (
+              <span className="text-indigo-400 font-medium mr-2">v{run.workflow_version_number}</span>
+            )}
+            {run.started_at && (
+              <>Started {new Date(run.started_at).toLocaleString()}{duration && <> · {duration}</>}</>
+            )}
+          </p>
         </div>
 
         {/* Delta stats banner */}

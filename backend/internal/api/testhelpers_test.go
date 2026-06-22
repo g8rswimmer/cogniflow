@@ -335,3 +335,17 @@ func (m *mockStore) GetTestCaseResult(_ context.Context, _ string) (store.TestCa
 func (m *mockStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
 	return nil, nil
 }
+func (m *mockStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (m *mockStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
+func (m *mockStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
+	return nil, nil
+}
+func (m *mockStore) GetWorkflowVersion(_ context.Context, _ string, _ int) (store.WorkflowVersion, error) {
+	return store.WorkflowVersion{}, store.ErrNotFound
+}
+func (m *mockStore) DeleteWorkflowVersions(_ context.Context, _ string) error { return nil }
+func (m *mockStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
+	return store.Workflow{}, store.ErrNotFound
+}

@@ -766,18 +766,19 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":                run.ID,
-		"suite_id":          run.SuiteID,
-		"status":            run.Status,
-		"triggered_by":      run.TriggeredBy,
-		"total_cases":       run.TotalCases,
-		"passed_count":      run.PassedCount,
-		"failed_count":      run.FailedCount,
-		"error_count":       run.ErrorCount,
-		"started_at":        run.StartedAt,
-		"finished_at":       run.FinishedAt,
-		"created_at":        run.CreatedAt,
-		"test_case_results": results,
+		"id":                      run.ID,
+		"suite_id":                run.SuiteID,
+		"status":                  run.Status,
+		"triggered_by":            run.TriggeredBy,
+		"total_cases":             run.TotalCases,
+		"passed_count":            run.PassedCount,
+		"failed_count":            run.FailedCount,
+		"error_count":             run.ErrorCount,
+		"workflow_version_number": run.WorkflowVersionNumber,
+		"started_at":              run.StartedAt,
+		"finished_at":             run.FinishedAt,
+		"created_at":              run.CreatedAt,
+		"test_case_results":       results,
 	})
 }
 

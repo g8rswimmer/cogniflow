@@ -87,6 +87,22 @@ export function Navbar({ onSave, onRun, saving, running }: Props) {
           </Link>
         )}
 
+        {/* Version History link — shown only for saved workflows */}
+        {workflowId && (
+          <Link
+            to={`/workflows/${workflowId}/versions`}
+            className="
+              flex items-center gap-1.5 rounded-md border border-gray-600
+              bg-gray-700 hover:bg-gray-600 text-gray-200 px-2.5 py-1.5
+              text-xs font-medium transition-colors flex-shrink-0
+            "
+            title="Workflow version history"
+          >
+            <span>⏱</span>
+            <span>History</span>
+          </Link>
+        )}
+
         {/* Run button — enabled only when workflow is saved */}
         <button
           onClick={onRun}

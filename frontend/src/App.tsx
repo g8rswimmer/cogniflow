@@ -4,6 +4,8 @@ import { WorkflowListPage } from './pages/WorkflowListPage'
 import { WorkflowEditorPage } from './pages/WorkflowEditorPage'
 import { RunHistoryPage } from './pages/RunHistoryPage'
 import { RunDetailPage } from './pages/RunDetailPage'
+import { WorkflowVersionHistoryPage } from './pages/WorkflowVersionHistoryPage'
+import { WorkflowVersionDetailPage } from './pages/WorkflowVersionDetailPage'
 import { EvalSuiteListPage } from './pages/EvalSuiteListPage'
 import { EvalSuiteDetailPage } from './pages/EvalSuiteDetailPage'
 import { EvalRunDetailPage } from './pages/EvalRunDetailPage'
@@ -36,6 +38,22 @@ export default function App() {
           element={
             <ErrorBoundary label="run history">
               <RunHistoryPage />
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/workflows/:id/versions"
+          element={
+            <ErrorBoundary label="version history">
+              <WorkflowVersionHistoryPage />
+            </ErrorBoundary>
+          }
+        />
+        <Route
+          path="/workflows/:id/versions/:version_number"
+          element={
+            <ErrorBoundary label="version detail">
+              <WorkflowVersionDetailPage />
             </ErrorBoundary>
           }
         />

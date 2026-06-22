@@ -90,6 +90,24 @@ type WorkflowSummary struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// WorkflowVersionSummary is a lightweight view of a workflow version for list responses.
+type WorkflowVersionSummary struct {
+	ID            string    `json:"id"`
+	WorkflowID    string    `json:"workflow_id"`
+	VersionNumber int       `json:"version_number"`
+	NodeCount     int       `json:"node_count"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// WorkflowVersion is a full point-in-time snapshot of a workflow definition.
+type WorkflowVersion struct {
+	ID            string    `json:"id"`
+	WorkflowID    string    `json:"workflow_id"`
+	VersionNumber int       `json:"version_number"`
+	Definition    Workflow  `json:"definition"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // RunStatus represents the lifecycle state of a workflow run.
 type RunStatus string
 
@@ -109,15 +127,16 @@ type NodeResult struct {
 
 // Run is one execution instance of a workflow.
 type Run struct {
-	ID          string                `json:"run_id"`
-	WorkflowID  string                `json:"workflow_id"`
-	TriggeredBy string                `json:"triggered_by"`
-	Status      RunStatus             `json:"status"`
-	StartedAt   *time.Time            `json:"started_at,omitempty"`
-	FinishedAt  *time.Time            `json:"finished_at,omitempty"`
-	FinalOutput map[string]any        `json:"final_output,omitempty"`
-	ErrorDetail map[string]any        `json:"error_detail,omitempty"`
-	NodeResults map[string]NodeResult `json:"node_results,omitempty"`
+	ID                    string                `json:"run_id"`
+	WorkflowID            string                `json:"workflow_id"`
+	TriggeredBy           string                `json:"triggered_by"`
+	Status                RunStatus             `json:"status"`
+	WorkflowVersionNumber *int                  `json:"workflow_version_number"`
+	StartedAt             *time.Time            `json:"started_at,omitempty"`
+	FinishedAt            *time.Time            `json:"finished_at,omitempty"`
+	FinalOutput           map[string]any        `json:"final_output,omitempty"`
+	ErrorDetail           map[string]any        `json:"error_detail,omitempty"`
+	NodeResults           map[string]NodeResult `json:"node_results,omitempty"`
 }
 
 // RunFilter constrains ListRuns queries.
@@ -194,6 +213,14 @@ type Store interface {
 	ListWorkflows(ctx context.Context) ([]WorkflowSummary, error)
 	UpdateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error
+
+	// Workflow Versions
+	CreateWorkflowVersion(ctx context.Context, w Workflow) error
+	GetLatestWorkflowVersionNumber(ctx context.Context, workflowID string) (*int, error)
+	ListWorkflowVersions(ctx context.Context, workflowID string) ([]WorkflowVersionSummary, error)
+	GetWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (WorkflowVersion, error)
+	DeleteWorkflowVersions(ctx context.Context, workflowID string) error
+	RestoreWorkflowVersion(ctx context.Context, workflowID string, versionNum int) (Workflow, error)
 
 	// Runs
 	CreateRun(ctx context.Context, r Run) (Run, error)
@@ -356,17 +383,18 @@ const (
 
 // EvalRun is one async execution of an EvalSuite.
 type EvalRun struct {
-	ID          string        `json:"id"            db:"id"`
-	SuiteID     string        `json:"suite_id"      db:"suite_id"`
-	TriggeredBy string        `json:"triggered_by"  db:"triggered_by"`
-	Status      EvalRunStatus `json:"status"        db:"status"`
-	TotalCases  int           `json:"total_cases"   db:"total_cases"`
-	PassedCount int           `json:"passed_count"  db:"passed_count"`
-	FailedCount int           `json:"failed_count"  db:"failed_count"`
-	ErrorCount  int           `json:"error_count"   db:"error_count"`
-	StartedAt   *time.Time    `json:"started_at"    db:"started_at"`
-	FinishedAt  *time.Time    `json:"finished_at"   db:"finished_at"`
-	CreatedAt   time.Time     `json:"created_at"    db:"created_at"`
+	ID                    string        `json:"id"                               db:"id"`
+	SuiteID               string        `json:"suite_id"                         db:"suite_id"`
+	TriggeredBy           string        `json:"triggered_by"                     db:"triggered_by"`
+	Status                EvalRunStatus `json:"status"                           db:"status"`
+	TotalCases            int           `json:"total_cases"                      db:"total_cases"`
+	PassedCount           int           `json:"passed_count"                     db:"passed_count"`
+	FailedCount           int           `json:"failed_count"                     db:"failed_count"`
+	ErrorCount            int           `json:"error_count"                      db:"error_count"`
+	WorkflowVersionNumber *int          `json:"workflow_version_number"           db:"workflow_version_number"`
+	StartedAt             *time.Time    `json:"started_at"                       db:"started_at"`
+	FinishedAt            *time.Time    `json:"finished_at"                      db:"finished_at"`
+	CreatedAt             time.Time     `json:"created_at"                       db:"created_at"`
 }
 
 // EvalRunFilter constrains ListEvalRuns queries.

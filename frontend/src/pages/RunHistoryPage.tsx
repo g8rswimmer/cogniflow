@@ -55,8 +55,15 @@ export function RunHistoryPage() {
               className="flex items-center justify-between rounded-lg bg-gray-800 border border-gray-700 px-4 py-3 hover:bg-gray-700 transition-colors group cursor-pointer"
             >
               <div className="min-w-0">
-                <div className="text-sm font-mono text-gray-300 truncate group-hover:text-gray-100 transition-colors">
-                  {run.run_id}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-mono text-gray-300 truncate group-hover:text-gray-100 transition-colors">
+                    {run.run_id}
+                  </span>
+                  {run.workflow_version_number != null && (
+                    <span className="text-xs font-medium text-indigo-400 flex-shrink-0">
+                      v{run.workflow_version_number}
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
                   {new Date(run.started_at).toLocaleString()} · triggered by {run.triggered_by}

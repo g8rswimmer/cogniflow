@@ -61,15 +61,16 @@ CREATE TABLE IF NOT EXISTS node_configs (
 );
 
 CREATE TABLE IF NOT EXISTS runs (
-    id           TEXT     NOT NULL PRIMARY KEY,
-    workflow_id  TEXT     NOT NULL,
-    triggered_by TEXT     NOT NULL DEFAULT '',
-    status       TEXT     NOT NULL DEFAULT 'running',
-    started_at   DATETIME,
-    finished_at  DATETIME,
-    final_output TEXT,
-    error_detail TEXT,
-    node_results TEXT
+    id                      TEXT     NOT NULL PRIMARY KEY,
+    workflow_id             TEXT     NOT NULL,
+    triggered_by            TEXT     NOT NULL DEFAULT '',
+    status                  TEXT     NOT NULL DEFAULT 'running',
+    workflow_version_number INTEGER,
+    started_at              DATETIME,
+    finished_at             DATETIME,
+    final_output            TEXT,
+    error_detail            TEXT,
+    node_results            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS rag_documents (
@@ -114,17 +115,18 @@ CREATE TABLE IF NOT EXISTS eval_test_cases (
 );
 
 CREATE TABLE IF NOT EXISTS eval_runs (
-    id           TEXT     NOT NULL PRIMARY KEY,
-    suite_id     TEXT     NOT NULL,
-    triggered_by TEXT     NOT NULL DEFAULT 'manual',
-    status       TEXT     NOT NULL DEFAULT 'pending',
-    total_cases  INTEGER  NOT NULL DEFAULT 0,
-    passed_count INTEGER  NOT NULL DEFAULT 0,
-    failed_count INTEGER  NOT NULL DEFAULT 0,
-    error_count  INTEGER  NOT NULL DEFAULT 0,
-    started_at   DATETIME,
-    finished_at  DATETIME,
-    created_at   DATETIME NOT NULL
+    id                      TEXT     NOT NULL PRIMARY KEY,
+    suite_id                TEXT     NOT NULL,
+    triggered_by            TEXT     NOT NULL DEFAULT 'manual',
+    status                  TEXT     NOT NULL DEFAULT 'pending',
+    total_cases             INTEGER  NOT NULL DEFAULT 0,
+    passed_count            INTEGER  NOT NULL DEFAULT 0,
+    failed_count            INTEGER  NOT NULL DEFAULT 0,
+    error_count             INTEGER  NOT NULL DEFAULT 0,
+    workflow_version_number INTEGER,
+    started_at              DATETIME,
+    finished_at             DATETIME,
+    created_at              DATETIME NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS eval_test_case_results (
@@ -147,6 +149,16 @@ CREATE TABLE IF NOT EXISTS grader_registrations (
     description   TEXT,
     config_schema TEXT     NOT NULL DEFAULT '{}',
     registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS workflow_versions (
+    id             TEXT     NOT NULL PRIMARY KEY,
+    workflow_id    TEXT     NOT NULL,
+    version_number INTEGER  NOT NULL,
+    node_count     INTEGER  NOT NULL DEFAULT 0,
+    definition     TEXT     NOT NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (workflow_id, version_number)
 );
 `
 

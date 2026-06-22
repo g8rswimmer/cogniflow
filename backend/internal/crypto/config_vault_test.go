@@ -134,6 +134,20 @@ func (s *vaultStubStore) GetTestCaseResult(_ context.Context, _ string) (store.T
 func (s *vaultStubStore) ListTestCaseResults(_ context.Context, _ string) ([]store.TestCaseResult, error) {
 	return nil, nil
 }
+func (s *vaultStubStore) CreateWorkflowVersion(_ context.Context, _ store.Workflow) error { return nil }
+func (s *vaultStubStore) GetLatestWorkflowVersionNumber(_ context.Context, _ string) (*int, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) ListWorkflowVersions(_ context.Context, _ string) ([]store.WorkflowVersionSummary, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) GetWorkflowVersion(_ context.Context, _ string, _ int) (store.WorkflowVersion, error) {
+	return store.WorkflowVersion{}, store.ErrNotFound
+}
+func (s *vaultStubStore) DeleteWorkflowVersions(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
+	return store.Workflow{}, store.ErrNotFound
+}
 
 // stubNode has one sensitive field "api_key".
 type stubNode struct{}
