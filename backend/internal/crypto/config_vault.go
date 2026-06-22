@@ -27,9 +27,19 @@ func NewConfigVault(inner store.Store, cipher *Cipher, registry *node.NodeRegist
 }
 
 // CreateWorkflow encrypts sensitive config values before delegating to the inner store.
+// After a successful write, version 1 is snapshotted so the initial state is always
+// recoverable, consistent with how PUT snapshots every subsequent save.
 func (v *ConfigVault) CreateWorkflow(ctx context.Context, w store.Workflow) (store.Workflow, error) {
 	v.encryptNodes(w.Nodes)
-	return v.inner.CreateWorkflow(ctx, w)
+	created, err := v.inner.CreateWorkflow(ctx, w)
+	if err != nil {
+		return store.Workflow{}, err
+	}
+	if vErr := v.inner.CreateWorkflowVersion(ctx, created); vErr != nil {
+		slog.WarnContext(ctx, "config vault: initial workflow version snapshot failed",
+			"workflow_id", created.ID, "error", vErr)
+	}
+	return created, nil
 }
 
 // GetWorkflow delegates to the inner store then decrypts sensitive config values.
