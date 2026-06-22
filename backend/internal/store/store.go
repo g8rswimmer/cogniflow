@@ -389,7 +389,7 @@ type EvalRun struct {
 	PassedCount           int           `json:"passed_count"                     db:"passed_count"`
 	FailedCount           int           `json:"failed_count"                     db:"failed_count"`
 	ErrorCount            int           `json:"error_count"                      db:"error_count"`
-	WorkflowVersionNumber *int          `json:"workflow_version_number,omitempty" db:"workflow_version_number"`
+	WorkflowVersionNumber *int          `json:"workflow_version_number"           db:"workflow_version_number"`
 	StartedAt             *time.Time    `json:"started_at"                       db:"started_at"`
 	FinishedAt            *time.Time    `json:"finished_at"                      db:"finished_at"`
 	CreatedAt             time.Time     `json:"created_at"                       db:"created_at"`
