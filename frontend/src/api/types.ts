@@ -293,6 +293,7 @@ export interface EvalRun {
   passed_count: number
   failed_count: number
   error_count: number
+  workflow_version_number?: number
   started_at?: string
   finished_at?: string
   created_at: string

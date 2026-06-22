@@ -389,10 +389,10 @@ func (s *WorkflowStore) CreateEvalRun(ctx context.Context, r store.EvalRun) (sto
 	r.CreatedAt = time.Now().UTC()
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO eval_runs (id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO eval_runs (id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count, workflow_version_number, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.SuiteID, r.TriggeredBy, string(r.Status), r.TotalCases,
-		r.PassedCount, r.FailedCount, r.ErrorCount, r.CreatedAt,
+		r.PassedCount, r.FailedCount, r.ErrorCount, r.WorkflowVersionNumber, r.CreatedAt,
 	)
 	if err != nil {
 		return store.EvalRun{}, fmt.Errorf("eval store: create eval run: %w", err)
@@ -404,11 +404,11 @@ func (s *WorkflowStore) GetEvalRun(ctx context.Context, id string) (store.EvalRu
 	var row dbEvalRun
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count,
-		        started_at, finished_at, created_at
+		        workflow_version_number, started_at, finished_at, created_at
 		 FROM eval_runs WHERE id=?`, id,
 	).Scan(&row.ID, &row.SuiteID, &row.TriggeredBy, &row.Status, &row.TotalCases,
 		&row.PassedCount, &row.FailedCount, &row.ErrorCount,
-		&row.StartedAt, &row.FinishedAt, &row.CreatedAt)
+		&row.WorkflowVersionNumber, &row.StartedAt, &row.FinishedAt, &row.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.EvalRun{}, store.ErrNotFound
 	}
@@ -420,7 +420,7 @@ func (s *WorkflowStore) GetEvalRun(ctx context.Context, id string) (store.EvalRu
 
 func (s *WorkflowStore) ListEvalRuns(ctx context.Context, f store.EvalRunFilter) ([]store.EvalRun, error) {
 	q := `SELECT id, suite_id, triggered_by, status, total_cases, passed_count, failed_count, error_count,
-	             started_at, finished_at, created_at
+	             workflow_version_number, started_at, finished_at, created_at
 	      FROM eval_runs WHERE suite_id=?`
 	args := []any{f.SuiteID}
 
@@ -447,7 +447,7 @@ func (s *WorkflowStore) ListEvalRuns(ctx context.Context, f store.EvalRunFilter)
 		var row dbEvalRun
 		if err := dbRows.Scan(&row.ID, &row.SuiteID, &row.TriggeredBy, &row.Status,
 			&row.TotalCases, &row.PassedCount, &row.FailedCount, &row.ErrorCount,
-			&row.StartedAt, &row.FinishedAt, &row.CreatedAt); err != nil {
+			&row.WorkflowVersionNumber, &row.StartedAt, &row.FinishedAt, &row.CreatedAt); err != nil {
 			return nil, fmt.Errorf("eval store: scan eval run: %w", err)
 		}
 		runs = append(runs, rowToEvalRun(row))
@@ -654,17 +654,18 @@ type dbTestCase struct {
 }
 
 type dbEvalRun struct {
-	ID          string     `db:"id"`
-	SuiteID     string     `db:"suite_id"`
-	TriggeredBy string     `db:"triggered_by"`
-	Status      string     `db:"status"`
-	TotalCases  int        `db:"total_cases"`
-	PassedCount int        `db:"passed_count"`
-	FailedCount int        `db:"failed_count"`
-	ErrorCount  int        `db:"error_count"`
-	StartedAt   *time.Time `db:"started_at"`
-	FinishedAt  *time.Time `db:"finished_at"`
-	CreatedAt   time.Time  `db:"created_at"`
+	ID                    string     `db:"id"`
+	SuiteID               string     `db:"suite_id"`
+	TriggeredBy           string     `db:"triggered_by"`
+	Status                string     `db:"status"`
+	TotalCases            int        `db:"total_cases"`
+	PassedCount           int        `db:"passed_count"`
+	FailedCount           int        `db:"failed_count"`
+	ErrorCount            int        `db:"error_count"`
+	WorkflowVersionNumber *int       `db:"workflow_version_number"`
+	StartedAt             *time.Time `db:"started_at"`
+	FinishedAt            *time.Time `db:"finished_at"`
+	CreatedAt             time.Time  `db:"created_at"`
 }
 
 type dbTestCaseResult struct {
@@ -745,17 +746,18 @@ func rowToTestCase(row dbTestCase) (store.TestCase, error) {
 
 func rowToEvalRun(row dbEvalRun) store.EvalRun {
 	return store.EvalRun{
-		ID:          row.ID,
-		SuiteID:     row.SuiteID,
-		TriggeredBy: row.TriggeredBy,
-		Status:      store.EvalRunStatus(row.Status),
-		TotalCases:  row.TotalCases,
-		PassedCount: row.PassedCount,
-		FailedCount: row.FailedCount,
-		ErrorCount:  row.ErrorCount,
-		StartedAt:   row.StartedAt,
-		FinishedAt:  row.FinishedAt,
-		CreatedAt:   row.CreatedAt,
+		ID:                    row.ID,
+		SuiteID:               row.SuiteID,
+		TriggeredBy:           row.TriggeredBy,
+		Status:                store.EvalRunStatus(row.Status),
+		TotalCases:            row.TotalCases,
+		PassedCount:           row.PassedCount,
+		FailedCount:           row.FailedCount,
+		ErrorCount:            row.ErrorCount,
+		WorkflowVersionNumber: row.WorkflowVersionNumber,
+		StartedAt:             row.StartedAt,
+		FinishedAt:            row.FinishedAt,
+		CreatedAt:             row.CreatedAt,
 	}
 }
 

@@ -114,17 +114,18 @@ CREATE TABLE IF NOT EXISTS eval_test_cases (
 );
 
 CREATE TABLE IF NOT EXISTS eval_runs (
-    id           TEXT     NOT NULL PRIMARY KEY,
-    suite_id     TEXT     NOT NULL,
-    triggered_by TEXT     NOT NULL DEFAULT 'manual',
-    status       TEXT     NOT NULL DEFAULT 'pending',
-    total_cases  INTEGER  NOT NULL DEFAULT 0,
-    passed_count INTEGER  NOT NULL DEFAULT 0,
-    failed_count INTEGER  NOT NULL DEFAULT 0,
-    error_count  INTEGER  NOT NULL DEFAULT 0,
-    started_at   DATETIME,
-    finished_at  DATETIME,
-    created_at   DATETIME NOT NULL
+    id                      TEXT     NOT NULL PRIMARY KEY,
+    suite_id                TEXT     NOT NULL,
+    triggered_by            TEXT     NOT NULL DEFAULT 'manual',
+    status                  TEXT     NOT NULL DEFAULT 'pending',
+    total_cases             INTEGER  NOT NULL DEFAULT 0,
+    passed_count            INTEGER  NOT NULL DEFAULT 0,
+    failed_count            INTEGER  NOT NULL DEFAULT 0,
+    error_count             INTEGER  NOT NULL DEFAULT 0,
+    workflow_version_number INTEGER,
+    started_at              DATETIME,
+    finished_at             DATETIME,
+    created_at              DATETIME NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS eval_test_case_results (

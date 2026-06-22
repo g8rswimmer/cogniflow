@@ -77,12 +77,23 @@ func (r *EvalRunner) Execute(ctx context.Context, suiteID string, triggeredBy st
 	if triggeredBy == "" {
 		triggeredBy = "manual"
 	}
+
+	// Record the workflow version active at the moment the run is triggered.
+	// This lets users correlate eval results with the exact workflow definition
+	// that was tested, especially useful for baseline comparisons.
+	var workflowVersionNumber *int
+	if versions, vErr := r.store.ListWorkflowVersions(ctx, suite.WorkflowID); vErr == nil && len(versions) > 0 {
+		n := versions[0].VersionNumber // ListWorkflowVersions returns newest-first
+		workflowVersionNumber = &n
+	}
+
 	evalRun, err := r.store.CreateEvalRun(ctx, store.EvalRun{
-		ID:          uuid.New().String(),
-		SuiteID:     suiteID,
-		TriggeredBy: triggeredBy,
-		Status:      store.EvalRunPending,
-		TotalCases:  len(testCases),
+		ID:                    uuid.New().String(),
+		SuiteID:               suiteID,
+		TriggeredBy:           triggeredBy,
+		Status:                store.EvalRunPending,
+		TotalCases:            len(testCases),
+		WorkflowVersionNumber: workflowVersionNumber,
 	})
 	if err != nil {
 		return "", fmt.Errorf("eval runner: create eval run: %w", err)

@@ -187,6 +187,7 @@ export function EvalRunDetailPage() {
               <option value="">— no baseline —</option>
               {completedSiblings.map(r => (
                 <option key={r.id} value={r.id}>
+                  {r.workflow_version_number != null ? `v${r.workflow_version_number} · ` : ''}
                   {r.id.slice(0, 8)}… ({new Date(r.created_at).toLocaleDateString()})
                 </option>
               ))}
@@ -223,12 +224,14 @@ export function EvalRunDetailPage() {
               <div className="text-xs text-gray-500 mt-0.5">Errors</div>
             </div>
           </div>
-          {run.started_at && (
-            <p className="text-xs text-gray-600 text-center mt-3">
-              Started {new Date(run.started_at).toLocaleString()}
-              {duration && <> · {duration}</>}
-            </p>
-          )}
+          <p className="text-xs text-gray-600 text-center mt-3">
+            {run.workflow_version_number != null && (
+              <span className="text-indigo-400 font-medium mr-2">v{run.workflow_version_number}</span>
+            )}
+            {run.started_at && (
+              <>Started {new Date(run.started_at).toLocaleString()}{duration && <> · {duration}</>}</>
+            )}
+          </p>
         </div>
 
         {/* Delta stats banner */}
