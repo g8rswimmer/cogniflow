@@ -124,8 +124,25 @@ func snapshotToWorkflow(snap versionSnapshot) (store.Workflow, error) {
 // Called by ConfigVault.UpdateWorkflow after the inner store write succeeds,
 // before decryption, so the snapshot captures the encrypted-at-rest representation.
 func (s *WorkflowStore) CreateWorkflowVersion(ctx context.Context, w store.Workflow) error {
+	snap := workflowToSnapshot(w)
+	defJSON, err := json.Marshal(snap)
+	if err != nil {
+		return fmt.Errorf("workflow version store: marshal definition: %w", err)
+	}
+
+	// Wrap SELECT MAX + INSERT in a transaction so the version_number is assigned
+	// atomically. The UNIQUE constraint on (workflow_id, version_number) provides a
+	// second layer of protection: if two concurrent saves race through this transaction,
+	// the losing INSERT fails with a unique-key error rather than silently inserting a
+	// duplicate version number.
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("workflow version store: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	var maxVer sql.NullInt32
-	if err := s.db.GetContext(ctx, &maxVer,
+	if err := tx.GetContext(ctx, &maxVer,
 		`SELECT MAX(version_number) FROM workflow_versions WHERE workflow_id=?`, w.ID); err != nil {
 		return fmt.Errorf("workflow version store: get max version: %w", err)
 	}
@@ -134,21 +151,14 @@ func (s *WorkflowStore) CreateWorkflowVersion(ctx context.Context, w store.Workf
 		nextVer = int(maxVer.Int32) + 1
 	}
 
-	snap := workflowToSnapshot(w)
-	defJSON, err := json.Marshal(snap)
-	if err != nil {
-		return fmt.Errorf("workflow version store: marshal definition: %w", err)
-	}
-
-	_, err = s.db.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_versions (id, workflow_id, version_number, node_count, definition, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		newUUID(), w.ID, nextVer, len(w.Nodes), string(defJSON), time.Now().UTC(),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("workflow version store: insert version: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListWorkflowVersions returns all version summaries for a workflow, newest first.
@@ -269,12 +279,16 @@ func (s *WorkflowStore) RestoreWorkflowVersion(ctx context.Context, workflowID s
 	}
 
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`UPDATE workflows SET name=?, description=?, trigger_kind=?, trigger_config=?, timeout_seconds=?, initial_data_schema=?, updated_at=? WHERE id=?`,
 		wf.Name, wf.Description, wf.Trigger.Kind, string(triggerCfgBytes),
 		wf.TimeoutSeconds, rawMessageToPtr(wf.InitialDataSchema), now, workflowID,
-	); err != nil {
+	)
+	if err != nil {
 		return store.Workflow{}, fmt.Errorf("workflow version store: update workflow: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.Workflow{}, fmt.Errorf("workflow version store: workflow %q: %w", workflowID, store.ErrNotFound)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -282,6 +296,13 @@ func (s *WorkflowStore) RestoreWorkflowVersion(ctx context.Context, workflowID s
 	}
 
 	wf.UpdatedAt = now
+
+	// Re-read the workflow's created_at from the DB so the restore response carries
+	// the correct original creation timestamp (it is not stored in the version snapshot).
+	var createdAt time.Time
+	if err := s.db.GetContext(ctx, &createdAt, `SELECT created_at FROM workflows WHERE id=?`, workflowID); err == nil {
+		wf.CreatedAt = createdAt
+	}
 
 	// Snapshot the restored state as the next version. The restore is already committed
 	// so this is best-effort; a failure here is logged but does not roll back the restore.

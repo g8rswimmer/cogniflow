@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS workflow_versions (
     version_number INTEGER  NOT NULL,
     node_count     INTEGER  NOT NULL DEFAULT 0,
     definition     TEXT     NOT NULL,
-    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (workflow_id, version_number)
 );
 `
 

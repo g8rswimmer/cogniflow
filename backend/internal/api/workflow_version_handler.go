@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -69,13 +70,17 @@ func (h *workflowVersionHandler) restoreVersion(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Re-arm the trigger manager with the restored trigger config.
+	// Re-arm the trigger manager with the restored trigger config. The restore is
+	// already committed to the DB at this point, so a trigger failure is logged as
+	// a warning rather than returning 500 (which would cause clients to retry and
+	// create a duplicate version snapshot). The scheduler will reload the correct
+	// trigger from the DB on the next server restart.
 	if tErr := h.triggers.Upsert(workflowID, store.TriggerConfig{
 		Kind:     restored.Trigger.Kind,
 		CronExpr: restored.Trigger.CronExpr,
 	}); tErr != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "restore succeeded but trigger update failed: "+tErr.Error())
-		return
+		slog.WarnContext(r.Context(), "version restore: trigger re-arm failed (restore committed)",
+			"workflow_id", workflowID, "version", versionNum, "error", tErr)
 	}
 
 	maskSensitiveConfig(restored.Nodes)
