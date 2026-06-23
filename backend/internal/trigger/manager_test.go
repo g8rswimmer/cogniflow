@@ -245,3 +245,119 @@ func TestManager_Remove_NilManager(t *testing.T) {
 	var m *Manager
 	m.Remove("wf-1") // must not panic
 }
+
+// ---- Kafka trigger tests -----------------------------------------------------
+
+func TestManager_Upsert_KafkaArmsConsumer(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	err := m.Upsert("wf-kafka", store.TriggerConfig{
+		Kind:         "kafka",
+		KafkaBrokers: "localhost:9092",
+		KafkaTopic:   "test-topic",
+	})
+	if err != nil {
+		t.Fatalf("Upsert kafka: %v", err)
+	}
+	m.mu.Lock()
+	_, exists := m.consumers["wf-kafka"]
+	m.mu.Unlock()
+	if !exists {
+		t.Error("expected consumer entry for kafka workflow")
+	}
+	m.Stop()
+}
+
+func TestManager_Upsert_KafkaMissingBrokersReturnsError(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	err := m.Upsert("wf-kafka", store.TriggerConfig{
+		Kind:       "kafka",
+		KafkaTopic: "test-topic",
+	})
+	if err == nil {
+		t.Error("expected error when kafka_brokers is missing")
+	}
+}
+
+func TestManager_Upsert_KafkaReplacesExistingConsumer(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	_ = m.Upsert("wf-1", store.TriggerConfig{
+		Kind:         "kafka",
+		KafkaBrokers: "localhost:9092",
+		KafkaTopic:   "topic-a",
+	})
+	_ = m.Upsert("wf-1", store.TriggerConfig{
+		Kind:         "kafka",
+		KafkaBrokers: "localhost:9092",
+		KafkaTopic:   "topic-b",
+	})
+	m.mu.Lock()
+	n := len(m.consumers)
+	m.mu.Unlock()
+	if n != 1 {
+		t.Errorf("want 1 consumer after two kafka upserts for same workflow, got %d", n)
+	}
+	m.Stop()
+}
+
+func TestManager_Upsert_SwitchFromKafkaToCronStopsConsumer(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	_ = m.Upsert("wf-1", store.TriggerConfig{
+		Kind:         "kafka",
+		KafkaBrokers: "localhost:9092",
+		KafkaTopic:   "topic-a",
+	})
+	// Switch to cron; the consumer goroutine should be cancelled.
+	if err := m.Upsert("wf-1", store.TriggerConfig{Kind: "cron", CronExpr: "* * * * *"}); err != nil {
+		t.Fatalf("Upsert cron: %v", err)
+	}
+	m.mu.Lock()
+	_, hasConsumer := m.consumers["wf-1"]
+	m.mu.Unlock()
+	if hasConsumer {
+		t.Error("consumer entry should be removed after switching to cron")
+	}
+	if m.cron.entryCount() != 1 {
+		t.Errorf("want 1 cron entry, got %d", m.cron.entryCount())
+	}
+	m.Stop()
+}
+
+func TestManager_Remove_StopsKafkaConsumer(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	_ = m.Upsert("wf-1", store.TriggerConfig{
+		Kind:         "kafka",
+		KafkaBrokers: "localhost:9092",
+		KafkaTopic:   "topic-a",
+	})
+	m.Remove("wf-1")
+	m.mu.Lock()
+	_, hasConsumer := m.consumers["wf-1"]
+	m.mu.Unlock()
+	if hasConsumer {
+		t.Error("expected consumer to be removed after Remove")
+	}
+}
+
+// ---- SQS trigger tests -------------------------------------------------------
+
+func TestManager_Upsert_SQSMissingURLReturnsError(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	err := m.Upsert("wf-sqs", store.TriggerConfig{
+		Kind:      "sqs",
+		SQSRegion: "us-east-1",
+	})
+	if err == nil {
+		t.Error("expected error when sqs_queue_url is missing")
+	}
+}
+
+func TestManager_Upsert_SQSMissingRegionReturnsError(t *testing.T) {
+	m := NewManager(&fullMockStore{}, &mockDispatcher{})
+	err := m.Upsert("wf-sqs", store.TriggerConfig{
+		Kind:        "sqs",
+		SQSQueueURL: "https://sqs.us-east-1.amazonaws.com/123/q",
+	})
+	if err == nil {
+		t.Error("expected error when sqs_region is missing")
+	}
+}

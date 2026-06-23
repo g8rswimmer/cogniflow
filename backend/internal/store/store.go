@@ -60,8 +60,17 @@ type WorkflowEdge struct {
 
 // Trigger describes how a workflow is activated.
 type Trigger struct {
-	Kind     string `json:"kind"`                // manual | webhook | cron
+	Kind     string `json:"kind"`                // manual | webhook | cron | kafka | sqs
 	CronExpr string `json:"cron_expr,omitempty"` // when kind == cron
+
+	// Kafka trigger fields
+	KafkaBrokers string `json:"kafka_brokers,omitempty"` // comma-separated host:port list
+	KafkaTopic   string `json:"kafka_topic,omitempty"`
+	KafkaGroupID string `json:"kafka_group_id,omitempty"` // defaults to "cogniflow-{workflowID}"
+
+	// SQS trigger fields
+	SQSQueueURL string `json:"sqs_queue_url,omitempty"`
+	SQSRegion   string `json:"sqs_region,omitempty"`
 }
 
 // Workflow is the full definition of a workflow including its graph.
@@ -152,6 +161,15 @@ type RunFilter struct {
 type TriggerConfig struct {
 	Kind     string
 	CronExpr string
+
+	// Kafka
+	KafkaBrokers string
+	KafkaTopic   string
+	KafkaGroupID string
+
+	// SQS
+	SQSQueueURL string
+	SQSRegion   string
 }
 
 // WorkflowTrigger pairs a workflow ID with its trigger config.
