@@ -23,6 +23,7 @@ type Manager struct {
 
 	mu        sync.Mutex
 	consumers map[string]func() // workflowID → cancel func for Kafka/SQS goroutines
+	wg        sync.WaitGroup   // tracks running consumer goroutines for clean shutdown
 }
 
 // NewManager creates a Manager. Call LoadAll then Start before serving requests.
@@ -88,11 +89,13 @@ func (m *Manager) Stop() {
 	<-drainCtx.Done()
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for id, cancel := range m.consumers {
 		cancel()
 		delete(m.consumers, id)
 	}
+	m.mu.Unlock()
+
+	m.wg.Wait()
 }
 
 // stopConsumer cancels and removes the consumer goroutine for workflowID, if any.
@@ -154,7 +157,11 @@ func (m *Manager) activate(workflowID string, cfg store.TriggerConfig) error {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		m.setConsumer(workflowID, cancel)
-		consumer.start(ctx)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			consumer.run(ctx)
+		}()
 		return nil
 	case "sqs":
 		m.cron.remove(workflowID)
@@ -164,7 +171,11 @@ func (m *Manager) activate(workflowID string, cfg store.TriggerConfig) error {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		m.setConsumer(workflowID, cancel)
-		consumer.start(ctx)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			consumer.run(ctx)
+		}()
 		return nil
 	case "webhook", "manual", "":
 		// If the workflow previously had a cron trigger or consumer, disarm it.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,29 +15,36 @@ import (
 
 // mockSQSClient implements sqsAPI for testing.
 type mockSQSClient struct {
-	batches  [][]types.Message // ReceiveMessage returns successive batches; last batch repeats
+	mu       sync.Mutex
+	batches  [][]types.Message // ReceiveMessage returns successive batches
 	batchIdx int
 	recvErr  error
 	deleted  []string // receipt handles of deleted messages
 }
 
-func (m *mockSQSClient) ReceiveMessage(_ context.Context, _ *sqs.ReceiveMessageInput, _ ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+func (m *mockSQSClient) ReceiveMessage(ctx context.Context, _ *sqs.ReceiveMessageInput, _ ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	m.mu.Lock()
 	if m.recvErr != nil {
 		err := m.recvErr
 		m.recvErr = nil // return once so the loop can make progress
+		m.mu.Unlock()
 		return nil, err
 	}
 	if m.batchIdx < len(m.batches) {
 		batch := m.batches[m.batchIdx]
 		m.batchIdx++
+		m.mu.Unlock()
 		return &sqs.ReceiveMessageOutput{Messages: batch}, nil
 	}
-	// No more batches: block until ctx cancelled (caller passes a background ctx,
-	// so we just return empty to let the loop eventually be cancelled externally).
-	return &sqs.ReceiveMessageOutput{}, nil
+	m.mu.Unlock()
+	// Block until context is cancelled, mimicking SQS long-poll behaviour.
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func (m *mockSQSClient) DeleteMessage(_ context.Context, params *sqs.DeleteMessageInput, _ ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.deleted = append(m.deleted, aws.ToString(params.ReceiptHandle))
 	return &sqs.DeleteMessageOutput{}, nil
 }
@@ -86,7 +94,7 @@ func TestSQSConsumer_DispatchesMessages(t *testing.T) {
 	c := newTestSQSConsumer(client, "wf-sqs", "https://queue-url", disp)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c.start(ctx)
+	go c.run(ctx)
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -127,19 +135,25 @@ func TestSQSConsumer_DeletesMessageAfterDispatch(t *testing.T) {
 	c := newTestSQSConsumer(client, "wf-sqs", "https://queue-url", disp)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c.start(ctx)
+	go c.run(ctx)
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if len(client.deleted) > 0 {
+		client.mu.Lock()
+		n := len(client.deleted)
+		client.mu.Unlock()
+		if n > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
 
-	if len(client.deleted) == 0 || client.deleted[0] != "rh-abc" {
-		t.Errorf("expected message rh-abc to be deleted, got %v", client.deleted)
+	client.mu.Lock()
+	deleted := client.deleted
+	client.mu.Unlock()
+	if len(deleted) == 0 || deleted[0] != "rh-abc" {
+		t.Errorf("expected message rh-abc to be deleted, got %v", deleted)
 	}
 }
 
@@ -154,11 +168,14 @@ func TestSQSConsumer_DoesNotDeleteOnDispatchError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	c.start(ctx)
+	go c.run(ctx)
 	<-ctx.Done()
 
-	if len(client.deleted) != 0 {
-		t.Errorf("message should not be deleted on dispatch failure, got %v", client.deleted)
+	client.mu.Lock()
+	deleted := client.deleted
+	client.mu.Unlock()
+	if len(deleted) != 0 {
+		t.Errorf("message should not be deleted on dispatch failure, got %v", deleted)
 	}
 }
 
@@ -172,7 +189,7 @@ func TestSQSConsumer_InvalidJSONUsesEmptyData(t *testing.T) {
 	c := newTestSQSConsumer(client, "wf-sqs", "https://queue-url", disp)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c.start(ctx)
+	go c.run(ctx)
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -205,7 +222,7 @@ func TestSQSConsumer_BacksOffOnReceiveError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	c.start(ctx)
+	go c.run(ctx)
 	<-ctx.Done()
 
 	disp.mu.Lock()

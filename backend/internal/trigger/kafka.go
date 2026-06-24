@@ -24,8 +24,13 @@ func ValidateKafkaConfig(brokers, topic string) error {
 
 // kafkaReader is a minimal interface over kafka.Reader so the consumer can be
 // tested with a mock without requiring a live Kafka broker.
+// FetchMessage is used instead of ReadMessage so the consumer controls when
+// the offset is committed: only after a successful Dispatch, giving
+// at-least-once delivery. ReadMessage auto-commits on fetch, which would
+// silently drop messages when Dispatch fails.
 type kafkaReader interface {
-	ReadMessage(ctx context.Context) (kafka.Message, error)
+	FetchMessage(ctx context.Context) (kafka.Message, error)
+	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
 	Close() error
 }
 
@@ -44,6 +49,10 @@ func newKafkaConsumer(workflowID, brokers, topic, groupID string, disp Dispatche
 		return nil, fmt.Errorf("kafka consumer: %w", err)
 	}
 	if groupID == "" {
+		// All backend replicas join the same consumer group, so Kafka distributes
+		// partition ownership across them. On a single-partition topic only one
+		// replica receives messages at a time. Set an explicit kafka_group_id in
+		// the trigger config to override this default.
 		groupID = "cogniflow-" + workflowID
 	}
 	parts := strings.Split(brokers, ",")
@@ -63,13 +72,17 @@ func newKafkaConsumer(workflowID, brokers, topic, groupID string, disp Dispatche
 	}, nil
 }
 
-func (c *kafkaConsumer) start(ctx context.Context) {
-	go c.run(ctx)
-}
-
 // run is the outer reconnect loop. It creates a fresh reader on each attempt so
-// that connection errors leave no stale state in the reader internals.
+// that connection errors leave no stale state in the reader internals. A panic
+// is caught and logged so the Manager's WaitGroup counter is always decremented.
 func (c *kafkaConsumer) run(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("kafka trigger: consumer panic; trigger disarmed until next server restart",
+				"workflow_id", c.workflowID, "panic", r)
+		}
+	}()
+
 	backoff := time.Second
 	for {
 		r := c.newReader()
@@ -82,10 +95,12 @@ func (c *kafkaConsumer) run(ctx context.Context) {
 }
 
 // consume reads messages from r until an error or ctx cancellation.
+// It uses FetchMessage (manual commit) so that a dispatch failure triggers a
+// reconnect and message retry rather than silently advancing the group offset.
 // Returns true if the caller should reconnect with a fresh reader.
 func (c *kafkaConsumer) consume(ctx context.Context, r kafkaReader, backoff *time.Duration) bool {
 	for {
-		msg, err := r.ReadMessage(ctx)
+		msg, err := r.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return false
@@ -100,7 +115,6 @@ func (c *kafkaConsumer) consume(ctx context.Context, r kafkaReader, backoff *tim
 			*backoff = min(*backoff*2, 30*time.Second)
 			return true // signal outer loop to reconnect
 		}
-		*backoff = time.Second
 
 		initialData := parseMessageJSON(msg.Value, c.workflowID, "kafka")
 		if _, err := c.dispatcher.Dispatch(ctx, RunRequest{
@@ -109,6 +123,21 @@ func (c *kafkaConsumer) consume(ctx context.Context, r kafkaReader, backoff *tim
 			TriggeredBy: "kafka",
 		}); err != nil {
 			slog.Error("kafka trigger: dispatch failed",
+				"workflow_id", c.workflowID, "error", err)
+			// Back off and reconnect so the uncommitted message is re-delivered.
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(*backoff):
+			}
+			*backoff = min(*backoff*2, 30*time.Second)
+			return true
+		}
+		*backoff = time.Second
+
+		// Commit only after successful dispatch so the message is retried on failure.
+		if err := r.CommitMessages(ctx, msg); err != nil {
+			slog.Error("kafka trigger: commit failed; message may be reprocessed",
 				"workflow_id", c.workflowID, "error", err)
 		}
 	}

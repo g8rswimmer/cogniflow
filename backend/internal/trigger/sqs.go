@@ -56,11 +56,14 @@ func newSQSConsumer(workflowID, queueURL, region string, disp Dispatcher) (*sqsC
 	}, nil
 }
 
-func (c *sqsConsumer) start(ctx context.Context) {
-	go c.run(ctx)
-}
-
 func (c *sqsConsumer) run(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("sqs trigger: consumer panic; trigger disarmed until next server restart",
+				"workflow_id", c.workflowID, "panic", r)
+		}
+	}()
+
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -108,7 +111,12 @@ func (c *sqsConsumer) handleMessage(ctx context.Context, msg types.Message) {
 		return
 	}
 
-	if _, err := c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+	// Use a short-lived independent context for DeleteMessage so that lifecycle
+	// cancellation (Manager.Stop) cannot prevent cleanup of a successfully
+	// dispatched message — which would otherwise cause a duplicate run.
+	delCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := c.client.DeleteMessage(delCtx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(c.queueURL),
 		ReceiptHandle: msg.ReceiptHandle,
 	}); err != nil {

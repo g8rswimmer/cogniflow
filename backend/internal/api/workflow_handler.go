@@ -93,6 +93,13 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.triggers.Upsert(created.ID, triggerConfigFromWorkflow(created.Trigger)); err != nil {
 		slog.Error("workflow create: trigger activation failed", "workflow_id", created.ID, "error", err)
+		// Roll back the persisted workflow so the client's failed request leaves no orphan.
+		// If the delete also fails, log it — the workflow remains in the DB but with no
+		// armed trigger and will be re-armed on the next server restart via LoadAll.
+		if delErr := h.store.DeleteWorkflow(r.Context(), created.ID); delErr != nil {
+			slog.Error("workflow create: rollback failed after trigger error",
+				"workflow_id", created.ID, "error", delErr)
+		}
 		writeError(w, http.StatusInternalServerError, "TRIGGER_ACTIVATION_FAILED", err.Error())
 		return
 	}

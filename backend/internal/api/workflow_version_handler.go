@@ -104,10 +104,7 @@ func (h *workflowVersionHandler) restoreVersion(w http.ResponseWriter, r *http.R
 	// a warning rather than returning 500 (which would cause clients to retry and
 	// create a duplicate version snapshot). The scheduler will reload the correct
 	// trigger from the DB on the next server restart.
-	if tErr := h.triggers.Upsert(workflowID, store.TriggerConfig{
-		Kind:     restored.Trigger.Kind,
-		CronExpr: restored.Trigger.CronExpr,
-	}); tErr != nil {
+	if tErr := h.triggers.Upsert(workflowID, triggerConfigFromWorkflow(restored.Trigger)); tErr != nil {
 		slog.WarnContext(r.Context(), "version restore: trigger re-arm failed (restore committed)",
 			"workflow_id", workflowID, "version", versionNum, "error", tErr)
 	}
