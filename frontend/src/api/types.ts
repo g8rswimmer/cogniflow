@@ -1,3 +1,61 @@
+// ---------------------------------------------------------------------------
+// Auth types
+// ---------------------------------------------------------------------------
+
+export interface UserResponse {
+  id: string
+  org_id: string
+  org_name: string
+  email: string
+  role: 'system_admin' | 'org_admin' | 'member'
+  permissions: string[]
+  created_at: string
+}
+
+export interface AuthResponse {
+  token: string
+  user: UserResponse
+}
+
+export interface OrgResponse {
+  id: string
+  name: string
+  created_at: string
+}
+
+export interface InvitePreviewResponse {
+  email: string
+  role: string
+  org_name: string
+}
+
+export interface InviteCreatedResponse {
+  id: string
+  email: string
+  role: string
+  token: string
+  expires_at: string
+}
+
+export interface OrgUsersResponse {
+  users: UserResponse[]
+}
+
+export interface OrgsResponse {
+  organizations: OrgResponse[]
+}
+
+export interface AllUsersResponse {
+  users: UserResponse[]
+}
+
+export interface CreateOrgResponse {
+  organization: OrgResponse
+  admin: UserResponse
+}
+
+// ---------------------------------------------------------------------------
+
 export interface Position {
   x: number
   y: number

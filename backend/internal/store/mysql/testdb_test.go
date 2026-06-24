@@ -14,14 +14,46 @@ import (
 // and uses SQLite's looser typing. Tested against the same SQL queries executed
 // by WorkflowStore so any dialect mismatch surfaces here first.
 const testSchema = `
+CREATE TABLE IF NOT EXISTS organizations (
+    id         TEXT     NOT NULL PRIMARY KEY,
+    name       TEXT     NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT     NOT NULL PRIMARY KEY,
+    org_id        TEXT     NOT NULL,
+    email         TEXT     NOT NULL UNIQUE,
+    password_hash TEXT     NOT NULL,
+    role          TEXT     NOT NULL DEFAULT 'member',
+    permissions   TEXT     NOT NULL DEFAULT '[]',
+    created_at    DATETIME NOT NULL,
+    updated_at    DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invitations (
+    id          TEXT     NOT NULL PRIMARY KEY,
+    org_id      TEXT     NOT NULL,
+    email       TEXT     NOT NULL,
+    role        TEXT     NOT NULL DEFAULT 'member',
+    permissions TEXT     NOT NULL DEFAULT '[]',
+    token       TEXT     NOT NULL UNIQUE,
+    invited_by  TEXT     NOT NULL,
+    expires_at  DATETIME NOT NULL,
+    accepted_at DATETIME NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS workflows (
     id                    TEXT     NOT NULL PRIMARY KEY,
+    org_id                TEXT     NOT NULL DEFAULT '',
     name                  TEXT     NOT NULL,
     description           TEXT     NOT NULL DEFAULT '',
     trigger_kind          TEXT     NOT NULL DEFAULT 'manual',
     trigger_config        TEXT,
     initial_data_schema   TEXT,
     timeout_seconds       INTEGER  NOT NULL DEFAULT 300,
+    webhook_secret        TEXT,
     created_at            DATETIME NOT NULL,
     updated_at            DATETIME NOT NULL
 );
@@ -75,6 +107,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE TABLE IF NOT EXISTS rag_documents (
     id         TEXT     NOT NULL PRIMARY KEY,
+    org_id     TEXT     NOT NULL DEFAULT '',
     source     TEXT     NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL
 );
@@ -89,6 +122,7 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
 
 CREATE TABLE IF NOT EXISTS eval_suites (
     id               TEXT    NOT NULL PRIMARY KEY,
+    org_id           TEXT    NOT NULL DEFAULT '',
     workflow_id      TEXT    NOT NULL,
     name             TEXT    NOT NULL,
     description      TEXT    NOT NULL DEFAULT '',

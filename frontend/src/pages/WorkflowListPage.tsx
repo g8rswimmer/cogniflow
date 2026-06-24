@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import type { WorkflowSummary } from '../api/types'
+import { useAuthStore } from '../stores/useAuthStore'
 
 function formatDate(iso: string) {
   try {
@@ -15,10 +16,18 @@ function formatDate(iso: string) {
 }
 
 export function WorkflowListPage() {
+  const navigate = useNavigate()
+  const user = useAuthStore(s => s.user)
+  const logout = useAuthStore(s => s.logout)
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   const load = async () => {
     setLoading(true)
@@ -52,9 +61,28 @@ export function WorkflowListPage() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Top bar */}
-      <header className="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-gray-100">cogniflow</h1>
-        <div className="flex items-center gap-3">
+      <header className="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center gap-3">
+        <h1 className="text-lg font-semibold text-gray-100 flex-shrink-0">cogniflow</h1>
+
+        <div className="flex items-center gap-2 flex-1 flex-wrap justify-end">
+          {/* Org-admin: manage users */}
+          {(user?.role === 'org_admin' || user?.role === 'system_admin') && (
+            <Link
+              to="/org/users"
+              className="rounded-lg border border-gray-600 hover:border-gray-500 text-gray-300 hover:text-gray-100 text-sm font-medium px-3 py-1.5 transition-colors"
+            >
+              Users
+            </Link>
+          )}
+          {/* System-admin: manage orgs */}
+          {user?.role === 'system_admin' && (
+            <Link
+              to="/admin/orgs"
+              className="rounded-lg border border-gray-600 hover:border-gray-500 text-gray-300 hover:text-gray-100 text-sm font-medium px-3 py-1.5 transition-colors"
+            >
+              Orgs
+            </Link>
+          )}
           <Link
             to="/admin/grader-plugins"
             className="rounded-lg border border-gray-600 hover:border-gray-500 text-gray-300 hover:text-gray-100 text-sm font-medium px-3 py-1.5 transition-colors"
@@ -68,6 +96,22 @@ export function WorkflowListPage() {
           >
             + New Workflow
           </Link>
+
+          {/* User chip */}
+          {user && (
+            <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-700">
+              <div className="text-right">
+                <p className="text-xs font-medium text-gray-200">{user.email}</p>
+                <p className="text-xs text-gray-500">{user.org_name}</p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </header>
 

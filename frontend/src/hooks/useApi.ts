@@ -1,4 +1,4 @@
-import { request, API_BASE, ApiError } from '../api/client'
+import { request, publicRequest, API_BASE, ApiError } from '../api/client'
 import type {
   Workflow,
   WorkflowListResponse,
@@ -19,6 +19,14 @@ import type {
   ImportTestCasesResponse,
   GraderRegistration,
   GraderPluginsResponse,
+  AuthResponse,
+  UserResponse,
+  InvitePreviewResponse,
+  InviteCreatedResponse,
+  OrgUsersResponse,
+  OrgsResponse,
+  AllUsersResponse,
+  CreateOrgResponse,
 } from '../api/types'
 
 export const api = {
@@ -173,4 +181,84 @@ export const api = {
     }
     return res.json() as Promise<ImportTestCasesResponse>
   },
+
+  // ---- Auth (public — no token required) ------------------------------------
+
+  login: (email: string, password: string) =>
+    publicRequest<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  getInvite: (token: string) =>
+    publicRequest<InvitePreviewResponse>(`/auth/invite/${encodeURIComponent(token)}`),
+
+  acceptInvite: (token: string, password: string) =>
+    publicRequest<AuthResponse>('/auth/accept-invite', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    }),
+
+  // ---- Auth (authenticated) -------------------------------------------------
+
+  getMe: () =>
+    request<UserResponse>('/auth/me'),
+
+  // ---- Org-admin ------------------------------------------------------------
+
+  listOrgUsers: () =>
+    request<OrgUsersResponse>('/org/users'),
+
+  inviteUser: (body: { email: string; role: string; permissions?: string[] }) =>
+    request<InviteCreatedResponse>('/org/users/invite', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateOrgUserRole: (userId: string, role: string) =>
+    request<void>(`/org/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
+
+  updateOrgUserPermissions: (userId: string, permissions: string[]) =>
+    request<void>(`/org/users/${userId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permissions }),
+    }),
+
+  removeOrgUser: (userId: string) =>
+    request<void>(`/org/users/${userId}`, { method: 'DELETE' }),
+
+  // ---- System-admin ---------------------------------------------------------
+
+  listOrgs: () =>
+    request<OrgsResponse>('/admin/orgs'),
+
+  createOrg: (body: { name: string; admin_email: string; admin_password: string }) =>
+    request<CreateOrgResponse>('/admin/orgs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteOrg: (orgId: string) =>
+    request<void>(`/admin/orgs/${orgId}`, { method: 'DELETE' }),
+
+  listAllUsers: () =>
+    request<AllUsersResponse>('/admin/users'),
+
+  deleteUser: (userId: string) =>
+    request<void>(`/admin/users/${userId}`, { method: 'DELETE' }),
+
+  adminUpdateUserRole: (userId: string, role: string) =>
+    request<void>(`/admin/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
+
+  adminUpdateUserPermissions: (userId: string, permissions: string[]) =>
+    request<void>(`/admin/users/${userId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permissions }),
+    }),
 }

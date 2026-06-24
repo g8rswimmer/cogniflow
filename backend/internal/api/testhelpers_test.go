@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
@@ -349,3 +350,40 @@ func (m *mockStore) DeleteWorkflowVersions(_ context.Context, _ string) error { 
 func (m *mockStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
 	return store.Workflow{}, store.ErrNotFound
 }
+
+// ---- Auth methods (not used by API handler tests; stub to satisfy store.Store) ----
+
+func (m *mockStore) CreateOrganization(_ context.Context, org store.Organization) (store.Organization, error) {
+	return org, nil
+}
+func (m *mockStore) GetOrganization(_ context.Context, _ string) (store.Organization, error) {
+	return store.Organization{}, store.ErrNotFound
+}
+func (m *mockStore) ListOrganizations(_ context.Context) ([]store.Organization, error) {
+	return nil, nil
+}
+func (m *mockStore) DeleteOrganization(_ context.Context, _ string) error { return nil }
+
+func (m *mockStore) CreateUser(_ context.Context, u store.User) (store.User, error) {
+	return u, nil
+}
+func (m *mockStore) GetUser(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (m *mockStore) GetUserByEmail(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (m *mockStore) ListUsers(_ context.Context, _ string) ([]store.User, error) { return nil, nil }
+func (m *mockStore) UpdateUserRole(_ context.Context, _, _ string) error          { return nil }
+func (m *mockStore) UpdateUserPermissions(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (m *mockStore) DeleteUser(_ context.Context, _ string) error { return nil }
+
+func (m *mockStore) CreateInvitation(_ context.Context, inv store.Invitation) (store.Invitation, error) {
+	return inv, nil
+}
+func (m *mockStore) GetInvitationByToken(_ context.Context, _ string) (store.Invitation, error) {
+	return store.Invitation{}, store.ErrNotFound
+}
+func (m *mockStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error { return nil }

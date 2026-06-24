@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -24,6 +25,53 @@ type ConfigVault struct {
 // NewConfigVault creates a ConfigVault that decorates the given Store.
 func NewConfigVault(inner store.Store, cipher *Cipher, registry *node.NodeRegistry) *ConfigVault {
 	return &ConfigVault{inner: inner, cipher: cipher, registry: registry}
+}
+
+// ---- Auth methods — delegate directly; no sensitive data in these types -----
+
+func (v *ConfigVault) CreateOrganization(ctx context.Context, org store.Organization) (store.Organization, error) {
+	return v.inner.CreateOrganization(ctx, org)
+}
+func (v *ConfigVault) GetOrganization(ctx context.Context, id string) (store.Organization, error) {
+	return v.inner.GetOrganization(ctx, id)
+}
+func (v *ConfigVault) ListOrganizations(ctx context.Context) ([]store.Organization, error) {
+	return v.inner.ListOrganizations(ctx)
+}
+func (v *ConfigVault) DeleteOrganization(ctx context.Context, id string) error {
+	return v.inner.DeleteOrganization(ctx, id)
+}
+
+func (v *ConfigVault) CreateUser(ctx context.Context, u store.User) (store.User, error) {
+	return v.inner.CreateUser(ctx, u)
+}
+func (v *ConfigVault) GetUser(ctx context.Context, id string) (store.User, error) {
+	return v.inner.GetUser(ctx, id)
+}
+func (v *ConfigVault) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+	return v.inner.GetUserByEmail(ctx, email)
+}
+func (v *ConfigVault) ListUsers(ctx context.Context, orgID string) ([]store.User, error) {
+	return v.inner.ListUsers(ctx, orgID)
+}
+func (v *ConfigVault) UpdateUserRole(ctx context.Context, userID, role string) error {
+	return v.inner.UpdateUserRole(ctx, userID, role)
+}
+func (v *ConfigVault) UpdateUserPermissions(ctx context.Context, userID string, permissions []string) error {
+	return v.inner.UpdateUserPermissions(ctx, userID, permissions)
+}
+func (v *ConfigVault) DeleteUser(ctx context.Context, userID string) error {
+	return v.inner.DeleteUser(ctx, userID)
+}
+
+func (v *ConfigVault) CreateInvitation(ctx context.Context, inv store.Invitation) (store.Invitation, error) {
+	return v.inner.CreateInvitation(ctx, inv)
+}
+func (v *ConfigVault) GetInvitationByToken(ctx context.Context, token string) (store.Invitation, error) {
+	return v.inner.GetInvitationByToken(ctx, token)
+}
+func (v *ConfigVault) AcceptInvitation(ctx context.Context, invID string, now time.Time) error {
+	return v.inner.AcceptInvitation(ctx, invID, now)
 }
 
 // CreateWorkflow encrypts sensitive config values before delegating to the inner store.

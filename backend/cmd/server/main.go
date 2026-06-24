@@ -17,8 +17,10 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider/anthropic"
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider/ollama"
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider/openai"
+	"github.com/g8rswimmer/cogniflow/internal/auth"
 	"github.com/g8rswimmer/cogniflow/internal/crypto"
 	"github.com/g8rswimmer/cogniflow/internal/engine"
+	"github.com/g8rswimmer/cogniflow/internal/eval/grader_plugin"
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/conditional"
 	datatransform "github.com/g8rswimmer/cogniflow/internal/node/builtin/data_transform"
@@ -31,8 +33,8 @@ import (
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/merge"
 	ragingest "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_ingest"
 	ragretrieve "github.com/g8rswimmer/cogniflow/internal/node/builtin/rag_retrieve"
-	"github.com/g8rswimmer/cogniflow/internal/eval/grader_plugin"
 	nodeplugin "github.com/g8rswimmer/cogniflow/internal/node/plugin"
+	"github.com/g8rswimmer/cogniflow/internal/store"
 	mysqlstore "github.com/g8rswimmer/cogniflow/internal/store/mysql"
 	"github.com/g8rswimmer/cogniflow/internal/trigger"
 )
@@ -80,6 +82,21 @@ func run(logLevel *slog.LevelVar) error {
 		return fmt.Errorf("invalid encryption key: %w", err)
 	}
 
+	jwtSecretStr := os.Getenv("JWT_SECRET")
+	if len(jwtSecretStr) < 32 {
+		return fmt.Errorf("JWT_SECRET must be at least 32 characters")
+	}
+	jwtSecret := []byte(jwtSecretStr)
+
+	jwtTTL := 24 * time.Hour
+	if ttlStr := os.Getenv("JWT_TTL"); ttlStr != "" {
+		parsed, err := time.ParseDuration(ttlStr)
+		if err != nil {
+			return fmt.Errorf("invalid JWT_TTL %q: %w", ttlStr, err)
+		}
+		jwtTTL = parsed
+	}
+
 	db, err := mysqlstore.Open(dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -120,6 +137,10 @@ func run(logLevel *slog.LevelVar) error {
 
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
 
+	if err := bootstrapAdmin(context.Background(), vault); err != nil {
+		return fmt.Errorf("admin bootstrap: %w", err)
+	}
+
 	if ollamaURL := os.Getenv("OLLAMA_BASE_URL"); ollamaURL != "" {
 		slog.Info("using Ollama for RAG embeddings", "base_url", ollamaURL)
 		ollamaClient := ollama.New(ollamaURL)
@@ -155,7 +176,7 @@ func run(logLevel *slog.LevelVar) error {
 	// background goroutines (e.g. EvalRunner) to stop cleanly.
 	srvCtx, srvCancel := context.WithCancel(context.Background())
 
-	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, graderRegistry, logLevel)
+	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, graderRegistry, logLevel, jwtSecret, jwtTTL)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)
@@ -181,5 +202,47 @@ func run(logLevel *slog.LevelVar) error {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("server error: %w", err)
 	}
+	return nil
+}
+
+// bootstrapAdmin creates a "Default" org and system_admin user on first startup
+// when BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD are set and no users
+// exist yet. Idempotent: does nothing if users already exist.
+func bootstrapAdmin(ctx context.Context, st store.Store) error {
+	email := os.Getenv("BOOTSTRAP_ADMIN_EMAIL")
+	password := os.Getenv("BOOTSTRAP_ADMIN_PASSWORD")
+	if email == "" || password == "" {
+		return nil
+	}
+
+	users, err := st.ListUsers(ctx, "")
+	if err != nil {
+		return fmt.Errorf("check existing users: %w", err)
+	}
+	if len(users) > 0 {
+		return nil // already bootstrapped
+	}
+
+	org, err := st.CreateOrganization(ctx, store.Organization{Name: "Default"})
+	if err != nil {
+		return fmt.Errorf("create default org: %w", err)
+	}
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	if _, err := st.CreateUser(ctx, store.User{
+		OrgID:        org.ID,
+		Email:        email,
+		PasswordHash: hash,
+		Role:         "system_admin",
+		Permissions:  store.DefaultPermissions,
+	}); err != nil {
+		return fmt.Errorf("create admin user: %w", err)
+	}
+
+	slog.Info("bootstrapped system_admin", "email", email, "org_id", org.ID)
 	return nil
 }

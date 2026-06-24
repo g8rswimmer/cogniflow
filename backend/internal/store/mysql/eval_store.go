@@ -35,11 +35,16 @@ func (s *WorkflowStore) CreateEvalSuite(ctx context.Context, suite store.EvalSui
 		return store.EvalSuite{}, fmt.Errorf("eval store: marshal trigger_config: %w", err)
 	}
 
+	orgID := store.OrgIDFrom(ctx)
+	if orgID == "" {
+		orgID = "00000000-0000-0000-0000-000000000001"
+	}
+
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO eval_suites
-		 (id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, trigger_kind, trigger_config, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		suite.ID, suite.WorkflowID, suite.Name, suite.Description,
+		 (id, org_id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted, trigger_kind, trigger_config, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		suite.ID, orgID, suite.WorkflowID, suite.Name, suite.Description,
 		suite.PassThreshold, suite.MaxConcurrency, boolToInt(suite.WorkflowDeleted),
 		suite.TriggerKind, trigCfg,
 		suite.CreatedAt, suite.UpdatedAt,
@@ -66,16 +71,21 @@ func (s *WorkflowStore) GetEvalSuite(ctx context.Context, id string) (store.Eval
 }
 
 func (s *WorkflowStore) ListEvalSuites(ctx context.Context, workflowID string) ([]store.EvalSuiteSummary, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT es.id, es.workflow_id, es.name, es.description, es.pass_threshold,
+	baseQuery := `SELECT es.id, es.workflow_id, es.name, es.description, es.pass_threshold,
 		        es.max_concurrency, es.workflow_deleted, es.trigger_kind, es.trigger_config,
 		        es.created_at, es.updated_at,
 		        (SELECT COUNT(*) FROM eval_test_cases WHERE suite_id = es.id) AS test_case_count,
 		        (SELECT status FROM eval_runs WHERE suite_id = es.id ORDER BY created_at DESC LIMIT 1) AS last_run_status,
 		        (SELECT created_at FROM eval_runs WHERE suite_id = es.id ORDER BY created_at DESC LIMIT 1) AS last_run_at
 		 FROM eval_suites es
-		 WHERE es.workflow_id = ?
-		 ORDER BY es.created_at DESC`, workflowID)
+		 WHERE es.workflow_id = ?`
+	queryArgs := []any{workflowID}
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		baseQuery += ` AND es.org_id = ?`
+		queryArgs = append(queryArgs, orgID)
+	}
+	baseQuery += ` ORDER BY es.created_at DESC`
+	rows, err := s.db.QueryContext(ctx, baseQuery, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("eval store: list suites: %w", err)
 	}

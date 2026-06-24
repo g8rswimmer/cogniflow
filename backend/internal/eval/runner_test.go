@@ -254,6 +254,42 @@ func (s *runnerStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int)
 	return store.Workflow{}, store.ErrNotFound
 }
 
+// Auth stubs — not used by runner tests; required to implement store.Store.
+func (s *runnerStore) CreateOrganization(_ context.Context, org store.Organization) (store.Organization, error) {
+	return org, nil
+}
+func (s *runnerStore) GetOrganization(_ context.Context, _ string) (store.Organization, error) {
+	return store.Organization{}, store.ErrNotFound
+}
+func (s *runnerStore) ListOrganizations(_ context.Context) ([]store.Organization, error) {
+	return nil, nil
+}
+func (s *runnerStore) DeleteOrganization(_ context.Context, _ string) error { return nil }
+func (s *runnerStore) CreateUser(_ context.Context, u store.User) (store.User, error) {
+	return u, nil
+}
+func (s *runnerStore) GetUser(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (s *runnerStore) GetUserByEmail(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (s *runnerStore) ListUsers(_ context.Context, _ string) ([]store.User, error) {
+	return nil, nil
+}
+func (s *runnerStore) UpdateUserRole(_ context.Context, _, _ string) error { return nil }
+func (s *runnerStore) UpdateUserPermissions(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (s *runnerStore) DeleteUser(_ context.Context, _ string) error { return nil }
+func (s *runnerStore) CreateInvitation(_ context.Context, inv store.Invitation) (store.Invitation, error) {
+	return inv, nil
+}
+func (s *runnerStore) GetInvitationByToken(_ context.Context, _ string) (store.Invitation, error) {
+	return store.Invitation{}, store.ErrNotFound
+}
+func (s *runnerStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error { return nil }
+
 // ---- helpers ---------------------------------------------------------------
 
 func newTestRunner(t *testing.T) (*EvalRunner, *runnerStore, *stubEngineRunner) {

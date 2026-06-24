@@ -58,11 +58,17 @@ func (s *WorkflowStore) CreateWorkflow(ctx context.Context, w store.Workflow) (s
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	orgID := store.OrgIDFrom(ctx)
+	if orgID == "" {
+		orgID = "00000000-0000-0000-0000-000000000001"
+	}
+
 	_, err = tx.NamedExecContext(ctx,
-		`INSERT INTO workflows (id, name, description, trigger_kind, trigger_config, initial_data_schema, timeout_seconds, created_at, updated_at)
-		 VALUES (:id, :name, :description, :trigger_kind, :trigger_config, :initial_data_schema, :timeout_seconds, :created_at, :updated_at)`,
+		`INSERT INTO workflows (id, org_id, name, description, trigger_kind, trigger_config, initial_data_schema, timeout_seconds, created_at, updated_at)
+		 VALUES (:id, :org_id, :name, :description, :trigger_kind, :trigger_config, :initial_data_schema, :timeout_seconds, :created_at, :updated_at)`,
 		workflowWriteRow{
 			ID:                w.ID,
+			OrgID:             orgID,
 			Name:              w.Name,
 			Description:       w.Description,
 			TriggerKind:       w.Trigger.Kind,
@@ -95,8 +101,8 @@ func (s *WorkflowStore) GetWorkflowSchema(ctx context.Context, id string) (json.
 	var row struct {
 		InitialDataSchema *string `db:"initial_data_schema"`
 	}
-	err := s.db.GetContext(ctx, &row,
-		`SELECT initial_data_schema FROM workflows WHERE id = ?`, id)
+	query, args := scopedByOrg(ctx, `SELECT initial_data_schema FROM workflows WHERE id = ?`, id)
+	err := s.db.GetContext(ctx, &row, query, args...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -108,10 +114,11 @@ func (s *WorkflowStore) GetWorkflowSchema(ctx context.Context, id string) (json.
 
 func (s *WorkflowStore) GetWorkflow(ctx context.Context, id string) (store.Workflow, error) {
 	var row dbWorkflow
-	err := s.db.GetContext(ctx, &row,
+	query, args := scopedByOrg(ctx,
 		`SELECT id, name, COALESCE(description,'') AS description, trigger_kind,
 		        trigger_config, initial_data_schema, timeout_seconds, created_at, updated_at
 		 FROM workflows WHERE id = ?`, id)
+	err := s.db.GetContext(ctx, &row, query, args...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Workflow{}, store.ErrNotFound
 	}
@@ -157,14 +164,18 @@ func (s *WorkflowStore) ListWorkflows(ctx context.Context) ([]store.WorkflowSumm
 		CreatedAt      time.Time `db:"created_at"`
 		UpdatedAt      time.Time `db:"updated_at"`
 	}
-	if err := s.db.SelectContext(ctx, &rows,
-		`SELECT w.id, w.name, COALESCE(w.description,'') AS description, w.trigger_kind,
+	baseQuery := `SELECT w.id, w.name, COALESCE(w.description,'') AS description, w.trigger_kind,
 		        w.timeout_seconds, w.created_at, w.updated_at,
 		        COUNT(n.id) AS node_count
 		 FROM workflows w
-		 LEFT JOIN workflow_nodes n ON n.workflow_id = w.id
-		 GROUP BY w.id
-		 ORDER BY w.updated_at DESC`); err != nil {
+		 LEFT JOIN workflow_nodes n ON n.workflow_id = w.id`
+	var queryArgs []any
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		baseQuery += ` WHERE w.org_id = ?`
+		queryArgs = append(queryArgs, orgID)
+	}
+	baseQuery += ` GROUP BY w.id ORDER BY w.updated_at DESC`
+	if err := s.db.SelectContext(ctx, &rows, baseQuery, queryArgs...); err != nil {
 		return nil, fmt.Errorf("workflow store: list workflows: %w", err)
 	}
 
@@ -200,14 +211,20 @@ func (s *WorkflowStore) UpdateWorkflow(ctx context.Context, w store.Workflow) (s
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	res, err := tx.NamedExecContext(ctx,
-		`UPDATE workflows
+	orgID := store.OrgIDFrom(ctx)
+
+	updateQuery := `UPDATE workflows
 		 SET name=:name, description=:description, trigger_kind=:trigger_kind,
 		     trigger_config=:trigger_config, initial_data_schema=:initial_data_schema,
 		     timeout_seconds=:timeout_seconds
-		 WHERE id=:id`,
+		 WHERE id=:id`
+	if orgID != "" {
+		updateQuery += ` AND org_id=:org_id`
+	}
+	res, err := tx.NamedExecContext(ctx, updateQuery,
 		workflowWriteRow{
 			ID:                w.ID,
+			OrgID:             orgID,
 			Name:              w.Name,
 			Description:       w.Description,
 			TriggerKind:       w.Trigger.Kind,
@@ -440,6 +457,7 @@ type dbWorkflow struct {
 // workflowWriteRow is the write-side row struct for INSERT/UPDATE named queries.
 type workflowWriteRow struct {
 	ID                string    `db:"id"`
+	OrgID             string    `db:"org_id"`
 	Name              string    `db:"name"`
 	Description       string    `db:"description"`
 	TriggerKind       string    `db:"trigger_kind"`
@@ -779,4 +797,15 @@ func newUUID() string {
 	u[8] = (u[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		u[0:4], u[4:6], u[6:8], u[8:10], u[10:])
+}
+
+// scopedByOrg appends AND org_id = ? to baseQuery when an org_id is present in ctx.
+// Returns the (possibly modified) query and the argument list to use.
+// When orgID is empty (system_admin path), the query is returned unchanged.
+func scopedByOrg(ctx context.Context, baseQuery string, firstArg any) (string, []any) {
+	orgID := store.OrgIDFrom(ctx)
+	if orgID == "" {
+		return baseQuery, []any{firstArg}
+	}
+	return baseQuery + " AND org_id = ?", []any{firstArg, orgID}
 }

@@ -10,6 +10,67 @@ import (
 // ErrNotFound is returned when a requested resource does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrDuplicateEmail is returned when a user with the same email already exists.
+var ErrDuplicateEmail = errors.New("email already in use")
+
+// ---- Multi-tenancy context helpers ------------------------------------------
+
+type orgIDCtxKey struct{}
+
+// WithOrgID stores the tenant org_id in the context so store implementations
+// can scope queries without changing every method signature.
+func WithOrgID(ctx context.Context, orgID string) context.Context {
+	return context.WithValue(ctx, orgIDCtxKey{}, orgID)
+}
+
+// OrgIDFrom retrieves the org_id from the context. Returns "" if not set
+// (system_admin path — no tenant filter applied).
+func OrgIDFrom(ctx context.Context) string {
+	s, _ := ctx.Value(orgIDCtxKey{}).(string)
+	return s
+}
+
+// ---- Auth domain types ------------------------------------------------------
+
+// Organization is a tenant in the system.
+type Organization struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// DefaultPermissions is the full set of scopes granted to a new member by default.
+var DefaultPermissions = []string{
+	"workflow:read", "workflow:write", "workflow:run",
+	"eval:read", "eval:write", "eval:run",
+}
+
+// User is an authenticated principal belonging to one organization.
+type User struct {
+	ID           string    `json:"id"`
+	OrgID        string    `json:"org_id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"` // never serialised to API responses
+	Role         string    `json:"role"` // system_admin | org_admin | member
+	Permissions  []string  `json:"permissions"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// Invitation is a pending invite that creates a User on acceptance.
+type Invitation struct {
+	ID          string     `json:"id"`
+	OrgID       string     `json:"org_id"`
+	Email       string     `json:"email"`
+	Role        string     `json:"role"`
+	Permissions []string   `json:"permissions"`
+	Token       string     `json:"token"`
+	InvitedBy   string     `json:"invited_by"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	AcceptedAt  *time.Time `json:"accepted_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
 // NodePosition holds the canvas coordinates of a workflow node.
 type NodePosition struct {
 	X float64 `json:"x"`
@@ -220,6 +281,27 @@ type PluginRegistration struct {
 // Store is the persistence interface. The MySQL implementation lives in
 // internal/store/mysql/. Tests use an in-memory stub.
 type Store interface {
+	// Organizations
+	CreateOrganization(ctx context.Context, org Organization) (Organization, error)
+	GetOrganization(ctx context.Context, id string) (Organization, error)
+	ListOrganizations(ctx context.Context) ([]Organization, error)
+	DeleteOrganization(ctx context.Context, id string) error
+
+	// Users
+	CreateUser(ctx context.Context, u User) (User, error)
+	GetUser(ctx context.Context, id string) (User, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// ListUsers returns all users in orgID; when orgID is empty all users are returned (system_admin).
+	ListUsers(ctx context.Context, orgID string) ([]User, error)
+	UpdateUserRole(ctx context.Context, userID, role string) error
+	UpdateUserPermissions(ctx context.Context, userID string, permissions []string) error
+	DeleteUser(ctx context.Context, userID string) error
+
+	// Invitations
+	CreateInvitation(ctx context.Context, inv Invitation) (Invitation, error)
+	GetInvitationByToken(ctx context.Context, token string) (Invitation, error)
+	AcceptInvitation(ctx context.Context, invID string, now time.Time) error
+
 	// Workflow CRUD
 	CreateWorkflow(ctx context.Context, w Workflow) (Workflow, error)
 	GetWorkflow(ctx context.Context, id string) (Workflow, error)

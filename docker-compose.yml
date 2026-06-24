@@ -36,6 +36,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PLUGIN_ADDRESSES: ${PLUGIN_ADDRESSES:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL: ${JWT_TTL:-24h}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       # AWS credentials — used by the SQS trigger consumer (leave blank if not using SQS)
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
