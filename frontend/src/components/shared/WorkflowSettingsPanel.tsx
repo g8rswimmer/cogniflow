@@ -23,14 +23,28 @@ export function WorkflowSettingsPanel({ workflowId, onClose }: Props) {
 
   const webhookUrl = workflowId ? `/webhooks/${workflowId}` : '(save workflow first)'
 
-  // Survives kind switches within the session so the user's cron expression
-  // is not lost when they temporarily select a different kind and come back.
+  // Refs survive kind switches within the session so config isn't lost when
+  // the user temporarily selects a different kind and comes back.
   const lastCronExpr = useRef(trigger.cron_expr ?? '* * * * *')
+  const lastKafkaBrokers = useRef(trigger.kafka_brokers ?? '')
+  const lastKafkaTopic = useRef(trigger.kafka_topic ?? '')
+  const lastKafkaGroupID = useRef(trigger.kafka_group_id ?? '')
+  const lastSQSQueueURL = useRef(trigger.sqs_queue_url ?? '')
+  const lastSQSRegion = useRef(trigger.sqs_region ?? '')
 
   const handleKindChange = (kind: TriggerKind) => {
     const next: Trigger = { kind }
     if (kind === 'cron') next.cron_expr = lastCronExpr.current
     if (kind === 'webhook' && workflowId) next.webhook_url = webhookUrl
+    if (kind === 'kafka') {
+      next.kafka_brokers = lastKafkaBrokers.current
+      next.kafka_topic = lastKafkaTopic.current
+      if (lastKafkaGroupID.current) next.kafka_group_id = lastKafkaGroupID.current
+    }
+    if (kind === 'sqs') {
+      next.sqs_queue_url = lastSQSQueueURL.current
+      next.sqs_region = lastSQSRegion.current
+    }
     setTrigger(next)
   }
 
@@ -114,13 +128,13 @@ export function WorkflowSettingsPanel({ workflowId, onClose }: Props) {
             </div>
 
             {/* Kind selector */}
-            <div className="flex gap-2 mb-4">
-              {(['manual', 'webhook', 'cron'] as TriggerKind[]).map(k => (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {(['manual', 'webhook', 'cron', 'kafka', 'sqs'] as TriggerKind[]).map(k => (
                 <button
                   key={k}
                   onClick={() => handleKindChange(k)}
                   className={`
-                    flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors border
+                    px-3 py-2 rounded-lg text-sm font-medium capitalize transition-colors border
                     ${trigger.kind === k
                       ? 'bg-indigo-600 border-indigo-500 text-white'
                       : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'}
@@ -166,6 +180,111 @@ export function WorkflowSettingsPanel({ workflowId, onClose }: Props) {
                 <div className="text-xs text-gray-500 mt-1">
                   min hour day month weekday — e.g.{' '}
                   <code className="text-gray-400">0 9 * * 1-5</code>
+                </div>
+              </div>
+            )}
+
+            {trigger.kind === 'kafka' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Brokers</label>
+                  <input
+                    type="text"
+                    value={trigger.kafka_brokers ?? ''}
+                    onChange={e => {
+                      lastKafkaBrokers.current = e.target.value
+                      setTrigger({ ...trigger, kafka_brokers: e.target.value })
+                    }}
+                    placeholder="localhost:9092"
+                    className="
+                      w-full rounded-md bg-gray-700 border border-gray-600
+                      px-3 py-2 font-mono text-sm text-gray-100
+                      focus:outline-none focus:border-indigo-500
+                    "
+                  />
+                  <div className="text-xs text-gray-500 mt-1">Comma-separated host:port list</div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Topic</label>
+                  <input
+                    type="text"
+                    value={trigger.kafka_topic ?? ''}
+                    onChange={e => {
+                      lastKafkaTopic.current = e.target.value
+                      setTrigger({ ...trigger, kafka_topic: e.target.value })
+                    }}
+                    placeholder="my-topic"
+                    className="
+                      w-full rounded-md bg-gray-700 border border-gray-600
+                      px-3 py-2 font-mono text-sm text-gray-100
+                      focus:outline-none focus:border-indigo-500
+                    "
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">
+                    Consumer Group ID{' '}
+                    <span className="text-gray-600 normal-case font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={trigger.kafka_group_id ?? ''}
+                    onChange={e => {
+                      lastKafkaGroupID.current = e.target.value
+                      setTrigger({ ...trigger, kafka_group_id: e.target.value })
+                    }}
+                    placeholder={workflowId ? `cogniflow-${workflowId}` : 'cogniflow-…'}
+                    className="
+                      w-full rounded-md bg-gray-700 border border-gray-600
+                      px-3 py-2 font-mono text-sm text-gray-100
+                      focus:outline-none focus:border-indigo-500
+                    "
+                  />
+                </div>
+                <div className="text-xs text-gray-500">
+                  Each message triggers one run. The message body (JSON) becomes the run's initial data.
+                </div>
+              </div>
+            )}
+
+            {trigger.kind === 'sqs' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Queue URL</label>
+                  <input
+                    type="text"
+                    value={trigger.sqs_queue_url ?? ''}
+                    onChange={e => {
+                      lastSQSQueueURL.current = e.target.value
+                      setTrigger({ ...trigger, sqs_queue_url: e.target.value })
+                    }}
+                    placeholder="https://sqs.us-east-1.amazonaws.com/123456789/my-queue"
+                    className="
+                      w-full rounded-md bg-gray-700 border border-gray-600
+                      px-3 py-2 font-mono text-sm text-gray-100
+                      focus:outline-none focus:border-indigo-500
+                    "
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Region</label>
+                  <input
+                    type="text"
+                    value={trigger.sqs_region ?? ''}
+                    onChange={e => {
+                      lastSQSRegion.current = e.target.value
+                      setTrigger({ ...trigger, sqs_region: e.target.value })
+                    }}
+                    placeholder="us-east-1"
+                    className="
+                      w-full rounded-md bg-gray-700 border border-gray-600
+                      px-3 py-2 font-mono text-sm text-gray-100
+                      focus:outline-none focus:border-indigo-500
+                    "
+                  />
+                </div>
+                <div className="text-xs text-gray-500">
+                  Uses the standard AWS credential chain (env vars, IAM role). Messages are deleted after successful dispatch.
                 </div>
               </div>
             )}

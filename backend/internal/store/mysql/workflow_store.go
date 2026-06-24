@@ -302,6 +302,21 @@ func (s *WorkflowStore) SaveTriggerConfig(ctx context.Context, workflowID string
 	if cfg.CronExpr != "" {
 		extra["cron_expr"] = cfg.CronExpr
 	}
+	if cfg.KafkaBrokers != "" {
+		extra["kafka_brokers"] = cfg.KafkaBrokers
+	}
+	if cfg.KafkaTopic != "" {
+		extra["kafka_topic"] = cfg.KafkaTopic
+	}
+	if cfg.KafkaGroupID != "" {
+		extra["kafka_group_id"] = cfg.KafkaGroupID
+	}
+	if cfg.SQSQueueURL != "" {
+		extra["sqs_queue_url"] = cfg.SQSQueueURL
+	}
+	if cfg.SQSRegion != "" {
+		extra["sqs_region"] = cfg.SQSRegion
+	}
 	b, err := json.Marshal(extra)
 	if err != nil {
 		return fmt.Errorf("trigger store: marshal config: %w", err)
@@ -365,10 +380,20 @@ func unmarshalTriggerConfig(kind string, raw *string) store.TriggerConfig {
 	cfg := store.TriggerConfig{Kind: kind}
 	if raw != nil {
 		var extra struct {
-			CronExpr string `json:"cron_expr"`
+			CronExpr     string `json:"cron_expr"`
+			KafkaBrokers string `json:"kafka_brokers"`
+			KafkaTopic   string `json:"kafka_topic"`
+			KafkaGroupID string `json:"kafka_group_id"`
+			SQSQueueURL  string `json:"sqs_queue_url"`
+			SQSRegion    string `json:"sqs_region"`
 		}
 		_ = json.Unmarshal([]byte(*raw), &extra)
 		cfg.CronExpr = extra.CronExpr
+		cfg.KafkaBrokers = extra.KafkaBrokers
+		cfg.KafkaTopic = extra.KafkaTopic
+		cfg.KafkaGroupID = extra.KafkaGroupID
+		cfg.SQSQueueURL = extra.SQSQueueURL
+		cfg.SQSRegion = extra.SQSRegion
 	}
 	return cfg
 }
@@ -714,6 +739,21 @@ func triggerExtra(t store.Trigger) map[string]any {
 	m := map[string]any{}
 	if t.CronExpr != "" {
 		m["cron_expr"] = t.CronExpr
+	}
+	if t.KafkaBrokers != "" {
+		m["kafka_brokers"] = t.KafkaBrokers
+	}
+	if t.KafkaTopic != "" {
+		m["kafka_topic"] = t.KafkaTopic
+	}
+	if t.KafkaGroupID != "" {
+		m["kafka_group_id"] = t.KafkaGroupID
+	}
+	if t.SQSQueueURL != "" {
+		m["sqs_queue_url"] = t.SQSQueueURL
+	}
+	if t.SQSRegion != "" {
+		m["sqs_region"] = t.SQSRegion
 	}
 	return m
 }

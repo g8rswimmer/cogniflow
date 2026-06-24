@@ -5,20 +5,25 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
 // Manager coordinates all trigger types for the running server.
-// It arms cron jobs and exposes the webhook HTTP handler. Webhook dispatch
-// is handled at request time via a static /webhooks/{workflow_id} route;
-// the Manager only manages in-memory cron state.
+// It arms cron jobs, Kafka consumers, and SQS consumers, and exposes the
+// webhook HTTP handler. Webhook dispatch is handled at request time via a
+// static /webhooks/{workflow_id} route.
 type Manager struct {
 	store      store.Store
 	dispatcher Dispatcher
 	cron       *cronScheduler
 	webhook    *webhookHandler
 	done       chan struct{} // closed by Stop() to signal shutdown to in-flight cron dispatches
+
+	mu        sync.Mutex
+	consumers map[string]func() // workflowID → cancel func for Kafka/SQS goroutines
+	wg        sync.WaitGroup   // tracks running consumer goroutines for clean shutdown
 }
 
 // NewManager creates a Manager. Call LoadAll then Start before serving requests.
@@ -29,6 +34,7 @@ func NewManager(st store.Store, disp Dispatcher) *Manager {
 		cron:       newCronScheduler(),
 		webhook:    &webhookHandler{store: st, dispatcher: disp},
 		done:       make(chan struct{}),
+		consumers:  make(map[string]func()),
 	}
 }
 
@@ -68,6 +74,7 @@ func (m *Manager) Remove(workflowID string) {
 		return
 	}
 	m.cron.remove(workflowID)
+	m.stopConsumer(workflowID)
 }
 
 // Start begins the cron scheduler. Call after LoadAll.
@@ -75,10 +82,40 @@ func (m *Manager) Start() { m.cron.start() }
 
 // Stop signals shutdown to any in-flight cron dispatches, halts the scheduler,
 // and waits for all running cron job goroutines to finish before returning.
+// It also cancels all active Kafka and SQS consumer goroutines.
 func (m *Manager) Stop() {
 	close(m.done)
 	drainCtx := m.cron.stop()
 	<-drainCtx.Done()
+
+	m.mu.Lock()
+	for id, cancel := range m.consumers {
+		cancel()
+		delete(m.consumers, id)
+	}
+	m.mu.Unlock()
+
+	m.wg.Wait()
+}
+
+// stopConsumer cancels and removes the consumer goroutine for workflowID, if any.
+func (m *Manager) stopConsumer(workflowID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cancel, ok := m.consumers[workflowID]; ok {
+		cancel()
+		delete(m.consumers, workflowID)
+	}
+}
+
+// setConsumer replaces any existing consumer for workflowID with cancel.
+func (m *Manager) setConsumer(workflowID string, cancel func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if old, ok := m.consumers[workflowID]; ok {
+		old()
+	}
+	m.consumers[workflowID] = cancel
 }
 
 // WebhookHandler returns an http.HandlerFunc suitable for POST /webhooks/{workflow_id}.
@@ -87,6 +124,8 @@ func (m *Manager) WebhookHandler() http.HandlerFunc { return m.webhook.handle }
 func (m *Manager) activate(workflowID string, cfg store.TriggerConfig) error {
 	switch cfg.Kind {
 	case "cron":
+		// Stop any running consumer before arming cron.
+		m.stopConsumer(workflowID)
 		// cron.add atomically removes any existing job for workflowID before
 		// scheduling the new one, so no pre-remove is needed here.
 		done := m.done
@@ -110,9 +149,38 @@ func (m *Manager) activate(workflowID string, cfg store.TriggerConfig) error {
 					"workflow_id", workflowID, "error", err)
 			}
 		})
-	case "webhook", "manual", "":
-		// If the workflow previously had a cron trigger, disarm it now.
+	case "kafka":
 		m.cron.remove(workflowID)
+		consumer, err := newKafkaConsumer(workflowID, cfg.KafkaBrokers, cfg.KafkaTopic, cfg.KafkaGroupID, m.dispatcher)
+		if err != nil {
+			return fmt.Errorf("trigger manager: kafka: %w", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.setConsumer(workflowID, cancel)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			consumer.run(ctx)
+		}()
+		return nil
+	case "sqs":
+		m.cron.remove(workflowID)
+		consumer, err := newSQSConsumer(workflowID, cfg.SQSQueueURL, cfg.SQSRegion, m.dispatcher)
+		if err != nil {
+			return fmt.Errorf("trigger manager: sqs: %w", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.setConsumer(workflowID, cancel)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			consumer.run(ctx)
+		}()
+		return nil
+	case "webhook", "manual", "":
+		// If the workflow previously had a cron trigger or consumer, disarm it.
+		m.cron.remove(workflowID)
+		m.stopConsumer(workflowID)
 		// Webhook is handled statically at request time; manual is on-demand only.
 		return nil
 	default:

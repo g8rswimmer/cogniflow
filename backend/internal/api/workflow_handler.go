@@ -71,11 +71,9 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if wf.Trigger.Kind == "cron" {
-		if err := trigger.ValidateCronExpr(wf.Trigger.CronExpr); err != nil {
-			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-			return
-		}
+	if err := validateTrigger(wf.Trigger); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
 	}
 
 	if err := engine.CycleDetect(wf.Nodes, wf.Edges); err != nil {
@@ -93,11 +91,15 @@ func (h *workflowHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.triggers.Upsert(created.ID, store.TriggerConfig{
-		Kind:     created.Trigger.Kind,
-		CronExpr: created.Trigger.CronExpr,
-	}); err != nil {
+	if err := h.triggers.Upsert(created.ID, triggerConfigFromWorkflow(created.Trigger)); err != nil {
 		slog.Error("workflow create: trigger activation failed", "workflow_id", created.ID, "error", err)
+		// Roll back the persisted workflow so the client's failed request leaves no orphan.
+		// If the delete also fails, log it — the workflow remains in the DB but with no
+		// armed trigger and will be re-armed on the next server restart via LoadAll.
+		if delErr := h.store.DeleteWorkflow(r.Context(), created.ID); delErr != nil {
+			slog.Error("workflow create: rollback failed after trigger error",
+				"workflow_id", created.ID, "error", delErr)
+		}
 		writeError(w, http.StatusInternalServerError, "TRIGGER_ACTIVATION_FAILED", err.Error())
 		return
 	}
@@ -148,11 +150,9 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if wf.Trigger.Kind == "cron" {
-		if err := trigger.ValidateCronExpr(wf.Trigger.CronExpr); err != nil {
-			writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-			return
-		}
+	if err := validateTrigger(wf.Trigger); err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
 	}
 
 	if err := engine.CycleDetect(wf.Nodes, wf.Edges); err != nil {
@@ -174,10 +174,7 @@ func (h *workflowHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.triggers.Upsert(updated.ID, store.TriggerConfig{
-		Kind:     updated.Trigger.Kind,
-		CronExpr: updated.Trigger.CronExpr,
-	}); err != nil {
+	if err := h.triggers.Upsert(updated.ID, triggerConfigFromWorkflow(updated.Trigger)); err != nil {
 		slog.Error("workflow update: trigger activation failed", "workflow_id", updated.ID, "error", err)
 		writeError(w, http.StatusInternalServerError, "TRIGGER_ACTIVATION_FAILED", err.Error())
 		return
@@ -599,9 +596,14 @@ type workflowResponse struct {
 }
 
 type triggerResponse struct {
-	Kind       string `json:"kind"`
-	CronExpr   string `json:"cron_expr,omitempty"`
-	WebhookURL string `json:"webhook_url,omitempty"`
+	Kind         string `json:"kind"`
+	CronExpr     string `json:"cron_expr,omitempty"`
+	WebhookURL   string `json:"webhook_url,omitempty"`
+	KafkaBrokers string `json:"kafka_brokers,omitempty"`
+	KafkaTopic   string `json:"kafka_topic,omitempty"`
+	KafkaGroupID string `json:"kafka_group_id,omitempty"`
+	SQSQueueURL  string `json:"sqs_queue_url,omitempty"`
+	SQSRegion    string `json:"sqs_region,omitempty"`
 }
 
 func toWorkflowResponse(wf store.Workflow) workflowResponse {
@@ -621,8 +623,13 @@ func toWorkflowResponse(wf store.Workflow) workflowResponse {
 		TimeoutSeconds:    wf.TimeoutSeconds,
 		InitialDataSchema: wf.InitialDataSchema,
 		Trigger: triggerResponse{
-			Kind:     wf.Trigger.Kind,
-			CronExpr: wf.Trigger.CronExpr,
+			Kind:         wf.Trigger.Kind,
+			CronExpr:     wf.Trigger.CronExpr,
+			KafkaBrokers: wf.Trigger.KafkaBrokers,
+			KafkaTopic:   wf.Trigger.KafkaTopic,
+			KafkaGroupID: wf.Trigger.KafkaGroupID,
+			SQSQueueURL:  wf.Trigger.SQSQueueURL,
+			SQSRegion:    wf.Trigger.SQSRegion,
 		},
 		Nodes:     nodes,
 		Edges:     edges,
@@ -633,6 +640,26 @@ func toWorkflowResponse(wf store.Workflow) workflowResponse {
 		resp.Trigger.WebhookURL = "/v1/webhooks/" + wf.ID
 	}
 	return resp
+}
+
+// validateTrigger runs kind-specific validation on a workflow trigger config.
+func validateTrigger(t store.Trigger) error {
+	switch t.Kind {
+	case "cron":
+		return trigger.ValidateCronExpr(t.CronExpr)
+	case "kafka":
+		return trigger.ValidateKafkaConfig(t.KafkaBrokers, t.KafkaTopic)
+	case "sqs":
+		return trigger.ValidateSQSConfig(t.SQSQueueURL, t.SQSRegion)
+	default:
+		return nil
+	}
+}
+
+// triggerConfigFromWorkflow maps a store.Trigger to the store.TriggerConfig
+// used by the trigger Manager.
+func triggerConfigFromWorkflow(t store.Trigger) store.TriggerConfig {
+	return store.TriggerConfig(t)
 }
 
 // maskSensitiveConfig replaces sensitive config values with "***" in API responses.
