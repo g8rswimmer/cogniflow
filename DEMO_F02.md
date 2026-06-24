@@ -16,28 +16,24 @@ docker compose up --build
 BASE=http://localhost:8080/v1
 ```
 
-### Kafka — start a local broker
+### Kafka — start with the compose profile
+
+The Kafka service is bundled in docker-compose under the `kafka` profile.
+Start everything together:
 
 ```bash
-docker run -d --name kafka \
-  -p 9092:9092 \
-  -e KAFKA_NODE_ID=1 \
-  -e KAFKA_PROCESS_ROLES=broker,controller \
-  -e KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093 \
-  -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
-  -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
-  -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT \
-  -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
-  -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
-  apache/kafka:3.8.0
+docker compose --profile kafka up --build
 ```
 
-Create the topic used in the demos:
+Kafka exposes two listeners:
 
-```bash
-docker exec kafka /opt/kafka/bin/kafka-topics.sh \
-  --create --topic order-events --bootstrap-server localhost:9092
-```
+| Listener | Address | Used by |
+|----------|---------|---------|
+| `PLAINTEXT` | `kafka:9092` | backend container (use this in the UI) |
+| `EXTERNAL` | `localhost:9094` | host-machine tools (producers, CLI) |
+
+Topics are created automatically on first use (`auto.create.topics.enable=true`),
+so no manual topic creation is needed.
 
 ### SQS — start LocalStack
 
@@ -79,7 +75,7 @@ WF_KAFKA=$(curl -s -X POST $BASE/workflows \
     "name": "F02 Kafka Order Events",
     "trigger": {
       "kind": "kafka",
-      "kafka_brokers": "localhost:9092",
+      "kafka_brokers": "kafka:9092",
       "kafka_topic": "order-events"
     },
     "timeout_seconds": 30,
@@ -108,8 +104,8 @@ The server immediately starts a consumer goroutine subscribed to `order-events`.
 
 ```bash
 echo '{"order_id":"ORD-001","amount":99.99,"customer":"alice"}' | \
-  docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
-  --topic order-events --bootstrap-server localhost:9092
+  docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
+  --topic order-events --bootstrap-server kafka:9092
 ```
 
 ### 1c — Verify a run was triggered
@@ -150,8 +146,8 @@ Publish three messages in sequence and confirm three runs are created.
 ```bash
 for i in 1 2 3; do
   echo "{\"order_id\":\"ORD-00$i\",\"amount\":$((i * 10)).00}" | \
-    docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
-    --topic order-events --bootstrap-server localhost:9092
+    docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
+    --topic order-events --bootstrap-server kafka:9092
 done
 
 sleep 5
@@ -164,16 +160,19 @@ curl -s "$BASE/workflows/$WF_KAFKA/runs" | jq 'length'
 
 ## Scenario 3 — SQS trigger dispatches a run
 
-Uses LocalStack SQS. Restart the server with fake AWS credentials pointing at LocalStack:
+Uses LocalStack SQS. Add the AWS env vars to your `.env` before starting:
 
 ```bash
-# Stop the existing backend container and relaunch with LocalStack env vars
-docker compose stop backend
+# .env additions for LocalStack
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_ENDPOINT_URL=http://host.docker.internal:4566
+```
 
-AWS_ACCESS_KEY_ID=test \
-AWS_SECRET_ACCESS_KEY=test \
-AWS_ENDPOINT_URL=http://localhost:4566 \
-  docker compose up -d backend
+Then start (or restart) the backend:
+
+```bash
+docker compose up -d --build backend
 ```
 
 ### 3a — Create the workflow with an sqs trigger
@@ -270,7 +269,7 @@ curl -s -X PUT "$BASE/workflows/$WF_KAFKA" \
   -d "$(curl -s $BASE/workflows/$WF_KAFKA | jq '
     .trigger = {
       "kind": "kafka",
-      "kafka_brokers": "localhost:9092",
+      "kafka_brokers": "kafka:9092",
       "kafka_topic": "order-events"
     }')" | jq '.trigger'
 ```
@@ -372,8 +371,8 @@ The consumer does not crash on a non-JSON message. It logs a warning and dispatc
 ```bash
 # Publish a plain-text message
 echo 'plain text — not JSON' | \
-  docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
-  --topic order-events --bootstrap-server localhost:9092
+  docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
+  --topic order-events --bootstrap-server kafka:9092
 
 sleep 3
 RUN_PLAIN=$(curl -s "$BASE/workflows/$WF_KAFKA/runs" | jq -r '.[0].run_id')
@@ -396,8 +395,8 @@ sleep 5  # wait for startup
 
 # The kafka consumer is already running again; publish a message
 echo '{"order_id":"POST-RESTART","amount":1.00}' | \
-  docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh \
-  --topic order-events --bootstrap-server localhost:9092
+  docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh \
+  --topic order-events --bootstrap-server kafka:9092
 
 sleep 3
 curl -s "$BASE/workflows/$WF_KAFKA/runs" | jq '[.[] | .triggered_by] | unique'
@@ -412,7 +411,7 @@ curl -s "$BASE/workflows/$WF_KAFKA/runs" | jq '[.[] | .triggered_by] | unique'
 ```bash
 curl -s -X DELETE "$BASE/workflows/$WF_KAFKA"
 curl -s -X DELETE "$BASE/workflows/$WF_SQS"
-docker stop kafka && docker rm kafka
+docker compose --profile kafka down -v
 docker stop localstack && docker rm localstack
 echo "Done"
 ```

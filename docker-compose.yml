@@ -36,6 +36,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PLUGIN_ADDRESSES: ${PLUGIN_ADDRESSES:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      # AWS credentials — used by the SQS trigger consumer (leave blank if not using SQS)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     healthcheck:
@@ -58,5 +62,41 @@ services:
     ports:
       - "${FRONTEND_PORT:-3000}:80"
 
+  # ── Optional: Kafka (start with --profile kafka) ──────────────────────────
+  #
+  # Two listeners are configured:
+  #   PLAINTEXT://kafka:9092   – used by the backend container (internal)
+  #   EXTERNAL://localhost:9094 – used by tools running on the host machine
+  #
+  # In the cogniflow UI, set kafka_brokers to "kafka:9092".
+  # To publish test messages from the host use localhost:9094.
+  kafka:
+    image: apache/kafka:3.8.0
+    profiles: ["kafka"]
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "${KAFKA_EXTERNAL_PORT:-9094}:9094"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
 volumes:
   mysql_data:
+  kafka_data:
