@@ -56,7 +56,7 @@ func (m *mockKafkaReader) Close() error {
 
 func newTestKafkaConsumer(reader kafkaReader, workflowID string, disp Dispatcher) *kafkaConsumer {
 	return &kafkaConsumer{
-		reader:     reader,
+		newReader:  func() kafkaReader { return reader },
 		workflowID: workflowID,
 		dispatcher: disp,
 	}

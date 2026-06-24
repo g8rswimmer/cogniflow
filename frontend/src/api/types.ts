@@ -54,12 +54,17 @@ export interface WorkflowEdge {
   is_loop_back?: boolean
 }
 
-export type TriggerKind = 'manual' | 'webhook' | 'cron'
+export type TriggerKind = 'manual' | 'webhook' | 'cron' | 'kafka' | 'sqs'
 
 export interface Trigger {
   kind: TriggerKind
   cron_expr?: string
   webhook_url?: string
+  kafka_brokers?: string
+  kafka_topic?: string
+  kafka_group_id?: string
+  sqs_queue_url?: string
+  sqs_region?: string
 }
 
 export interface Workflow {

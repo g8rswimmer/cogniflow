@@ -30,7 +30,11 @@ type kafkaReader interface {
 }
 
 type kafkaConsumer struct {
-	reader     kafkaReader
+	// newReader is called on each (re)connect attempt, yielding a fresh reader.
+	// Using a factory rather than a single reader instance ensures clean state
+	// after connection errors — kafka.Reader's internal connection is not reliably
+	// reset after certain error types, so recreating it is the safe approach.
+	newReader  func() kafkaReader
 	workflowID string
 	dispatcher Dispatcher
 }
@@ -46,13 +50,14 @@ func newKafkaConsumer(workflowID, brokers, topic, groupID string, disp Dispatche
 	for i, p := range parts {
 		parts[i] = strings.TrimSpace(p)
 	}
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: parts,
-		Topic:   topic,
-		GroupID: groupID,
-	})
 	return &kafkaConsumer{
-		reader:     r,
+		newReader: func() kafkaReader {
+			return kafka.NewReader(kafka.ReaderConfig{
+				Brokers: parts,
+				Topic:   topic,
+				GroupID: groupID,
+			})
+		},
 		workflowID: workflowID,
 		dispatcher: disp,
 	}, nil
@@ -62,26 +67,40 @@ func (c *kafkaConsumer) start(ctx context.Context) {
 	go c.run(ctx)
 }
 
+// run is the outer reconnect loop. It creates a fresh reader on each attempt so
+// that connection errors leave no stale state in the reader internals.
 func (c *kafkaConsumer) run(ctx context.Context) {
-	defer c.reader.Close()
 	backoff := time.Second
 	for {
-		msg, err := c.reader.ReadMessage(ctx)
+		r := c.newReader()
+		reconnect := c.consume(ctx, r, &backoff)
+		_ = r.Close()
+		if !reconnect || ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// consume reads messages from r until an error or ctx cancellation.
+// Returns true if the caller should reconnect with a fresh reader.
+func (c *kafkaConsumer) consume(ctx context.Context, r kafkaReader, backoff *time.Duration) bool {
+	for {
+		msg, err := r.ReadMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return false
 			}
 			slog.Error("kafka trigger: read error",
 				"workflow_id", c.workflowID, "error", err)
 			select {
 			case <-ctx.Done():
-				return
-			case <-time.After(backoff):
+				return false
+			case <-time.After(*backoff):
 			}
-			backoff = min(backoff*2, 30*time.Second)
-			continue
+			*backoff = min(*backoff*2, 30*time.Second)
+			return true // signal outer loop to reconnect
 		}
-		backoff = time.Second
+		*backoff = time.Second
 
 		initialData := parseMessageJSON(msg.Value, c.workflowID, "kafka")
 		if _, err := c.dispatcher.Dispatch(ctx, RunRequest{
