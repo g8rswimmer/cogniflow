@@ -17,12 +17,26 @@ cd cogniflow
 cp .env.example .env
 ```
 
-Open `.env` and set **`COGNIFLOW_ENCRYPTION_KEY`** to a fresh 32-byte base64 key:
+Open `.env` and set the two required secrets:
 
 ```bash
+# AES-256 key for encrypting sensitive node config values at rest
 openssl rand -base64 32
-# paste the output into .env as COGNIFLOW_ENCRYPTION_KEY=<output>
+# paste as COGNIFLOW_ENCRYPTION_KEY=<output>
+
+# HMAC-SHA256 key for signing JWT tokens
+openssl rand -hex 32
+# paste as JWT_SECRET=<output>
 ```
+
+Also set the bootstrap admin credentials so you can log in on first run:
+
+```
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=<choose a strong password>
+```
+
+On first startup the server creates the "Default" org and this `system_admin` account automatically. Open `http://localhost:3000/login` and sign in with these credentials.
 
 ```bash
 # 3. Start everything
@@ -54,6 +68,11 @@ http://localhost:3000
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `COGNIFLOW_ENCRYPTION_KEY` | **yes** | — | 32-byte AES-256 key (base64). Generate: `openssl rand -base64 32` |
+| `JWT_SECRET` | **yes** | — | HMAC-SHA256 signing key for JWT tokens (≥ 32 chars). Generate: `openssl rand -hex 32` |
+| `JWT_TTL` | no | `24h` | JWT token lifetime. Accepts Go duration strings: `1h`, `30m`, etc. |
+| `BOOTSTRAP_ADMIN_EMAIL` | no | — | Email for the initial `system_admin` account created on first startup |
+| `BOOTSTRAP_ADMIN_PASSWORD` | no | — | Password for the bootstrap admin (min 8 chars). Change before production. |
+| `FRONTEND_URL` | no | `http://localhost:3000` | Public URL of the frontend — used to build accept-invite links in emails |
 | `MYSQL_PASSWORD` | no | `cogniflow_pass` | MySQL app-user password |
 | `MYSQL_ROOT_PASSWORD` | no | `cogniflow_root` | MySQL root password (init only) |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
@@ -93,6 +112,9 @@ Then start the backend locally with:
 cd backend
 export DB_DSN="cogniflow:cogniflow_pass@tcp(localhost:3306)/cogniflow?parseTime=true&multiStatements=true"
 export COGNIFLOW_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export JWT_SECRET="$(openssl rand -hex 32)"
+export BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+export BOOTSTRAP_ADMIN_PASSWORD=localdevpassword
 go run ./cmd/server
 ```
 

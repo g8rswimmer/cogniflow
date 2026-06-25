@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
@@ -148,6 +149,51 @@ func (s *vaultStubStore) DeleteWorkflowVersions(_ context.Context, _ string) err
 func (s *vaultStubStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
 	return store.Workflow{}, store.ErrNotFound
 }
+
+// Auth stubs — not used by vault tests; required to implement store.Store.
+func (s *vaultStubStore) CreateOrganization(_ context.Context, org store.Organization) (store.Organization, error) {
+	return org, nil
+}
+func (s *vaultStubStore) GetOrganization(_ context.Context, _ string) (store.Organization, error) {
+	return store.Organization{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListOrganizations(_ context.Context) ([]store.Organization, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) DeleteOrganization(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) CreateUser(_ context.Context, u store.User) (store.User, error) {
+	return u, nil
+}
+func (s *vaultStubStore) GetUser(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (s *vaultStubStore) GetUserByEmail(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (s *vaultStubStore) ListUsers(_ context.Context, _ string) ([]store.User, error) {
+	return nil, nil
+}
+func (s *vaultStubStore) UpdateUserRole(_ context.Context, _, _ string) error { return nil }
+func (s *vaultStubStore) UpdateUserPermissions(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (s *vaultStubStore) DeleteUser(_ context.Context, _ string) error { return nil }
+func (s *vaultStubStore) CreateInvitation(_ context.Context, inv store.Invitation) (store.Invitation, error) {
+	return inv, nil
+}
+func (s *vaultStubStore) GetInvitationByToken(_ context.Context, _ string) (store.Invitation, error) {
+	return store.Invitation{}, store.ErrNotFound
+}
+func (s *vaultStubStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+func (s *vaultStubStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (s *vaultStubStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (s *vaultStubStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
 
 // stubNode has one sensitive field "api_key".
 type stubNode struct{}

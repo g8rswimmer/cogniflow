@@ -185,6 +185,51 @@ func (m *mockEngineStore) RestoreWorkflowVersion(_ context.Context, _ string, _ 
 	return store.Workflow{}, store.ErrNotFound
 }
 
+// Auth methods — not used by engine tests; stubs to satisfy store.Store.
+func (m *mockEngineStore) CreateOrganization(_ context.Context, org store.Organization) (store.Organization, error) {
+	return org, nil
+}
+func (m *mockEngineStore) GetOrganization(_ context.Context, _ string) (store.Organization, error) {
+	return store.Organization{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListOrganizations(_ context.Context) ([]store.Organization, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) DeleteOrganization(_ context.Context, _ string) error { return nil }
+func (m *mockEngineStore) CreateUser(_ context.Context, u store.User) (store.User, error) {
+	return u, nil
+}
+func (m *mockEngineStore) GetUser(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (m *mockEngineStore) GetUserByEmail(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (m *mockEngineStore) ListUsers(_ context.Context, _ string) ([]store.User, error) {
+	return nil, nil
+}
+func (m *mockEngineStore) UpdateUserRole(_ context.Context, _, _ string) error { return nil }
+func (m *mockEngineStore) UpdateUserPermissions(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (m *mockEngineStore) DeleteUser(_ context.Context, _ string) error { return nil }
+func (m *mockEngineStore) CreateInvitation(_ context.Context, inv store.Invitation) (store.Invitation, error) {
+	return inv, nil
+}
+func (m *mockEngineStore) GetInvitationByToken(_ context.Context, _ string) (store.Invitation, error) {
+	return store.Invitation{}, store.ErrNotFound
+}
+func (m *mockEngineStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+func (m *mockEngineStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (m *mockEngineStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (m *mockEngineStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
+
 // ---- helpers -------------------------------------------------------------
 
 func buildTestWorkflow(id string, handlers ...node.NodeHandler) (store.Workflow, *node.NodeRegistry) {

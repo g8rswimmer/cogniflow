@@ -1,3 +1,76 @@
+// ---------------------------------------------------------------------------
+// Auth types
+// ---------------------------------------------------------------------------
+
+export interface UserResponse {
+  id: string
+  org_id: string
+  org_name: string
+  email: string
+  role: 'system_admin' | 'org_admin' | 'member'
+  permissions: string[]
+  created_at: string
+}
+
+export interface AuthResponse {
+  token: string
+  user: UserResponse
+}
+
+export interface OrgResponse {
+  id: string
+  name: string
+  created_at: string
+}
+
+export interface InvitePreviewResponse {
+  email: string
+  role: string
+  org_name: string
+}
+
+export interface InviteCreatedResponse {
+  id: string
+  email: string
+  role: string
+  token: string
+  expires_at: string
+  email_sent: boolean
+}
+
+export interface OrgEmailSettingsResponse {
+  org_id: string
+  smtp_host: string
+  smtp_port: string
+  smtp_user: string
+  smtp_password: string  // "***" when set, "" when not set
+  smtp_from: string
+  subject: string
+  body: string
+  smtp_configured: boolean
+  is_default: boolean
+  updated_at?: string
+}
+
+export interface OrgUsersResponse {
+  users: UserResponse[]
+}
+
+export interface OrgsResponse {
+  organizations: OrgResponse[]
+}
+
+export interface AllUsersResponse {
+  users: UserResponse[]
+}
+
+export interface CreateOrgResponse {
+  organization: OrgResponse
+  admin: UserResponse
+}
+
+// ---------------------------------------------------------------------------
+
 export interface Position {
   x: number
   y: number

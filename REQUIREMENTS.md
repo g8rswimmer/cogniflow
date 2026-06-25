@@ -278,8 +278,8 @@ All nodes (built-in and extended) must conform to the following interface:
 | # | Item |
 |---|------|
 | ~~F-01~~ | ~~Workflow loops / cycles with configurable max-iteration guard~~ |
-| F-02 | Message queue triggers — Kafka topic and AWS SQS queue subscriptions |
-| F-03 | User authentication and multi-tenancy |
+| ~~F-02~~ | ~~Message queue triggers — Kafka topic and AWS SQS queue subscriptions~~ |
+| ~~F-03~~ | ~~User authentication and multi-tenancy~~ |
 | ~~F-04~~ | ~~Workflow versioning and change history~~ |
 | ~~F-05~~ | ~~Persistent per-node execution data (full run replay)~~ |
 | F-06 | Community node extension marketplace |

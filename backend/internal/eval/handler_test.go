@@ -420,6 +420,47 @@ func (s *stubStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (
 	return store.Workflow{}, store.ErrNotFound
 }
 
+// Auth stubs — not used by eval handler tests; required to implement store.Store.
+func (s *stubStore) CreateOrganization(_ context.Context, org store.Organization) (store.Organization, error) {
+	return org, nil
+}
+func (s *stubStore) GetOrganization(_ context.Context, _ string) (store.Organization, error) {
+	return store.Organization{}, store.ErrNotFound
+}
+func (s *stubStore) ListOrganizations(_ context.Context) ([]store.Organization, error) {
+	return nil, nil
+}
+func (s *stubStore) DeleteOrganization(_ context.Context, _ string) error { return nil }
+func (s *stubStore) CreateUser(_ context.Context, u store.User) (store.User, error) {
+	return u, nil
+}
+func (s *stubStore) GetUser(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (s *stubStore) GetUserByEmail(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (s *stubStore) ListUsers(_ context.Context, _ string) ([]store.User, error) { return nil, nil }
+func (s *stubStore) UpdateUserRole(_ context.Context, _, _ string) error          { return nil }
+func (s *stubStore) UpdateUserPermissions(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (s *stubStore) DeleteUser(_ context.Context, _ string) error { return nil }
+func (s *stubStore) CreateInvitation(_ context.Context, inv store.Invitation) (store.Invitation, error) {
+	return inv, nil
+}
+func (s *stubStore) GetInvitationByToken(_ context.Context, _ string) (store.Invitation, error) {
+	return store.Invitation{}, store.ErrNotFound
+}
+func (s *stubStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error { return nil }
+func (s *stubStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (s *stubStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (s *stubStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
+
 // ---- Suite handler tests ---------------------------------------------------
 
 func TestHandler_CreateSuite(t *testing.T) {

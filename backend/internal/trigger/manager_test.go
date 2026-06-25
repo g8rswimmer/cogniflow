@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
@@ -119,6 +120,51 @@ func (m *fullMockStore) DeleteWorkflowVersions(_ context.Context, _ string) erro
 func (m *fullMockStore) RestoreWorkflowVersion(_ context.Context, _ string, _ int) (store.Workflow, error) {
 	return store.Workflow{}, store.ErrNotFound
 }
+
+// Auth stubs — not used by trigger tests; required to implement store.Store.
+func (m *fullMockStore) CreateOrganization(_ context.Context, org store.Organization) (store.Organization, error) {
+	return org, nil
+}
+func (m *fullMockStore) GetOrganization(_ context.Context, _ string) (store.Organization, error) {
+	return store.Organization{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListOrganizations(_ context.Context) ([]store.Organization, error) {
+	return nil, nil
+}
+func (m *fullMockStore) DeleteOrganization(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) CreateUser(_ context.Context, u store.User) (store.User, error) {
+	return u, nil
+}
+func (m *fullMockStore) GetUser(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (m *fullMockStore) GetUserByEmail(_ context.Context, _ string) (store.User, error) {
+	return store.User{}, store.ErrNotFound
+}
+func (m *fullMockStore) ListUsers(_ context.Context, _ string) ([]store.User, error) {
+	return nil, nil
+}
+func (m *fullMockStore) UpdateUserRole(_ context.Context, _, _ string) error { return nil }
+func (m *fullMockStore) UpdateUserPermissions(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+func (m *fullMockStore) DeleteUser(_ context.Context, _ string) error { return nil }
+func (m *fullMockStore) CreateInvitation(_ context.Context, inv store.Invitation) (store.Invitation, error) {
+	return inv, nil
+}
+func (m *fullMockStore) GetInvitationByToken(_ context.Context, _ string) (store.Invitation, error) {
+	return store.Invitation{}, store.ErrNotFound
+}
+func (m *fullMockStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+func (m *fullMockStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (m *fullMockStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (m *fullMockStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
 
 // ---- LoadAll tests ----------------------------------------------------------
 

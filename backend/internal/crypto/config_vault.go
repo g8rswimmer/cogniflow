@@ -2,13 +2,18 @@ package crypto
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
+
+const encPrefix = "enc:"
 
 // Compile-time assertion that *ConfigVault implements store.Store.
 var _ store.Store = (*ConfigVault)(nil)
@@ -24,6 +29,113 @@ type ConfigVault struct {
 // NewConfigVault creates a ConfigVault that decorates the given Store.
 func NewConfigVault(inner store.Store, cipher *Cipher, registry *node.NodeRegistry) *ConfigVault {
 	return &ConfigVault{inner: inner, cipher: cipher, registry: registry}
+}
+
+// ---- Auth methods — delegate directly; no sensitive data in these types -----
+
+func (v *ConfigVault) CreateOrganization(ctx context.Context, org store.Organization) (store.Organization, error) {
+	return v.inner.CreateOrganization(ctx, org)
+}
+func (v *ConfigVault) GetOrganization(ctx context.Context, id string) (store.Organization, error) {
+	return v.inner.GetOrganization(ctx, id)
+}
+func (v *ConfigVault) ListOrganizations(ctx context.Context) ([]store.Organization, error) {
+	return v.inner.ListOrganizations(ctx)
+}
+func (v *ConfigVault) DeleteOrganization(ctx context.Context, id string) error {
+	return v.inner.DeleteOrganization(ctx, id)
+}
+
+func (v *ConfigVault) CreateUser(ctx context.Context, u store.User) (store.User, error) {
+	return v.inner.CreateUser(ctx, u)
+}
+func (v *ConfigVault) GetUser(ctx context.Context, id string) (store.User, error) {
+	return v.inner.GetUser(ctx, id)
+}
+func (v *ConfigVault) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+	return v.inner.GetUserByEmail(ctx, email)
+}
+func (v *ConfigVault) ListUsers(ctx context.Context, orgID string) ([]store.User, error) {
+	return v.inner.ListUsers(ctx, orgID)
+}
+func (v *ConfigVault) UpdateUserRole(ctx context.Context, userID, role string) error {
+	return v.inner.UpdateUserRole(ctx, userID, role)
+}
+func (v *ConfigVault) UpdateUserPermissions(ctx context.Context, userID string, permissions []string) error {
+	return v.inner.UpdateUserPermissions(ctx, userID, permissions)
+}
+func (v *ConfigVault) DeleteUser(ctx context.Context, userID string) error {
+	return v.inner.DeleteUser(ctx, userID)
+}
+
+func (v *ConfigVault) CreateInvitation(ctx context.Context, inv store.Invitation) (store.Invitation, error) {
+	return v.inner.CreateInvitation(ctx, inv)
+}
+func (v *ConfigVault) GetInvitationByToken(ctx context.Context, token string) (store.Invitation, error) {
+	return v.inner.GetInvitationByToken(ctx, token)
+}
+func (v *ConfigVault) AcceptInvitation(ctx context.Context, invID string, now time.Time) error {
+	return v.inner.AcceptInvitation(ctx, invID, now)
+}
+
+func (v *ConfigVault) UpsertOrgEmailSettings(ctx context.Context, s store.OrgEmailSettings) error {
+	if s.SMTPPassword != "" {
+		enc, err := v.encryptString(s.SMTPPassword)
+		if err != nil {
+			return fmt.Errorf("config vault: encrypt smtp_password: %w", err)
+		}
+		s.SMTPPassword = enc
+	}
+	return v.inner.UpsertOrgEmailSettings(ctx, s)
+}
+
+func (v *ConfigVault) GetOrgEmailSettings(ctx context.Context, orgID string) (store.OrgEmailSettings, error) {
+	s, err := v.inner.GetOrgEmailSettings(ctx, orgID)
+	if err != nil {
+		return store.OrgEmailSettings{}, err
+	}
+	if s.SMTPPassword != "" {
+		plain, err := v.decryptString(s.SMTPPassword)
+		if err != nil {
+			return store.OrgEmailSettings{}, fmt.Errorf("config vault: decrypt smtp_password: %w", err)
+		}
+		s.SMTPPassword = plain
+	}
+	return s, nil
+}
+
+func (v *ConfigVault) DeleteOrgEmailSettings(ctx context.Context, orgID string) error {
+	return v.inner.DeleteOrgEmailSettings(ctx, orgID)
+}
+
+// encryptString encrypts a plain-text string with AES-256-GCM and returns
+// "enc:<base64>". Already-encrypted values are returned unchanged.
+func (v *ConfigVault) encryptString(plain string) (string, error) {
+	if strings.HasPrefix(plain, encPrefix) {
+		return plain, nil
+	}
+	ct, err := v.cipher.Encrypt([]byte(plain))
+	if err != nil {
+		return "", err
+	}
+	return encPrefix + base64.StdEncoding.EncodeToString(ct), nil
+}
+
+// decryptString decrypts a value produced by encryptString.
+// Returns the input unchanged if it does not have the enc: prefix.
+func (v *ConfigVault) decryptString(encrypted string) (string, error) {
+	if !strings.HasPrefix(encrypted, encPrefix) {
+		return encrypted, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(encrypted, encPrefix))
+	if err != nil {
+		return "", fmt.Errorf("base64 decode: %w", err)
+	}
+	plain, err := v.cipher.Decrypt(decoded)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 // CreateWorkflow encrypts sensitive config values before delegating to the inner store.
