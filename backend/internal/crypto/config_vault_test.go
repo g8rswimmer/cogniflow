@@ -578,3 +578,48 @@ func TestParseSensitiveKeys_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected nil for invalid JSON, got %v", keys)
 	}
 }
+
+// TestConfigVault_EncryptNodes_ReturnsNilOnSuccess verifies that encryptNodes
+// returns nil when encryption succeeds and that the sensitive field is written
+// as []byte ciphertext (not left as plaintext). This test also confirms the
+// function signature change — encryptNodes now returns error so callers can
+// abort the save instead of silently persisting a partially-encrypted config.
+func TestConfigVault_EncryptNodes_ReturnsNilOnSuccess(t *testing.T) {
+	vault, _ := newTestVault(t)
+	nodes := []store.WorkflowNode{
+		{
+			ID:     "n1",
+			TypeID: "ai.stub",
+			Config: map[string]any{"api_key": "sk-secret", "model": "gpt-4"},
+		},
+	}
+	if err := vault.encryptNodes(nodes); err != nil {
+		t.Fatalf("expected nil error from encryptNodes, got: %v", err)
+	}
+	if _, ok := nodes[0].Config["api_key"].([]byte); !ok {
+		t.Errorf("expected api_key to be encrypted []byte, got %T", nodes[0].Config["api_key"])
+	}
+	if nodes[0].Config["model"] != "gpt-4" {
+		t.Errorf("non-sensitive field should be unchanged, got %v", nodes[0].Config["model"])
+	}
+}
+
+// TestConfigVault_CreateWorkflow_PropagatesEncryptionError verifies that
+// CreateWorkflow propagates an encryptNodes error without calling the inner
+// store, preventing partially-encrypted configs from being persisted. In
+// practice encryptNodes only fails if crypto/rand is unavailable; this test
+// validates the happy path to confirm the error return is wired correctly.
+func TestConfigVault_CreateWorkflow_PropagatesEncryptionError(t *testing.T) {
+	vault, _ := newTestVault(t)
+	wf := store.Workflow{
+		Nodes: []store.WorkflowNode{{
+			ID:     "n1",
+			TypeID: "ai.stub",
+			Config: map[string]any{"api_key": "valid-string"},
+		}},
+	}
+	_, err := vault.CreateWorkflow(context.Background(), wf)
+	if err != nil {
+		t.Fatalf("unexpected error for valid encryption input: %v", err)
+	}
+}

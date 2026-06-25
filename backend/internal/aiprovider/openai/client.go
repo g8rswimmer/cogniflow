@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/httpclient"
 )
 
 const (
@@ -44,10 +45,14 @@ type Client struct {
 	http *http.Client
 }
 
-// New returns a new OpenAI Client with a default 90 s timeout.
-// Pass Option values to override timeout or transport.
+// New returns a new OpenAI Client with a default 90 s timeout and a retry
+// transport that retries up to 3 times on 429/5xx with exponential backoff.
+// Pass Option values to override timeout or transport (WithTransport bypasses retry).
 func New(opts ...Option) *Client {
-	hc := &http.Client{Timeout: defaultTimeout}
+	hc := &http.Client{
+		Timeout:   defaultTimeout,
+		Transport: httpclient.NewRetryTransport(nil, 3, time.Second),
+	}
 	for _, o := range opts {
 		o(hc)
 	}
