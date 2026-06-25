@@ -27,6 +27,7 @@ import type {
   OrgsResponse,
   AllUsersResponse,
   CreateOrgResponse,
+  OrgEmailSettingsResponse,
 } from '../api/types'
 
 export const api = {
@@ -261,4 +262,28 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ permissions }),
     }),
+
+  getOrgEmailSettings: () =>
+    request<OrgEmailSettingsResponse>('/org/email-settings'),
+
+  setOrgEmailSettingsAdmin: (orgId: string, body: {
+    smtp_host: string; smtp_port: string; smtp_user: string
+    smtp_password: string; smtp_from: string; subject: string; body: string
+  }) =>
+    request<OrgEmailSettingsResponse>(`/admin/orgs/${encodeURIComponent(orgId)}/email-settings`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  upsertOrgEmailSettings: (body: {
+    smtp_host: string; smtp_port: string; smtp_user: string
+    smtp_password: string; smtp_from: string; subject: string; body: string
+  }) =>
+    request<OrgEmailSettingsResponse>('/org/email-settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteOrgEmailSettings: () =>
+    request<void>('/org/email-settings', { method: 'DELETE' }),
 }

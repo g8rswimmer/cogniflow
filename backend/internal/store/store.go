@@ -57,6 +57,23 @@ type User struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// OrgEmailSettings holds per-org SMTP credentials and the Go text/template for
+// invite emails. SMTPPassword is stored AES-256-GCM encrypted (enc:<base64>)
+// and is returned in plaintext by ConfigVault; callers must mask it before
+// including it in API responses. When SMTPHost is empty, email sending is
+// disabled for the org. When Subject/Body are empty, built-in defaults are used.
+type OrgEmailSettings struct {
+	OrgID        string    `json:"org_id"`
+	SMTPHost     string    `json:"smtp_host"`
+	SMTPPort     string    `json:"smtp_port"`
+	SMTPUser     string    `json:"smtp_user"`
+	SMTPPassword string    `json:"smtp_password"` // plaintext in memory; encrypted at rest
+	SMTPFrom     string    `json:"smtp_from"`
+	Subject      string    `json:"subject"`
+	Body         string    `json:"body"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 // Invitation is a pending invite that creates a User on acceptance.
 type Invitation struct {
 	ID          string     `json:"id"`
@@ -301,6 +318,11 @@ type Store interface {
 	CreateInvitation(ctx context.Context, inv Invitation) (Invitation, error)
 	GetInvitationByToken(ctx context.Context, token string) (Invitation, error)
 	AcceptInvitation(ctx context.Context, invID string, now time.Time) error
+
+	// Org Email Settings (SMTP + invite template)
+	UpsertOrgEmailSettings(ctx context.Context, s OrgEmailSettings) error
+	GetOrgEmailSettings(ctx context.Context, orgID string) (OrgEmailSettings, error)
+	DeleteOrgEmailSettings(ctx context.Context, orgID string) error
 
 	// Workflow CRUD
 	CreateWorkflow(ctx context.Context, w Workflow) (Workflow, error)

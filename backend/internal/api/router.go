@@ -40,8 +40,12 @@ func NewRouter(
 	level *slog.LevelVar,
 	jwtSecret []byte,
 	jwtTTL time.Duration,
+	frontendURL string,
 ) http.Handler {
 	mux := newAuthMux(jwtSecret)
+
+	// Config — always public.
+	mux.public("GET /v1/config", newConfigHandler())
 
 	// Infrastructure — always public.
 	mux.public("GET /health", newHealthHandler(db))
@@ -122,14 +126,19 @@ func NewRouter(
 	mux.public("POST /v1/eval-webhooks/{suite_id}", http.HandlerFunc(eh.WebhookTrigger))
 
 	// Org-admin routes (org_admin or system_admin).
-	uah := &userAdminHandler{store: st, jwtSecret: jwtSecret, jwtTTL: jwtTTL}
+	uah := &userAdminHandler{store: st, jwtSecret: jwtSecret, jwtTTL: jwtTTL, frontendURL: frontendURL}
+	esH := &orgEmailSettingsHandler{store: st}
 	mux.role("GET /v1/org/users", http.HandlerFunc(uah.listOrgUsers), "org_admin", "system_admin")
 	mux.role("POST /v1/org/users/invite", http.HandlerFunc(uah.inviteUser), "org_admin", "system_admin")
 	mux.role("PUT /v1/org/users/{id}/role", http.HandlerFunc(uah.updateOrgUserRole), "org_admin", "system_admin")
 	mux.role("PUT /v1/org/users/{id}/permissions", http.HandlerFunc(uah.updateOrgUserPermissions), "org_admin", "system_admin")
 	mux.role("DELETE /v1/org/users/{id}", http.HandlerFunc(uah.removeOrgUser), "org_admin", "system_admin")
+	mux.role("GET /v1/org/email-settings", http.HandlerFunc(esH.getOrgEmailSettings), "org_admin", "system_admin")
+	mux.role("PUT /v1/org/email-settings", http.HandlerFunc(esH.upsertOrgEmailSettings), "org_admin", "system_admin")
+	mux.role("DELETE /v1/org/email-settings", http.HandlerFunc(esH.deleteOrgEmailSettings), "org_admin", "system_admin")
 
 	// System-admin routes.
+	mux.role("PUT /v1/admin/orgs/{org_id}/email-settings", http.HandlerFunc(esH.upsertOrgEmailSettingsAdmin), "system_admin")
 	pah := &pluginAdminHandler{store: st, registry: registry, registerFn: nodeplugin.RegisterOne}
 	mux.role("GET /v1/admin/orgs", http.HandlerFunc(uah.listOrgs), "system_admin")
 	mux.role("POST /v1/admin/orgs", http.HandlerFunc(uah.createOrg), "system_admin")

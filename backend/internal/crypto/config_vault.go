@@ -2,14 +2,18 @@ package crypto
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
+
+const encPrefix = "enc:"
 
 // Compile-time assertion that *ConfigVault implements store.Store.
 var _ store.Store = (*ConfigVault)(nil)
@@ -72,6 +76,66 @@ func (v *ConfigVault) GetInvitationByToken(ctx context.Context, token string) (s
 }
 func (v *ConfigVault) AcceptInvitation(ctx context.Context, invID string, now time.Time) error {
 	return v.inner.AcceptInvitation(ctx, invID, now)
+}
+
+func (v *ConfigVault) UpsertOrgEmailSettings(ctx context.Context, s store.OrgEmailSettings) error {
+	if s.SMTPPassword != "" {
+		enc, err := v.encryptString(s.SMTPPassword)
+		if err != nil {
+			return fmt.Errorf("config vault: encrypt smtp_password: %w", err)
+		}
+		s.SMTPPassword = enc
+	}
+	return v.inner.UpsertOrgEmailSettings(ctx, s)
+}
+
+func (v *ConfigVault) GetOrgEmailSettings(ctx context.Context, orgID string) (store.OrgEmailSettings, error) {
+	s, err := v.inner.GetOrgEmailSettings(ctx, orgID)
+	if err != nil {
+		return store.OrgEmailSettings{}, err
+	}
+	if s.SMTPPassword != "" {
+		plain, err := v.decryptString(s.SMTPPassword)
+		if err != nil {
+			return store.OrgEmailSettings{}, fmt.Errorf("config vault: decrypt smtp_password: %w", err)
+		}
+		s.SMTPPassword = plain
+	}
+	return s, nil
+}
+
+func (v *ConfigVault) DeleteOrgEmailSettings(ctx context.Context, orgID string) error {
+	return v.inner.DeleteOrgEmailSettings(ctx, orgID)
+}
+
+// encryptString encrypts a plain-text string with AES-256-GCM and returns
+// "enc:<base64>". Already-encrypted values are returned unchanged.
+func (v *ConfigVault) encryptString(plain string) (string, error) {
+	if strings.HasPrefix(plain, encPrefix) {
+		return plain, nil
+	}
+	ct, err := v.cipher.Encrypt([]byte(plain))
+	if err != nil {
+		return "", err
+	}
+	return encPrefix + base64.StdEncoding.EncodeToString(ct), nil
+}
+
+// decryptString decrypts a value produced by encryptString.
+// Returns the input unchanged if it does not have the enc: prefix.
+func (v *ConfigVault) decryptString(encrypted string) (string, error) {
+	if !strings.HasPrefix(encrypted, encPrefix) {
+		return encrypted, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(encrypted, encPrefix))
+	if err != nil {
+		return "", fmt.Errorf("base64 decode: %w", err)
+	}
+	plain, err := v.cipher.Decrypt(decoded)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 // CreateWorkflow encrypts sensitive config values before delegating to the inner store.

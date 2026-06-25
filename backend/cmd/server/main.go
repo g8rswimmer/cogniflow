@@ -137,6 +137,8 @@ func run(logLevel *slog.LevelVar) error {
 
 	vault := crypto.NewConfigVault(rawStore, cipher, registry)
 
+	frontendURL := os.Getenv("FRONTEND_URL")
+
 	if err := bootstrapAdmin(context.Background(), vault); err != nil {
 		return fmt.Errorf("admin bootstrap: %w", err)
 	}
@@ -176,7 +178,7 @@ func run(logLevel *slog.LevelVar) error {
 	// background goroutines (e.g. EvalRunner) to stop cleanly.
 	srvCtx, srvCancel := context.WithCancel(context.Background())
 
-	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, graderRegistry, logLevel, jwtSecret, jwtTTL)
+	router := api.NewRouter(srvCtx, db, vault, registry, wfEngine, bus, wfEngine, cipher, triggerMgr, graderRegistry, logLevel, jwtSecret, jwtTTL, frontendURL)
 
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("server starting", "addr", addr)

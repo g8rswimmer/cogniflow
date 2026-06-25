@@ -387,3 +387,10 @@ func (m *mockStore) GetInvitationByToken(_ context.Context, _ string) (store.Inv
 	return store.Invitation{}, store.ErrNotFound
 }
 func (m *mockStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error { return nil }
+func (m *mockStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (m *mockStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (m *mockStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }

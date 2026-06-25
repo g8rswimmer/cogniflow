@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../hooks/useApi'
 import { useAuthStore } from '../stores/useAuthStore'
 import { ApiError } from '../api/client'
-import type { UserResponse } from '../api/types'
+import type { UserResponse, OrgEmailSettingsResponse } from '../api/types'
 import { useToastStore } from '../stores/useToastStore'
 
 const ALL_SCOPES = [
@@ -14,6 +14,8 @@ const ALL_SCOPES = [
   'eval:write',
   'eval:run',
 ]
+
+const DEFAULT_PORT = '587'
 
 export function OrgUsersPage() {
   const currentUser = useAuthStore(s => s.user)
@@ -26,6 +28,19 @@ export function OrgUsersPage() {
   const [inviting, setInviting] = useState(false)
   const [inviteToken, setInviteToken] = useState<string | null>(null)
 
+  // Email settings state
+  const [emailSettings, setEmailSettings] = useState<OrgEmailSettingsResponse | null>(null)
+  const [emailSettingsOpen, setEmailSettingsOpen] = useState(false)
+  const [emailSettingsLoading, setEmailSettingsLoading] = useState(false)
+  const [smtpHost, setSmtpHost] = useState('')
+  const [smtpPort, setSmtpPort] = useState(DEFAULT_PORT)
+  const [smtpUser, setSmtpUser] = useState('')
+  const [smtpPassword, setSmtpPassword] = useState('')
+  const [smtpFrom, setSmtpFrom] = useState('')
+  const [templateSubject, setTemplateSubject] = useState('')
+  const [templateBody, setTemplateBody] = useState('')
+  const [savingEmailSettings, setSavingEmailSettings] = useState(false)
+
   const load = () => {
     setLoading(true)
     api.listOrgUsers()
@@ -34,16 +49,78 @@ export function OrgUsersPage() {
       .finally(() => setLoading(false))
   }
 
+  const loadEmailSettings = async () => {
+    setEmailSettingsLoading(true)
+    try {
+      const s = await api.getOrgEmailSettings()
+      setEmailSettings(s)
+      setSmtpHost(s.smtp_host)
+      setSmtpPort(s.smtp_port || DEFAULT_PORT)
+      setSmtpUser(s.smtp_user)
+      setSmtpPassword(s.smtp_password) // "***" when set
+      setSmtpFrom(s.smtp_from)
+      setTemplateSubject(s.subject)
+      setTemplateBody(s.body)
+    } catch (err) {
+      addToast('error', err instanceof ApiError ? err.message : 'Failed to load email settings')
+    } finally {
+      setEmailSettingsLoading(false)
+    }
+  }
+
   useEffect(() => { load() }, [])
+
+  const openEmailSettings = () => {
+    setEmailSettingsOpen(true)
+    if (!emailSettings) loadEmailSettings()
+  }
+
+  const handleSaveEmailSettings = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingEmailSettings(true)
+    try {
+      const saved = await api.upsertOrgEmailSettings({
+        smtp_host: smtpHost,
+        smtp_port: smtpPort || DEFAULT_PORT,
+        smtp_user: smtpUser,
+        smtp_password: smtpPassword,
+        smtp_from: smtpFrom,
+        subject: templateSubject,
+        body: templateBody,
+      })
+      setEmailSettings(saved)
+      addToast('success', 'Email settings saved')
+    } catch (err) {
+      addToast('error', err instanceof ApiError ? err.message : 'Failed to save email settings')
+    } finally {
+      setSavingEmailSettings(false)
+    }
+  }
+
+  const handleResetEmailSettings = async () => {
+    if (!confirm('Reset all email settings and template to defaults?')) return
+    try {
+      await api.deleteOrgEmailSettings()
+      await loadEmailSettings()
+      addToast('success', 'Email settings reset to defaults')
+    } catch (err) {
+      addToast('error', err instanceof ApiError ? err.message : 'Failed to reset settings')
+    }
+  }
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
     setInviting(true)
     try {
       const res = await api.inviteUser({ email: inviteEmail, role: inviteRole })
-      setInviteToken(res.token)
       setInviteEmail('')
-      addToast('success', `Invitation created for ${res.email}`)
+      if (res.email_sent) {
+        setInviteToken(null)
+        addToast('success', `Invitation sent to ${res.email}`)
+      } else {
+        setInviteToken(res.token)
+        addToast('success', `Invitation created for ${res.email}`)
+      }
     } catch (err) {
       addToast('error', err instanceof ApiError ? err.message : 'Failed to create invitation')
     } finally {
@@ -83,6 +160,9 @@ export function OrgUsersPage() {
     }
   }
 
+  const emailConfigured = emailSettings?.smtp_configured ?? false
+  const inviteButtonLabel = inviting ? 'Sending…' : emailConfigured ? 'Send invite' : 'Generate link'
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <header className="h-12 flex items-center px-4 gap-3 bg-gray-900 border-b border-gray-700">
@@ -121,7 +201,7 @@ export function OrgUsersPage() {
               disabled={inviting}
               className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-1.5 rounded-md transition-colors"
             >
-              {inviting ? 'Inviting…' : 'Send invite'}
+              {inviteButtonLabel}
             </button>
           </form>
 
@@ -137,6 +217,150 @@ export function OrgUsersPage() {
               >
                 Copy link
               </button>
+            </div>
+          )}
+        </section>
+
+        {/* Email & SMTP Settings */}
+        <section className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
+          <button
+            onClick={() => emailSettingsOpen ? setEmailSettingsOpen(false) : openEmailSettings()}
+            className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-800 transition-colors"
+          >
+            <span className="text-sm font-semibold text-gray-300">Email settings</span>
+            <div className="flex items-center gap-3">
+              {emailSettings && (
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                  emailSettings.smtp_configured
+                    ? 'border-emerald-600 text-emerald-400'
+                    : 'border-gray-600 text-gray-500'
+                }`}>
+                  {emailSettings.smtp_configured ? 'SMTP configured' : 'Not configured'}
+                </span>
+              )}
+              <span className="text-gray-500 text-xs">{emailSettingsOpen ? '▲' : '▼'}</span>
+            </div>
+          </button>
+
+          {emailSettingsOpen && (
+            <div className="border-t border-gray-700 p-5">
+              {emailSettingsLoading && <p className="text-sm text-gray-400">Loading…</p>}
+
+              {!emailSettingsLoading && (
+                <form onSubmit={handleSaveEmailSettings} className="flex flex-col gap-5">
+
+                  {/* SMTP credentials */}
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">SMTP credentials</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2 sm:col-span-1">
+                        <label className="block text-xs text-gray-400 mb-1">SMTP host</label>
+                        <input
+                          value={smtpHost}
+                          onChange={e => setSmtpHost(e.target.value)}
+                          placeholder="smtp.example.com"
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="col-span-2 sm:col-span-1">
+                        <label className="block text-xs text-gray-400 mb-1">Port</label>
+                        <input
+                          value={smtpPort}
+                          onChange={e => setSmtpPort(e.target.value)}
+                          placeholder="587"
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="col-span-2 sm:col-span-1">
+                        <label className="block text-xs text-gray-400 mb-1">Username</label>
+                        <input
+                          value={smtpUser}
+                          onChange={e => setSmtpUser(e.target.value)}
+                          placeholder="user@example.com"
+                          autoComplete="off"
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="col-span-2 sm:col-span-1">
+                        <label className="block text-xs text-gray-400 mb-1">
+                          Password
+                          {smtpPassword === '***' && (
+                            <span className="ml-2 text-gray-500">(set — clear to remove)</span>
+                          )}
+                        </label>
+                        <input
+                          type="password"
+                          value={smtpPassword}
+                          onChange={e => setSmtpPassword(e.target.value)}
+                          placeholder="••••••••"
+                          autoComplete="new-password"
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs text-gray-400 mb-1">From address</label>
+                        <input
+                          type="email"
+                          value={smtpFrom}
+                          onChange={e => setSmtpFrom(e.target.value)}
+                          placeholder="no-reply@example.com"
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Email template */}
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Invite email template</h3>
+                    <div className="text-xs text-gray-500 bg-gray-800 border border-gray-700 rounded-md p-3 font-mono mb-3 leading-relaxed">
+                      Available variables:{' '}
+                      {['{{.OrgName}}', '{{.InviteURL}}', '{{.InviteeEmail}}', '{{.InviterEmail}}', '{{.ExpiresAt.Format "Jan 2, 2006"}}'].map(v => (
+                        <span key={v} className="text-indigo-400 mr-2">{v}</span>
+                      ))}
+                    </div>
+                    <div className="flex flex-col gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Subject</label>
+                        <input
+                          value={templateSubject}
+                          onChange={e => setTemplateSubject(e.target.value)}
+                          placeholder="You've been invited to join {{.OrgName}}"
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Body</label>
+                        <textarea
+                          rows={10}
+                          value={templateBody}
+                          onChange={e => setTemplateBody(e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500 resize-y"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={savingEmailSettings}
+                      className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-1.5 rounded-md transition-colors"
+                    >
+                      {savingEmailSettings ? 'Saving…' : 'Save settings'}
+                    </button>
+                    {emailSettings && !emailSettings.is_default && (
+                      <button
+                        type="button"
+                        onClick={handleResetEmailSettings}
+                        className="text-xs text-gray-400 hover:text-gray-200 px-4 py-1.5 border border-gray-700 hover:border-gray-500 rounded-md transition-colors"
+                      >
+                        Reset to defaults
+                      </button>
+                    )}
+                  </div>
+                </form>
+              )}
             </div>
           )}
         </section>
@@ -160,7 +384,6 @@ export function OrgUsersPage() {
                       <p className="text-xs text-gray-500">{u.id}</p>
                     </div>
 
-                    {/* Role selector — only for other users */}
                     {u.id !== currentUser?.id ? (
                       <select
                         value={u.role}
@@ -177,7 +400,6 @@ export function OrgUsersPage() {
                       <span className="text-xs px-2 py-1 rounded bg-gray-700 text-gray-300">{u.role}</span>
                     )}
 
-                    {/* Remove button */}
                     {u.id !== currentUser?.id && (
                       <button
                         onClick={() => handleRemove(u.id, u.email)}
@@ -188,7 +410,6 @@ export function OrgUsersPage() {
                     )}
                   </div>
 
-                  {/* Permission toggles — only for members */}
                   {u.role === 'member' && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {ALL_SCOPES.map(scope => (

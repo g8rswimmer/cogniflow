@@ -222,6 +222,13 @@ func (m *mockEngineStore) GetInvitationByToken(_ context.Context, _ string) (sto
 func (m *mockEngineStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }
+func (m *mockEngineStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (m *mockEngineStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (m *mockEngineStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
 
 // ---- helpers -------------------------------------------------------------
 

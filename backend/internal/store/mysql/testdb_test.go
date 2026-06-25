@@ -194,6 +194,18 @@ CREATE TABLE IF NOT EXISTS workflow_versions (
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (workflow_id, version_number)
 );
+
+CREATE TABLE IF NOT EXISTS org_email_settings (
+    org_id        TEXT     NOT NULL PRIMARY KEY,
+    smtp_host     TEXT     NOT NULL DEFAULT '',
+    smtp_port     TEXT     NOT NULL DEFAULT '587',
+    smtp_user     TEXT     NOT NULL DEFAULT '',
+    smtp_password TEXT     NOT NULL DEFAULT '',
+    smtp_from     TEXT     NOT NULL DEFAULT '',
+    subject       TEXT     NOT NULL DEFAULT '',
+    body          TEXT     NOT NULL DEFAULT '',
+    updated_at    DATETIME NOT NULL
+);
 `
 
 // openTestDB opens an in-memory SQLite database, applies the test schema, and

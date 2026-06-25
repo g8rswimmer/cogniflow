@@ -187,6 +187,13 @@ func (s *vaultStubStore) GetInvitationByToken(_ context.Context, _ string) (stor
 func (s *vaultStubStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }
+func (s *vaultStubStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (s *vaultStubStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (s *vaultStubStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
 
 // stubNode has one sensitive field "api_key".
 type stubNode struct{}

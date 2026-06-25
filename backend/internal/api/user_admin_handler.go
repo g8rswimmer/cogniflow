@@ -3,17 +3,22 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/auth"
+	"github.com/g8rswimmer/cogniflow/internal/email"
 	"github.com/g8rswimmer/cogniflow/internal/store"
 )
 
+
 type userAdminHandler struct {
-	store     store.Store
-	jwtSecret []byte
-	jwtTTL    time.Duration
+	store       store.Store
+	jwtSecret   []byte
+	jwtTTL      time.Duration
+	frontendURL string
 }
 
 // ---- Org-admin endpoints (own org users) ------------------------------------
@@ -96,14 +101,32 @@ func (h *userAdminHandler) inviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Email delivery is out of scope: return the token so the caller can
-	// distribute it (or the admin can copy it from the response).
+	emailSent := false
+	if emailSettings, err := h.store.GetOrgEmailSettings(r.Context(), claims.OrgID); err == nil && emailSettings.SMTPHost != "" {
+		sender := email.New(emailSettings.SMTPHost, emailSettings.SMTPPort, emailSettings.SMTPUser, emailSettings.SMTPPassword, emailSettings.SMTPFrom)
+		org, _ := h.store.GetOrganization(r.Context(), claims.OrgID)
+		inviteURL := fmt.Sprintf("%s/invite/%s", h.frontendURL, inv.Token)
+		data := email.InviteData{
+			OrgName:      org.Name,
+			InviteURL:    inviteURL,
+			InviteeEmail: inv.Email,
+			InviterEmail: claims.Email,
+			ExpiresAt:    inv.ExpiresAt,
+		}
+		if err := sender.SendInvite(inv.Email, data, emailSettings.Subject, emailSettings.Body); err != nil {
+			slog.WarnContext(r.Context(), "failed to send invite email", "error", err, "to", inv.Email)
+		} else {
+			emailSent = true
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":         inv.ID,
 		"email":      inv.Email,
 		"role":       inv.Role,
 		"token":      inv.Token,
 		"expires_at": inv.ExpiresAt,
+		"email_sent": emailSent,
 	})
 }
 

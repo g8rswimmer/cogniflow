@@ -35,6 +35,21 @@ export interface InviteCreatedResponse {
   role: string
   token: string
   expires_at: string
+  email_sent: boolean
+}
+
+export interface OrgEmailSettingsResponse {
+  org_id: string
+  smtp_host: string
+  smtp_port: string
+  smtp_user: string
+  smtp_password: string  // "***" when set, "" when not set
+  smtp_from: string
+  subject: string
+  body: string
+  smtp_configured: boolean
+  is_default: boolean
+  updated_at?: string
 }
 
 export interface OrgUsersResponse {

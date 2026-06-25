@@ -17,6 +17,14 @@ export function AdminOrgsPage() {
   const [adminPassword, setAdminPassword] = useState('')
   const [creating, setCreating] = useState(false)
 
+  // Optional email settings for new org
+  const [showEmailSettings, setShowEmailSettings] = useState(false)
+  const [smtpHost, setSmtpHost] = useState('')
+  const [smtpPort, setSmtpPort] = useState('587')
+  const [smtpUser, setSmtpUser] = useState('')
+  const [smtpPassword, setSmtpPassword] = useState('')
+  const [smtpFrom, setSmtpFrom] = useState('')
+
   const load = () => {
     setLoading(true)
     api.listOrgs()
@@ -27,16 +35,31 @@ export function AdminOrgsPage() {
 
   useEffect(() => { load() }, [])
 
+  const resetCreateForm = () => {
+    setOrgName(''); setAdminEmail(''); setAdminPassword('')
+    setSmtpHost(''); setSmtpPort('587'); setSmtpUser(''); setSmtpPassword(''); setSmtpFrom('')
+    setShowEmailSettings(false)
+  }
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreating(true)
     try {
       const res = await api.createOrg({ name: orgName, admin_email: adminEmail, admin_password: adminPassword })
+      if (smtpHost) {
+        try {
+          await api.setOrgEmailSettingsAdmin(res.organization.id, {
+            smtp_host: smtpHost, smtp_port: smtpPort || '587',
+            smtp_user: smtpUser, smtp_password: smtpPassword,
+            smtp_from: smtpFrom, subject: '', body: '',
+          })
+        } catch {
+          addToast('error', 'Org created but email settings failed — configure them from the Org Users page')
+        }
+      }
       addToast('success', `Created org "${res.organization.name}"`)
       setShowCreate(false)
-      setOrgName('')
-      setAdminEmail('')
-      setAdminPassword('')
+      resetCreateForm()
       load()
     } catch (err) {
       addToast('error', err instanceof ApiError ? err.message : 'Failed to create org')
@@ -110,6 +133,70 @@ export function AdminOrgsPage() {
                   placeholder="Min 8 characters"
                 />
               </div>
+              {/* Optional SMTP settings */}
+              <div className="border-t border-gray-700 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEmailSettings(s => !s)}
+                  className="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1.5"
+                >
+                  <span>{showEmailSettings ? '▼' : '▶'}</span>
+                  Email settings (optional)
+                </button>
+
+                {showEmailSettings && (
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs text-gray-400 mb-1">SMTP host</label>
+                      <input
+                        value={smtpHost}
+                        onChange={e => setSmtpHost(e.target.value)}
+                        placeholder="smtp.example.com"
+                        className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs text-gray-400 mb-1">Port</label>
+                      <input
+                        value={smtpPort}
+                        onChange={e => setSmtpPort(e.target.value)}
+                        placeholder="587"
+                        className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs text-gray-400 mb-1">SMTP username</label>
+                      <input
+                        value={smtpUser}
+                        onChange={e => setSmtpUser(e.target.value)}
+                        autoComplete="off"
+                        className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-xs text-gray-400 mb-1">SMTP password</label>
+                      <input
+                        type="password"
+                        value={smtpPassword}
+                        onChange={e => setSmtpPassword(e.target.value)}
+                        autoComplete="new-password"
+                        className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs text-gray-400 mb-1">From address</label>
+                      <input
+                        type="email"
+                        value={smtpFrom}
+                        onChange={e => setSmtpFrom(e.target.value)}
+                        placeholder="no-reply@example.com"
+                        className="w-full bg-gray-800 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-3 mt-1">
                 <button
                   type="submit"
@@ -120,7 +207,7 @@ export function AdminOrgsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowCreate(false)}
+                  onClick={() => { setShowCreate(false); resetCreateForm() }}
                   className="text-xs text-gray-400 hover:text-gray-200 px-4 py-1.5"
                 >
                   Cancel

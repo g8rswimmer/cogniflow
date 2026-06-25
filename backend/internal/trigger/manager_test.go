@@ -158,6 +158,13 @@ func (m *fullMockStore) GetInvitationByToken(_ context.Context, _ string) (store
 func (m *fullMockStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }
+func (m *fullMockStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (m *fullMockStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (m *fullMockStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
 
 // ---- LoadAll tests ----------------------------------------------------------
 

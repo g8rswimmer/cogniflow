@@ -453,6 +453,13 @@ func (s *stubStore) GetInvitationByToken(_ context.Context, _ string) (store.Inv
 	return store.Invitation{}, store.ErrNotFound
 }
 func (s *stubStore) AcceptInvitation(_ context.Context, _ string, _ time.Time) error { return nil }
+func (s *stubStore) UpsertOrgEmailSettings(_ context.Context, _ store.OrgEmailSettings) error {
+	return nil
+}
+func (s *stubStore) GetOrgEmailSettings(_ context.Context, _ string) (store.OrgEmailSettings, error) {
+	return store.OrgEmailSettings{}, store.ErrNotFound
+}
+func (s *stubStore) DeleteOrgEmailSettings(_ context.Context, _ string) error { return nil }
 
 // ---- Suite handler tests ---------------------------------------------------
 
