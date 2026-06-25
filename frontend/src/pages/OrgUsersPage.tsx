@@ -376,7 +376,9 @@ export function OrgUsersPage() {
 
           {!loading && !error && (
             <div className="divide-y divide-gray-800">
-              {users.map(u => (
+              {users.map(u => {
+                const isProtected = u.role === 'system_admin' && currentUser?.role !== 'system_admin'
+                return (
                 <div key={u.id} className="px-5 py-4">
                   <div className="flex items-center gap-4 flex-wrap">
                     <div className="flex-1 min-w-0">
@@ -384,7 +386,15 @@ export function OrgUsersPage() {
                       <p className="text-xs text-gray-500">{u.id}</p>
                     </div>
 
-                    {u.id !== currentUser?.id ? (
+                    {u.id === currentUser?.id || isProtected ? (
+                      <span className={`text-xs px-2 py-1 rounded border ${
+                        u.role === 'system_admin'
+                          ? 'bg-amber-900/30 border-amber-700 text-amber-400'
+                          : 'bg-gray-700 border-gray-600 text-gray-300'
+                      }`}>
+                        {u.role === 'system_admin' ? 'System Admin' : u.role}
+                      </span>
+                    ) : (
                       <select
                         value={u.role}
                         onChange={e => handleRoleChange(u.id, e.target.value)}
@@ -396,11 +406,9 @@ export function OrgUsersPage() {
                           <option value="system_admin">System Admin</option>
                         )}
                       </select>
-                    ) : (
-                      <span className="text-xs px-2 py-1 rounded bg-gray-700 text-gray-300">{u.role}</span>
                     )}
 
-                    {u.id !== currentUser?.id && (
+                    {u.id !== currentUser?.id && !isProtected && (
                       <button
                         onClick={() => handleRemove(u.id, u.email)}
                         className="text-xs text-red-500 hover:text-red-400 transition-colors"
@@ -428,7 +436,7 @@ export function OrgUsersPage() {
                     </div>
                   )}
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </section>
