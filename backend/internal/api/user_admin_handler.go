@@ -173,6 +173,10 @@ func (h *userAdminHandler) updateOrgUserRole(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "user not found")
 			return
 		}
+		if target.Role == "system_admin" {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot modify a system_admin")
+			return
+		}
 	}
 
 	if err := h.store.UpdateUserRole(r.Context(), targetID, body.Role); err != nil {
@@ -219,6 +223,10 @@ func (h *userAdminHandler) updateOrgUserPermissions(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "user not found")
 			return
 		}
+		if target.Role == "system_admin" {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot modify a system_admin")
+			return
+		}
 	}
 
 	if err := h.store.UpdateUserPermissions(r.Context(), targetID, body.Permissions); err != nil {
@@ -255,6 +263,10 @@ func (h *userAdminHandler) removeOrgUser(w http.ResponseWriter, r *http.Request)
 		}
 		if target.OrgID != claims.OrgID {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+			return
+		}
+		if target.Role == "system_admin" {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot remove a system_admin")
 			return
 		}
 	}
