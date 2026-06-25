@@ -96,10 +96,17 @@ func (s *WorkflowStore) UpdateRunStatus(ctx context.Context, runID string, statu
 
 func (s *WorkflowStore) GetRun(ctx context.Context, runID string) (store.Run, error) {
 	var row dbRun
-	err := s.db.GetContext(ctx, &row,
-		`SELECT id, workflow_id, triggered_by, status, workflow_version_number,
-		        started_at, finished_at, final_output, error_detail, node_results
-		 FROM runs WHERE id=?`, runID)
+	q := `SELECT r.id, r.workflow_id, r.triggered_by, r.status, r.workflow_version_number,
+	             r.started_at, r.finished_at, r.final_output, r.error_detail, r.node_results
+	      FROM runs r
+	      JOIN workflows w ON w.id = r.workflow_id
+	      WHERE r.id = ?`
+	args := []any{runID}
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		q += " AND w.org_id = ?"
+		args = append(args, orgID)
+	}
+	err := s.db.GetContext(ctx, &row, q, args...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Run{}, store.ErrNotFound
 	}

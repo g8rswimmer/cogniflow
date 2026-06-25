@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -191,9 +192,10 @@ func (h *authHandler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.AcceptInvitation(r.Context(), inv.ID, now); err != nil {
-		// Non-fatal: user created; invitation mark can be retried.
-		// Log but continue so the user receives their token.
-		_ = err
+		// Non-fatal: user is already created. Log so ops can manually clean up
+		// the invitation row, which would otherwise remain reusable until expiry.
+		slog.WarnContext(r.Context(), "failed to mark invitation accepted; token remains reusable until expiry",
+			"invitation_id", inv.ID, "error", err)
 	}
 
 	org, err := h.store.GetOrganization(r.Context(), user.OrgID)

@@ -294,7 +294,13 @@ func (s *WorkflowStore) DeleteWorkflow(ctx context.Context, id string) error {
 		return fmt.Errorf("workflow store: delete workflow versions: %w", err)
 	}
 
-	res, err := tx.ExecContext(ctx, `DELETE FROM workflows WHERE id = ?`, id)
+	deleteQ := `DELETE FROM workflows WHERE id = ?`
+	deleteArgs := []any{id}
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		deleteQ += " AND org_id = ?"
+		deleteArgs = append(deleteArgs, orgID)
+	}
+	res, err := tx.ExecContext(ctx, deleteQ, deleteArgs...)
 	if err != nil {
 		return fmt.Errorf("workflow store: delete workflow: %w", err)
 	}

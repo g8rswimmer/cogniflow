@@ -143,8 +143,7 @@ func (h *orgEmailSettingsHandler) upsertOrgEmailSettings(w http.ResponseWriter, 
 		return
 	}
 
-	saved, _ := h.store.GetOrgEmailSettings(r.Context(), claims.OrgID)
-	writeJSON(w, http.StatusOK, toSettingsResponse(saved, false))
+	writeJSON(w, http.StatusOK, toSettingsResponse(settings, false))
 }
 
 // deleteOrgEmailSettings handles DELETE /v1/org/email-settings.
@@ -196,6 +195,17 @@ func (h *orgEmailSettingsHandler) upsertOrgEmailSettingsAdmin(w http.ResponseWri
 		}
 	}
 
+	// If the client sent "***", keep the existing password rather than overwriting.
+	password := body.SMTPPassword
+	if password == passwordMask {
+		existing, err := h.store.GetOrgEmailSettings(r.Context(), orgID)
+		if err == nil {
+			password = existing.SMTPPassword
+		} else {
+			password = ""
+		}
+	}
+
 	port := body.SMTPPort
 	if port == "" {
 		port = "587"
@@ -206,7 +216,7 @@ func (h *orgEmailSettingsHandler) upsertOrgEmailSettingsAdmin(w http.ResponseWri
 		SMTPHost:     body.SMTPHost,
 		SMTPPort:     port,
 		SMTPUser:     body.SMTPUser,
-		SMTPPassword: body.SMTPPassword,
+		SMTPPassword: password,
 		SMTPFrom:     body.SMTPFrom,
 		Subject:      body.Subject,
 		Body:         body.Body,
@@ -216,6 +226,5 @@ func (h *orgEmailSettingsHandler) upsertOrgEmailSettingsAdmin(w http.ResponseWri
 		return
 	}
 
-	saved, _ := h.store.GetOrgEmailSettings(r.Context(), orgID)
-	writeJSON(w, http.StatusOK, toSettingsResponse(saved, false))
+	writeJSON(w, http.StatusOK, toSettingsResponse(settings, false))
 }

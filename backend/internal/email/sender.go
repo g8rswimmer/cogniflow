@@ -2,6 +2,7 @@ package email
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"net/smtp"
 	"strings"
@@ -71,13 +72,45 @@ func (s *Sender) SendInvite(to string, data InviteData, subjectTmpl, bodyTmpl st
 		return fmt.Errorf("render body: %w", err)
 	}
 
-	msg := buildMessage(s.from, to, subject, body)
 	addr := s.host + ":" + s.port
-	var auth smtp.Auth
-	if s.user != "" {
-		auth = smtp.PlainAuth("", s.user, s.password, s.host)
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return fmt.Errorf("smtp dial: %w", err)
 	}
-	return smtp.SendMail(addr, auth, s.from, []string{to}, []byte(msg))
+	defer c.Close() //nolint:errcheck
+
+	// Negotiate STARTTLS with certificate verification when the server supports it.
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: s.host}); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	}
+
+	if s.user != "" {
+		if err := c.Auth(smtp.PlainAuth("", s.user, s.password, s.host)); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+
+	if err := c.Mail(s.from); err != nil {
+		return fmt.Errorf("smtp mail from: %w", err)
+	}
+	if err := c.Rcpt(to); err != nil {
+		return fmt.Errorf("smtp rcpt to: %w", err)
+	}
+	wc, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("smtp data: %w", err)
+	}
+	msg := buildMessage(s.from, to, subject, body)
+	if _, err = fmt.Fprint(wc, msg); err != nil {
+		_ = wc.Close()
+		return fmt.Errorf("smtp write: %w", err)
+	}
+	if err := wc.Close(); err != nil {
+		return fmt.Errorf("smtp close data: %w", err)
+	}
+	return c.Quit()
 }
 
 // ParseTemplate validates a Go text/template string. Returns a non-nil error
@@ -99,11 +132,21 @@ func renderTemplate(name, tmplStr string, data InviteData) (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
+// sanitizeHeader strips CR and LF from a header value to prevent CRLF injection.
+func sanitizeHeader(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func buildMessage(from, to, subject, body string) string {
 	var sb strings.Builder
-	sb.WriteString("From: " + from + "\r\n")
-	sb.WriteString("To: " + to + "\r\n")
-	sb.WriteString("Subject: " + subject + "\r\n")
+	sb.WriteString("From: " + sanitizeHeader(from) + "\r\n")
+	sb.WriteString("To: " + sanitizeHeader(to) + "\r\n")
+	sb.WriteString("Subject: " + sanitizeHeader(subject) + "\r\n")
 	sb.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	sb.WriteString("\r\n")
 	sb.WriteString(body)

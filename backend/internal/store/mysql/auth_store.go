@@ -62,7 +62,7 @@ func (s *WorkflowStore) DeleteOrganization(ctx context.Context, id string) error
 	defer tx.Rollback() //nolint:errcheck
 
 	// Delete org resources in dependency order (no FK constraints — app layer).
-	tables := []string{"users", "invitations", "eval_suites", "rag_documents"}
+	tables := []string{"users", "invitations", "eval_suites", "rag_documents", "org_email_settings"}
 	for _, t := range tables {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t+" WHERE org_id = ?", id); err != nil {
 			return fmt.Errorf("auth store: delete org %s from %s: %w", id, t, err)

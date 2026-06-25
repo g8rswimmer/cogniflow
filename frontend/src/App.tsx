@@ -18,13 +18,19 @@ import { OrgUsersPage } from './pages/OrgUsersPage'
 import { AdminOrgsPage } from './pages/AdminOrgsPage'
 import { ToastContainer } from './components/shared/ToastContainer'
 import { useAuthStore } from './stores/useAuthStore'
+import { api } from './hooks/useApi'
 
 export default function App() {
   const initialize = useAuthStore(s => s.initialize)
+  const setUser = useAuthStore(s => s.setUser)
+  const logout = useAuthStore(s => s.logout)
 
   useEffect(() => {
     initialize()
-  }, [initialize])
+    api.getMe()
+      .then(user => setUser(user))
+      .catch(() => logout())
+  }, [initialize, setUser, logout])
 
   return (
     <BrowserRouter>

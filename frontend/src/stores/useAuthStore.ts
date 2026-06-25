@@ -8,6 +8,7 @@ interface AuthState {
   user: UserResponse | null
   login: (token: string, user: UserResponse) => void
   logout: () => void
+  setUser: (user: UserResponse) => void
   initialize: () => void
 }
 
@@ -25,7 +26,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null, user: null })
   },
 
-  // Reads stored token; the API client will validate it on first use.
+  setUser: (user) => set({ user }),
+
+  // Reads stored token; App.tsx calls getMe() immediately after to populate user.
   // If the first authenticated request gets a 401, client.ts calls logout().
   initialize: () => {
     const token = localStorage.getItem(TOKEN_KEY)

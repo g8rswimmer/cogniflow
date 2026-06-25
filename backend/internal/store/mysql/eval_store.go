@@ -57,10 +57,15 @@ func (s *WorkflowStore) CreateEvalSuite(ctx context.Context, suite store.EvalSui
 
 func (s *WorkflowStore) GetEvalSuite(ctx context.Context, id string) (store.EvalSuite, error) {
 	var row dbEvalSuite
-	err := s.db.GetContext(ctx, &row,
-		`SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted,
-		        trigger_kind, trigger_config, created_at, updated_at
-		 FROM eval_suites WHERE id=?`, id)
+	q := `SELECT id, workflow_id, name, description, pass_threshold, max_concurrency, workflow_deleted,
+	             trigger_kind, trigger_config, created_at, updated_at
+	      FROM eval_suites WHERE id=?`
+	args := []any{id}
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		q += " AND org_id = ?"
+		args = append(args, orgID)
+	}
+	err := s.db.GetContext(ctx, &row, q, args...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.EvalSuite{}, store.ErrNotFound
 	}
@@ -163,14 +168,17 @@ func (s *WorkflowStore) UpdateEvalSuite(ctx context.Context, suite store.EvalSui
 	if err != nil {
 		return store.EvalSuite{}, fmt.Errorf("eval store: marshal trigger_config: %w", err)
 	}
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE eval_suites
-		 SET name=?, description=?, pass_threshold=?, max_concurrency=?,
-		     trigger_kind=?, trigger_config=?, updated_at=?
-		 WHERE id=?`,
-		suite.Name, suite.Description, suite.PassThreshold, suite.MaxConcurrency,
-		suite.TriggerKind, trigCfg, suite.UpdatedAt, suite.ID,
-	)
+	updateQ := `UPDATE eval_suites
+	 SET name=?, description=?, pass_threshold=?, max_concurrency=?,
+	     trigger_kind=?, trigger_config=?, updated_at=?
+	 WHERE id=?`
+	updateArgs := []any{suite.Name, suite.Description, suite.PassThreshold, suite.MaxConcurrency,
+		suite.TriggerKind, trigCfg, suite.UpdatedAt, suite.ID}
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		updateQ += " AND org_id = ?"
+		updateArgs = append(updateArgs, orgID)
+	}
+	result, err := s.db.ExecContext(ctx, updateQ, updateArgs...)
 	if err != nil {
 		return store.EvalSuite{}, fmt.Errorf("eval store: update suite: %w", err)
 	}
@@ -201,7 +209,13 @@ func (s *WorkflowStore) DeleteEvalSuite(ctx context.Context, id string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM eval_test_cases WHERE suite_id=?`, id); err != nil {
 		return fmt.Errorf("eval store: delete test cases: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM eval_suites WHERE id=?`, id)
+	deleteQ := `DELETE FROM eval_suites WHERE id=?`
+	deleteArgs := []any{id}
+	if orgID := store.OrgIDFrom(ctx); orgID != "" {
+		deleteQ += " AND org_id = ?"
+		deleteArgs = append(deleteArgs, orgID)
+	}
+	result, err := tx.ExecContext(ctx, deleteQ, deleteArgs...)
 	if err != nil {
 		return fmt.Errorf("eval store: delete suite: %w", err)
 	}
