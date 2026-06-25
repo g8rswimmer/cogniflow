@@ -25,14 +25,19 @@ export function AdminOrgsPage() {
   const [smtpPassword, setSmtpPassword] = useState('')
   const [smtpFrom, setSmtpFrom] = useState('')
 
-  const load = () => {
+  const load = async () => {
     setLoading(true)
-    api.listOrgs()
-      .then(r => setOrgs(r.organizations))
-      .catch(err => setError(err instanceof ApiError ? err.message : 'Failed to load orgs'))
-      .finally(() => setLoading(false))
+    try {
+      const r = await api.listOrgs()
+      setOrgs(r.organizations)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load orgs')
+    } finally {
+      setLoading(false)
+    }
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [])
 
   const resetCreateForm = () => {

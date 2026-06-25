@@ -41,12 +41,16 @@ export function OrgUsersPage() {
   const [templateBody, setTemplateBody] = useState('')
   const [savingEmailSettings, setSavingEmailSettings] = useState(false)
 
-  const load = () => {
+  const load = async () => {
     setLoading(true)
-    api.listOrgUsers()
-      .then(r => setUsers(r.users))
-      .catch(err => setError(err instanceof ApiError ? err.message : 'Failed to load users'))
-      .finally(() => setLoading(false))
+    try {
+      const r = await api.listOrgUsers()
+      setUsers(r.users)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load users')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const loadEmailSettings = async () => {
@@ -68,6 +72,7 @@ export function OrgUsersPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [])
 
   const openEmailSettings = () => {
