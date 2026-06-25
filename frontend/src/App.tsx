@@ -27,9 +27,15 @@ export default function App() {
 
   useEffect(() => {
     initialize()
-    api.getMe()
-      .then(user => setUser(user))
-      .catch(() => logout())
+    // Only call getMe() if a stored token was found. Without a token the
+    // request gets a 401, which triggers a redirect to /login, causing an
+    // infinite reload loop when the user is already on the login page.
+    const { token } = useAuthStore.getState()
+    if (token) {
+      api.getMe()
+        .then(user => setUser(user))
+        .catch(() => logout())
+    }
   }, [initialize, setUser, logout])
 
   return (
