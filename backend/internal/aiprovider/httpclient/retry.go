@@ -2,7 +2,6 @@
 package httpclient
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -33,6 +32,8 @@ func NewRetryTransport(base http.RoundTripper, maxRetries int, baseDelay time.Du
 
 // RoundTrip implements http.RoundTripper.
 func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone so body rebuilds and other mutations are not visible to the caller.
+	req = req.Clone(req.Context())
 	var lastErr error
 	for attempt := 0; attempt <= rt.maxRetries; attempt++ {
 		if attempt > 0 {
@@ -46,17 +47,19 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				req.Body = body
 			}
 
+			t := time.NewTimer(rt.backoff(attempt))
 			select {
 			case <-req.Context().Done():
+				t.Stop()
 				return nil, req.Context().Err()
-			case <-time.After(rt.backoff(attempt)):
+			case <-t.C:
 			}
 		}
 
 		resp, err := rt.base.RoundTrip(req)
 		if err != nil {
-			// Do not retry if the request context was cancelled or timed out.
-			if errors.Is(err, req.Context().Err()) && req.Context().Err() != nil {
+			// Do not retry on context cancellation or deadline.
+			if req.Context().Err() != nil {
 				return nil, err
 			}
 			lastErr = err

@@ -468,8 +468,8 @@ func executeNode(
 	resultCh <- nodeResult{nodeID: nodeID, output: outData, routingOutput: routingOutput}
 }
 
-// timerAfter returns a channel that fires after d. Overridable in tests to avoid real sleeps.
-var timerAfter = time.After
+// newTimer creates a timer that fires after d. Overridable in tests to avoid real sleeps.
+var newTimer = time.NewTimer
 
 // executeWithRetry calls handler.Execute, retrying up to MaxRetries times with linear backoff.
 func executeWithRetry(ctx context.Context, runID, nodeID string, n store.WorkflowNode, input node.NodeInput, handler node.NodeHandler) (node.NodeOutput, error) {
@@ -493,10 +493,12 @@ func executeWithRetry(ctx context.Context, runID, nodeID string, n store.Workflo
 				"backoff_ms", delay.Milliseconds(),
 				"last_error", lastErr,
 			)
+			t := newTimer(delay)
 			select {
 			case <-ctx.Done():
+				t.Stop()
 				return node.NodeOutput{}, ctx.Err()
-			case <-timerAfter(delay):
+			case <-t.C:
 			}
 		}
 		out, err := handler.Execute(ctx, input)
