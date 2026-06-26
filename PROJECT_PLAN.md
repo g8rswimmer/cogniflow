@@ -1,8 +1,14 @@
 # cogniflow — Project Plan
 
-> **Status:** Draft v0.2
-> **Last Updated:** 2026-06-01
+> **Status:** Draft v0.3
+> **Last Updated:** 2026-06-26
 > **References:** REQUIREMENTS.md · ARCHITECTURE.md
+
+> **Additional milestone plans (implemented as separate feature branches):**
+> - **`PROJECT_PLAN_EVAL.md`** — Milestones ME1–ME5: workflow evaluation suites, graders, grader plugins
+> - **F03 Auth** — JWT authentication, organizations, users, roles, invite flow (see migrations 0022–0029)
+> - **F04 Workflow Versioning** — Save-on-write version history; restore via API and UI (see migration 0018)
+> - **Loop Support** — `loop.controller` built-in node; engine loop routing (see migration 0016)
 
 Each milestone leaves the system in a **runnable, verifiable state**. Later milestones build on earlier ones. No milestone is purely internal — every one can be exercised by starting the system and observing real behaviour.
 
