@@ -145,8 +145,10 @@ cogniflow/                              # Repository root
 │   │   │   │   │   └── handler.go      # DB Query node — read-only SQL via database/sql
 │   │   │   │   ├── db_write/
 │   │   │   │   │   └── handler.go      # DB Write node — insert/update/delete via database/sql
-│   │   │   │   └── merge/
-│   │   │   │       └── handler.go      # Merge node — identity; engine handles the fan-in wait
+│   │   │   │   ├── merge/
+│   │   │   │   │   └── handler.go      # Merge node — identity; engine handles the fan-in wait
+│   │   │   │   └── loop_controller/
+│   │   │   │       └── handler.go      # Loop Controller node — bounded iteration with CEL exit condition
 │   │   │   └── plugin/
 │   │   │       ├── grpc_proxy.go       # NodeHandler adapter that forwards calls to a gRPC plugin
 │   │   │       └── registrar.go        # Dials plugin addresses at startup, registers proxy handlers
@@ -163,22 +165,60 @@ cogniflow/                              # Repository root
 │   │   │   │   ├── run_store.go        # Run create/update/query SQL
 │   │   │   │   ├── rag_store.go        # rag_documents + rag_chunks upsert + vector search
 │   │   │   │   └── plugin_store.go     # plugin_registrations CRUD SQL
-│   │   │   └── migrations/
-│   │   │       ├── 0001_create_workflows.up.sql
-│   │   │       ├── 0001_create_workflows.down.sql
-│   │   │       ├── 0002_create_runs.up.sql
-│   │   │       ├── 0002_create_runs.down.sql
-│   │   │       ├── 0003_create_rag.up.sql
-│   │   │       └── 0003_create_rag.down.sql
+│   │   │   └── migrations/              # 0001–0029 (run automatically at startup via golang-migrate)
+│   │   │       │                        # 0001: workflows
+│   │   │       │                        # 0002: workflow_nodes, workflow_edges, node_configs
+│   │   │       │                        # 0003: runs
+│   │   │       │                        # 0004: output_parsers on workflow_nodes
+│   │   │       │                        # 0005–0006: rag_documents, rag_chunks (VECTOR(768))
+│   │   │       │                        # 0007–0008: composite PKs; orphan cleanup
+│   │   │       │                        # 0009: plugin_registrations
+│   │   │       │                        # 0010: widen branch_label to VARCHAR(100)
+│   │   │       │                        # 0011: initial_data_schema on workflows
+│   │   │       │                        # 0012–0015: eval_suites, test_cases, eval_runs, results
+│   │   │       │                        # 0016: loop state on runs
+│   │   │       │                        # 0017: grader_registrations
+│   │   │       │                        # 0018–0021: workflow_versions; versioning on runs + eval_runs
+│   │   │       │                        # 0022: organizations
+│   │   │       │                        # 0023: users (role, permissions JSON)
+│   │   │       │                        # 0024: invitations (token, expires_at)
+│   │   │       │                        # 0025–0027: org_id on workflows, eval_suites, rag tables
+│   │   │       │                        # 0028: webhook_secret on workflows (HMAC validation)
+│   │   │       └── (...)                # 0029: email_templates (org-level SMTP overrides)
 │   │   ├── aiprovider/
 │   │   │   ├── provider.go             # LLMClient + EmbeddingClient interfaces
 │   │   │   ├── openai/
 │   │   │   │   └── client.go           # OpenAI implementation (chat completions + embeddings)
 │   │   │   └── anthropic/
 │   │   │       └── client.go           # Anthropic implementation (Messages API)
-│   │   └── crypto/
-│   │       ├── encrypt.go              # AES-256-GCM encrypt/decrypt; envelope key loading
-│   │       └── config_vault.go         # Wraps Store reads/writes to transparently encrypt sensitive fields
+│   │   ├── crypto/
+│   │   │   ├── encrypt.go              # AES-256-GCM encrypt/decrypt; envelope key loading
+│   │   │   └── config_vault.go         # Wraps Store reads/writes to transparently encrypt sensitive fields
+│   │   ├── auth/
+│   │   │   ├── token.go                # JWT Claims struct; Sign() and Verify() using HS256
+│   │   │   ├── middleware.go           # Authenticate, RequireRole, RequirePermission HTTP middleware
+│   │   │   └── password.go             # bcrypt hash/check helpers
+│   │   ├── email/
+│   │   │   └── sender.go               # SMTP invite email sender (STARTTLS); org-level template overrides
+│   │   └── eval/
+│   │       ├── grader.go               # Grader interface; BuildGrader() factory for all grader types
+│   │       ├── runner.go               # EvalRunner — async per-test-case workflow execution + grading
+│   │       ├── scheduler.go            # EvalScheduler — cron-triggered eval suite runs
+│   │       ├── handler.go              # HTTP handlers for all /v1/eval-* and /v1/eval-suites/* routes
+│   │       ├── importer.go             # Bulk test case import (CSV / JSON)
+│   │       ├── vault.go                # GraderVault — AES-256-GCM encryption for grader API keys
+│   │       ├── event.go                # EvalEventBus — streams EvalEvent frames to WebSocket subscribers
+│   │       ├── ws_handler.go           # WebSocket handler for /v1/eval-runs/{id}/events
+│   │       ├── graders/
+│   │       │   ├── string_match.go     # Exact / contains / prefix / suffix grader
+│   │       │   ├── numeric.go          # Numeric threshold grader (gt/gte/lt/lte/eq)
+│   │       │   ├── json_schema.go      # JSON Schema validation grader
+│   │       │   ├── llm_judge.go        # LLM-as-judge grader (score 0–1 + reasoning)
+│   │       │   └── checklist.go        # Checklist grader (partial scoring, per-item verdicts)
+│   │       └── grader_plugin/
+│   │           ├── grpc_proxy.go       # GraderHandler adapter forwarding to gRPC grader plugin
+│   │           ├── registrar.go        # Dials grader plugin addresses; registers proxy handlers
+│   │           └── registry.go         # GraderRegistry — thread-safe map of grader plugin handlers
 │   ├── proto/
 │   │   └── plugin/
 │   │       └── v1/
@@ -257,14 +297,17 @@ cogniflow/                              # Repository root
 | Package | Responsibility |
 |---------|---------------|
 | `backend/cmd/server` | Binary entry point; dependency injection; HTTP server startup |
-| `backend/internal/api` | HTTP routing, request parsing, response serialization, WebSocket upgrade |
+| `backend/internal/api` | HTTP routing, request parsing, response serialization, WebSocket upgrade; JWT-protected route registration |
 | `backend/internal/engine` | DAG construction, topological scheduling, concurrent execution, event emission |
 | `backend/internal/node` | NodeHandler interface, NodeRegistry, all built-in node implementations, gRPC proxy adapter |
-| `backend/internal/trigger` | Cron scheduler, webhook route registration, RunRequest dispatch |
+| `backend/internal/trigger` | Cron scheduler, HMAC-validated webhook route registration, RunRequest dispatch |
 | `backend/internal/store` | Store interface + MySQL implementation; schema migrations |
 | `backend/internal/aiprovider` | LLM and embedding provider abstractions + concrete OpenAI/Anthropic clients |
 | `backend/internal/crypto` | AES-256-GCM encrypt/decrypt helpers; config vault wrapper |
-| `backend/proto/plugin/v1` | Protobuf definitions for the out-of-process plugin gRPC contract |
+| `backend/internal/auth` | JWT sign/verify (HS256); bcrypt password helpers; HTTP middleware (Authenticate, RequireRole, RequirePermission) |
+| `backend/internal/email` | SMTP transactional email sender for user invite flows; org-level template overrides |
+| `backend/internal/eval` | Eval suite execution, grader dispatch, grader plugin registry, eval scheduling, HTTP handlers, WebSocket event streaming |
+| `backend/proto/plugin/v1` | Protobuf definitions for the out-of-process node plugin gRPC contract |
 
 ### Frontend Module Responsibilities
 
@@ -872,15 +915,16 @@ New webhooks created while the server is running are added via `router.Mount()` 
 **Request handling:**
 
 ```
-POST /webhooks/{workflow_id}
+POST /v1/webhooks/{workflow_id}
   → parse JSON body (max 1 MB)
   → look up workflow (verify it exists and has webhook trigger)
+  → if workflow.webhook_secret is set: validate X-Cogniflow-Signature HMAC-SHA256 header
   → build RunRequest{WorkflowID, InitialData: body, TriggeredBy: "webhook"}
   → engine.Dispatch(req)  ← non-blocking
   → 202 Accepted {"run_id": "<uuid>"}
 ```
 
-Webhook URLs are stable and deterministic: `/webhooks/{workflow_id}` where `workflow_id` is the UUID assigned at workflow creation (TR-05).
+Webhook URLs are stable and deterministic: `/v1/webhooks/{workflow_id}` where `workflow_id` is the UUID assigned at workflow creation (TR-05). The `webhook_secret` field (set via workflow update) enables HMAC-SHA256 request validation.
 
 ### Cron Trigger
 
@@ -937,12 +981,22 @@ The frontend calls `POST /workflows/{id}/runs` with an optional JSON body `{"ini
 ### Route / Page Structure
 
 ```
-/                          → redirect to /workflows
-/workflows                 → WorkflowListPage
-/workflows/new             → WorkflowEditorPage (new blank workflow)
-/workflows/:id             → WorkflowEditorPage (load existing)
-/workflows/:id/runs        → RunHistoryPage
-/runs/:run_id              → RunDetailPage
+/login                                       → LoginPage
+/accept-invite                               → AcceptInvitePage
+/                                            → redirect to /workflows
+/workflows                                   → WorkflowListPage
+/workflows/new                               → WorkflowEditorPage (new blank workflow)
+/workflows/:id                               → WorkflowEditorPage (load existing)
+/workflows/:id/runs                          → RunHistoryPage
+/runs/:run_id                                → RunDetailPage
+/workflows/:id/versions                      → WorkflowVersionHistoryPage
+/workflows/:id/versions/:version_number      → WorkflowVersionDetailPage
+/workflows/:id/eval-suites                   → EvalSuiteListPage
+/eval-suites/:id                             → EvalSuiteDetailPage
+/eval-runs/:id                               → EvalRunDetailPage
+/admin/orgs                                  → AdminOrgsPage (system_admin only)
+/admin/grader-plugins                        → GraderPluginAdminPage (system_admin only)
+/org/users                                   → OrgUsersPage (org_admin or system_admin)
 ```
 
 ### Component Tree
@@ -1238,24 +1292,88 @@ The `node_configs` table stores sensitive values in `encrypted_value` (MEDIUMBLO
 
 ### Endpoint Summary
 
+All routes are prefixed `/v1/` unless noted. Routes marked **🔒** require a valid JWT Bearer token. Routes marked **🛡️** require a specific role.
+
+**Public (no auth)**
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `GET` | `/node-types` | List all registered node types |
-| `GET` | `/workflows` | List all workflows |
-| `POST` | `/workflows` | Create a workflow |
-| `GET` | `/workflows/:id` | Get a workflow (full definition) |
-| `PUT` | `/workflows/:id` | Replace a workflow definition |
-| `DELETE` | `/workflows/:id` | Delete a workflow |
-| `POST` | `/workflows/:id/runs` | Manually trigger a run |
-| `GET` | `/workflows/:id/runs` | List runs for a workflow |
-| `GET` | `/runs/:run_id` | Get a single run |
-| `POST` | `/webhooks/:workflow_id` | Inbound webhook trigger |
-| `GET` | `/admin/plugins` | List all persisted plugin registrations |
-| `POST` | `/admin/plugins` | Register a plugin by address; dials, calls Meta(), persists, adds to registry |
-| `PUT` | `/admin/plugins/:type_id` | Update a plugin's address; re-dials, swaps registry entry, updates DB |
-| `DELETE` | `/admin/plugins/:type_id` | Unregister a plugin; removes from registry and DB |
-| `WS` | `/runs/:run_id/events` | Stream real-time run events |
+| `GET` | `/v1/config` | Public runtime configuration (e.g. feature flags) |
+| `POST` | `/v1/auth/login` | Issue a JWT from email + password |
+| `GET` | `/v1/auth/invite/{token}` | Fetch invite details for accept-invite flow |
+| `POST` | `/v1/auth/accept-invite` | Accept an invite; set password; activate account |
+| `POST` | `/v1/webhooks/{workflow_id}` | Inbound webhook trigger (HMAC-validated inside handler) |
+| `POST` | `/v1/eval-webhooks/{suite_id}` | Inbound eval webhook trigger (HMAC-validated inside handler) |
+
+**Authenticated**
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/v1/auth/me` | (any authed user) | Current user info from JWT |
+| `GET` | `/v1/node-types` | `workflow:read` | List all registered node types |
+| `GET` | `/v1/workflows` | `workflow:read` | List workflows (org-scoped) |
+| `POST` | `/v1/workflows` | `workflow:write` | Create a workflow |
+| `GET` | `/v1/workflows/{id}` | `workflow:read` | Get a workflow (full definition) |
+| `PUT` | `/v1/workflows/{id}` | `workflow:write` | Replace a workflow definition |
+| `DELETE` | `/v1/workflows/{id}` | `workflow:write` | Delete a workflow |
+| `GET` | `/v1/workflows/{id}/versions` | `workflow:read` | List version history |
+| `GET` | `/v1/workflows/{id}/versions/{version_number}` | `workflow:read` | Get a specific version |
+| `POST` | `/v1/workflows/{id}/versions/{version_number}/restore` | `workflow:write` | Restore workflow to a previous version |
+| `POST` | `/v1/workflows/{id}/runs` | `workflow:run` | Manually trigger a run |
+| `GET` | `/v1/workflows/{id}/runs` | `workflow:read` | List runs for a workflow |
+| `GET` | `/v1/runs/{run_id}` | `workflow:read` | Get a single run |
+| `WS` | `/v1/runs/{run_id}/events` | `workflow:read` | Stream real-time run events |
+| `GET` | `/v1/workflows/{workflow_id}/eval-suites` | `eval:read` | List eval suites for a workflow |
+| `POST` | `/v1/workflows/{workflow_id}/eval-suites` | `eval:write` | Create an eval suite |
+| `GET` | `/v1/eval-suites/{suite_id}` | `eval:read` | Get an eval suite |
+| `PUT` | `/v1/eval-suites/{suite_id}` | `eval:write` | Update an eval suite |
+| `DELETE` | `/v1/eval-suites/{suite_id}` | `eval:write` | Delete an eval suite |
+| `GET` | `/v1/eval-suites/{suite_id}/test-cases` | `eval:read` | List test cases |
+| `POST` | `/v1/eval-suites/{suite_id}/test-cases` | `eval:write` | Create a test case |
+| `PUT` | `/v1/eval-suites/{suite_id}/test-cases/order` | `eval:write` | Reorder test cases |
+| `POST` | `/v1/eval-suites/{suite_id}/test-cases/import` | `eval:write` | Bulk import test cases |
+| `GET` | `/v1/eval-suites/{suite_id}/test-cases/{case_id}` | `eval:read` | Get a test case |
+| `PUT` | `/v1/eval-suites/{suite_id}/test-cases/{case_id}` | `eval:write` | Update a test case |
+| `DELETE` | `/v1/eval-suites/{suite_id}/test-cases/{case_id}` | `eval:write` | Delete a test case |
+| `POST` | `/v1/eval-suites/{suite_id}/runs` | `eval:run` | Trigger an eval run |
+| `GET` | `/v1/eval-suites/{suite_id}/runs` | `eval:read` | List eval runs |
+| `GET` | `/v1/eval-runs/{eval_run_id}` | `eval:read` | Get an eval run |
+| `WS` | `/v1/eval-runs/{eval_run_id}/events` | `eval:read` | Stream real-time eval run events |
+| `GET` | `/v1/eval-runs/{eval_run_id}/compare` | `eval:read` | Compare two eval runs |
+| `GET` | `/v1/eval-runs/{eval_run_id}/test-case-results/{result_id}` | `eval:read` | Get a single test case result |
+
+**Org-admin routes** (`org_admin` or `system_admin` role required)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/org/users` | List users in the caller's org |
+| `POST` | `/v1/org/users/invite` | Invite a new user to the org |
+| `PUT` | `/v1/org/users/{id}/role` | Change a user's role |
+| `PUT` | `/v1/org/users/{id}/permissions` | Override a user's permission scopes |
+| `DELETE` | `/v1/org/users/{id}` | Remove a user from the org |
+| `GET` | `/v1/org/email-settings` | Get org email settings |
+| `PUT` | `/v1/org/email-settings` | Upsert org email settings (SMTP + templates) |
+| `DELETE` | `/v1/org/email-settings` | Delete org email settings |
+
+**System-admin routes** (`system_admin` role required)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/admin/orgs` | List all organizations |
+| `POST` | `/v1/admin/orgs` | Create an organization |
+| `DELETE` | `/v1/admin/orgs/{id}` | Delete an organization |
+| `GET` | `/v1/admin/users` | List all users across all orgs |
+| `DELETE` | `/v1/admin/users/{id}` | Delete any user |
+| `PUT` | `/v1/admin/orgs/{org_id}/email-settings` | Set email settings for any org |
+| `GET` | `/v1/admin/plugins` | List persisted node plugin registrations |
+| `POST` | `/v1/admin/plugins` | Register a node plugin by gRPC address |
+| `PUT` | `/v1/admin/plugins/{type_id}` | Update a node plugin's address |
+| `DELETE` | `/v1/admin/plugins/{type_id}` | Unregister a node plugin |
+| `GET` | `/v1/admin/grader-plugins` | List persisted grader plugin registrations |
+| `POST` | `/v1/admin/grader-plugins` | Register a grader plugin by gRPC address |
+| `PUT` | `/v1/admin/grader-plugins/{type_id}` | Update a grader plugin's address |
+| `DELETE` | `/v1/admin/grader-plugins/{type_id}` | Unregister a grader plugin |
 
 ### Request / Response Examples
 

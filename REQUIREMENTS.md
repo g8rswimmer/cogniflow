@@ -9,7 +9,7 @@
 
 **cogniflow** is a workflow orchestration platform that enables users to build, configure, and run workflows composed of both AI-powered nodes and deterministic processing nodes. Workflows are authored through a visual web-based canvas, persisted to a backend store, and executed by a Go-based runtime engine.
 
-The platform is designed for a single-user / internal-tool deployment with no authentication requirement in the initial version.
+The platform supports multi-tenant deployments with JWT-based authentication, organization-scoped data isolation, and role-based access control.
 
 ---
 
@@ -41,17 +41,23 @@ The platform is designed for a single-user / internal-tool deployment with no au
 - Per-run execution logs and output visibility
 - REST API between frontend and backend
 
-### Out of Scope (v1)
+### Out of Scope
 
-- User authentication / authorization
-- Multi-tenancy (multiple users or organizations)
 - Billing or usage metering
-- Workflow versioning / git integration
-- Role-based access control
 - Mobile interface
 - Marketplace for community node extensions
-- Workflow loops / cycles (strict DAGs only in v1; loops deferred to v2)
-- Message queue triggers — Kafka, SQS, etc. (deferred to v2)
+- Message queue triggers — Kafka, SQS, etc.
+
+### Implemented Beyond Original v1 Scope
+
+The following were initially deferred but are now fully implemented:
+
+- **User authentication / authorization** — JWT-based login, invite flow, permission scopes
+- **Multi-tenancy** — Organizations isolate workflows, runs, RAG data, and eval suites; all queries are org-scoped
+- **Role-based access control** — `system_admin`, `org_admin`, `member` roles; per-user permission overrides
+- **Workflow versioning** — Save-on-write version history; restore to any previous version via API and UI
+- **Workflow loops / cycles** — `loop.controller` built-in node drives bounded iterative sub-graph execution with a CEL exit condition
+- **Workflow evaluation** — Eval suites, test cases, graders (string match, numeric, JSON schema, LLM judge, checklist, plugin), and eval run history. See **`REQUIREMENTS_EVAL.md`** for full requirements.
 
 ---
 
@@ -141,6 +147,7 @@ All nodes (built-in and extended) must conform to the following interface:
 | DT-04 | **Database Query** | Execute a read (SELECT) query against a configured relational database. Returns the result set. |
 | DT-05 | **Database Write** | Execute an insert/update/delete statement against a configured relational database. Returns rows affected. |
 | DT-06 | **Merge** | Wait for all upstream parallel branches to complete and merge their outputs into a single data context. |
+| DT-07 | **Loop Controller** | Drive bounded iterative execution of a loop body sub-graph. Configures a `max_iterations` hard cap and an optional CEL `exit_condition` evaluated after each iteration. Outputs `action` (`"loop_body"` or `"exit"`), `iteration` count, and `exit_reason`. The engine routes on `action` to continue or terminate the loop. |
 
 ### 5.3 Node Extension System
 

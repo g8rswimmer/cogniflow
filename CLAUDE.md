@@ -8,7 +8,10 @@ Always read these before starting implementation work:
 
 - **`REQUIREMENTS.md`** — functional and non-functional requirements; the authoritative source for what the system must do
 - **`ARCHITECTURE.md`** — package structure, core Go interfaces, MySQL schema, REST API contract, CEL usage, gRPC plugin protocol, and Docker Compose setup
-- **`PROJECT_PLAN.md`** — 12 milestones (M1–M12) with deliverables and testable criteria; use this to understand what has been built and what comes next
+- **`PROJECT_PLAN.md`** — milestones M1–M15 with deliverables and testable criteria; use this to understand what has been built and what comes next
+- **`REQUIREMENTS_EVAL.md`** — requirements for the workflow evaluation / quality-testing feature
+- **`ARCHITECTURE_EVAL.md`** — architecture for the eval subsystem (graders, eval runner, grader plugins)
+- **`PROJECT_PLAN_EVAL.md`** — milestones ME1–ME5 for the eval feature
 
 The memory file `milestone-status.md` (in the project memory directory) tracks which milestones are complete. **Update it whenever a milestone is finished.**
 
@@ -72,13 +75,16 @@ cogniflow/
 ├── backend/          ← Go module: github.com/g8rswimmer/cogniflow
 │   ├── cmd/server/   ← binary entry point (main.go)
 │   └── internal/
-│       ├── api/      ← HTTP handlers + chi router
+│       ├── api/      ← HTTP handlers + chi router (JWT-protected routes)
 │       ├── engine/   ← DAG execution engine
 │       ├── node/     ← NodeHandler interface, registry, all built-in nodes, gRPC proxy
-│       ├── trigger/  ← cron + webhook trigger manager
+│       ├── trigger/  ← cron + webhook (HMAC-validated) trigger manager
 │       ├── store/    ← Store interface + MySQL implementation + migrations
 │       ├── aiprovider/ ← LLMClient / EmbeddingClient interfaces + OpenAI/Anthropic clients
-│       └── crypto/   ← AES-256-GCM helpers + config vault
+│       ├── crypto/   ← AES-256-GCM helpers + config vault
+│       ├── auth/     ← JWT sign/verify, RBAC middleware (Authenticate, RequireRole, RequirePermission)
+│       ├── email/    ← SMTP invite email sender with configurable templates
+│       └── eval/     ← Eval suite runner, graders, grader plugins, scheduler, event bus
 ├── frontend/         ← React 18 + TypeScript SPA (Vite, React Flow, Zustand, Tailwind)
 └── docker-compose.yml
 ```
@@ -133,6 +139,11 @@ Migrations live in `backend/internal/store/mysql/migrations/` and are embedded v
 | `DB_DSN` | yes | MySQL DSN: `user:pass@tcp(host:3306)/dbname?parseTime=true` |
 | `PORT` | no | HTTP listen port (default `8080`) |
 | `COGNIFLOW_ENCRYPTION_KEY` | yes | 32-byte AES-256 key for sensitive config values |
+| `JWT_SECRET` | yes | HMAC-SHA256 signing key for JWT tokens (at least 32 chars) |
+| `JWT_TTL` | no | JWT token lifetime (default `24h`); accepts Go duration strings |
+| `BOOTSTRAP_ADMIN_EMAIL` | no | Email for auto-created system_admin user on first startup |
+| `BOOTSTRAP_ADMIN_PASSWORD` | no | Password for the bootstrap admin (only used when no users exist) |
+| `FRONTEND_URL` | no | Base URL of the frontend (used in invite email links) |
 | `PLUGIN_ADDRESSES` | no | Comma-separated `host:port` list of gRPC plugin processes |
 | `OLLAMA_BASE_URL` | no | If set, RAG nodes use Ollama for embeddings (e.g. `http://localhost:11434`); otherwise OpenAI is used |
 
@@ -177,6 +188,18 @@ Consequences to keep in mind when writing store code:
 
 All JSON struct tags and API request/response bodies use **snake_case** (`type_id`, `display_name`, `input_schema`, etc.). Never use camelCase in JSON tags.
 
-### Frontend (planned)
+### Authentication
 
-React 18 + TypeScript. Key libraries: `@xyflow/react` (canvas), `zustand` (state), `@rjsf/core` (JSON schema-driven config forms), Tailwind CSS, Vite. The config sidebar renders node forms directly from `NodeMeta.input_schema` — no hand-written form components per node type. Communicates with the backend via REST + WebSocket (`/runs/{run_id}/events`).
+All API routes (except `/health`, `/v1/config`, and the public auth endpoints) require a `Bearer` JWT token in the `Authorization` header. Tokens are issued by `POST /v1/auth/login`. The JWT carries `user_id`, `org_id`, `role`, and `permissions` claims.
+
+Route protection uses three levels:
+- **`public`** — no auth (health, config, webhook triggers, invite accept)
+- **`authed`** — valid JWT required (`GET /v1/auth/me`)
+- **`perm`** — valid JWT + a specific permission scope (e.g. `workflow:read`, `eval:write`)
+- **`role`** — valid JWT + a specific role (e.g. `org_admin`, `system_admin`)
+
+All data-scoped queries are automatically filtered by `org_id` from the JWT via `store.WithOrgID(ctx)`. Do not pass `org_id` as an explicit query parameter in store calls — it is injected by middleware.
+
+### Frontend
+
+React 18 + TypeScript. Key libraries: `@xyflow/react` (canvas), `zustand` (state), `@rjsf/core` (JSON schema-driven config forms), Tailwind CSS, Vite. The config sidebar renders node forms directly from `NodeMeta.input_schema` — no hand-written form components per node type. Communicates with the backend via REST + WebSocket (`/v1/runs/{run_id}/events`).
