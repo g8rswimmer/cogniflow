@@ -10,6 +10,7 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
+	"github.com/g8rswimmer/cogniflow/internal/node/builtin/nodeutil"
 )
 
 // setupSQLiteDB creates a temp SQLite file, applies DDL/DML, and returns the path.
@@ -62,9 +63,9 @@ func TestExecute_MissingQuery_ReturnsError(t *testing.T) {
 
 func TestExecute_OpenError_ReturnsError(t *testing.T) {
 	h := &Handler{
-		openDB: func(driver, dsn string) (*sql.DB, error) {
+		pool: nodeutil.NewTestPool(func(driver, dsn string) (*sql.DB, error) {
 			return nil, errors.New("connect refused")
-		},
+		}),
 	}
 	_, err := h.Execute(context.Background(), node.NodeInput{
 		Config:       map[string]any{"dsn": "any", "query": "INSERT INTO t VALUES (1)"},

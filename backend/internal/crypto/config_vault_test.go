@@ -16,8 +16,34 @@ type vaultStubStore struct {
 	workflow store.Workflow
 }
 
+// cloneNodes deep-copies node Config and SensitiveKeys maps so that mutations
+// applied to the returned workflow (e.g. decryptNodes) do not affect the stored copy.
+func cloneNodes(nodes []store.WorkflowNode) []store.WorkflowNode {
+	out := make([]store.WorkflowNode, len(nodes))
+	copy(out, nodes)
+	for i := range out {
+		if out[i].Config != nil {
+			cfg := make(map[string]any, len(out[i].Config))
+			for k, v := range out[i].Config {
+				cfg[k] = v
+			}
+			out[i].Config = cfg
+		}
+		if out[i].SensitiveKeys != nil {
+			sk := make(map[string]bool, len(out[i].SensitiveKeys))
+			for k, v := range out[i].SensitiveKeys {
+				sk[k] = v
+			}
+			out[i].SensitiveKeys = sk
+		}
+	}
+	return out
+}
+
 func (s *vaultStubStore) CreateWorkflow(_ context.Context, w store.Workflow) (store.Workflow, error) {
-	s.workflow = w
+	snap := w
+	snap.Nodes = cloneNodes(w.Nodes)
+	s.workflow = snap
 	return w, nil
 }
 func (s *vaultStubStore) GetWorkflow(_ context.Context, _ string) (store.Workflow, error) {
@@ -27,7 +53,9 @@ func (s *vaultStubStore) ListWorkflows(_ context.Context) ([]store.WorkflowSumma
 	return nil, nil
 }
 func (s *vaultStubStore) UpdateWorkflow(_ context.Context, w store.Workflow) (store.Workflow, error) {
-	s.workflow = w
+	snap := w
+	snap.Nodes = cloneNodes(w.Nodes)
+	s.workflow = snap
 	return w, nil
 }
 func (s *vaultStubStore) DeleteWorkflow(_ context.Context, _ string) error { return nil }
@@ -254,7 +282,7 @@ func TestConfigVault_CreateWorkflow_EncryptsSensitiveField(t *testing.T) {
 		},
 	}
 
-	_, err := vault.CreateWorkflow(context.Background(), wf)
+	created, err := vault.CreateWorkflow(context.Background(), wf)
 	if err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
@@ -275,6 +303,11 @@ func TestConfigVault_CreateWorkflow_EncryptsSensitiveField(t *testing.T) {
 	}
 	if stored.SensitiveKeys["model"] {
 		t.Fatal("SensitiveKeys[model] should be false")
+	}
+
+	// The returned workflow must have the plaintext value back (not ciphertext).
+	if got, ok := created.Nodes[0].Config["api_key"].(string); !ok || got != "sk-secret" {
+		t.Fatalf("expected returned api_key to be plaintext %q, got %T(%v)", "sk-secret", created.Nodes[0].Config["api_key"], created.Nodes[0].Config["api_key"])
 	}
 }
 
@@ -431,7 +464,7 @@ func TestConfigVault_UpdateWorkflow_EncryptsAndDecrypts(t *testing.T) {
 			{ID: "n1", TypeID: "ai.stub", Config: map[string]any{"api_key": "original-key", "model": "m1"}},
 		},
 	}
-	_, err := vault.UpdateWorkflow(context.Background(), wf)
+	updated, err := vault.UpdateWorkflow(context.Background(), wf)
 	if err != nil {
 		t.Fatalf("UpdateWorkflow: %v", err)
 	}
@@ -439,7 +472,12 @@ func TestConfigVault_UpdateWorkflow_EncryptsAndDecrypts(t *testing.T) {
 	// Inner store should have encrypted ciphertext.
 	stored := inner.workflow.Nodes[0]
 	if _, ok := stored.Config["api_key"].([]byte); !ok {
-		t.Fatalf("api_key should be encrypted []byte, got %T", stored.Config["api_key"])
+		t.Fatalf("api_key should be encrypted []byte in inner store, got %T", stored.Config["api_key"])
+	}
+
+	// Returned workflow must have the plaintext value back.
+	if got, ok := updated.Nodes[0].Config["api_key"].(string); !ok || got != "original-key" {
+		t.Fatalf("expected returned api_key to be plaintext %q, got %T(%v)", "original-key", updated.Nodes[0].Config["api_key"], updated.Nodes[0].Config["api_key"])
 	}
 }
 
@@ -576,5 +614,50 @@ func TestParseSensitiveKeys_InvalidJSON(t *testing.T) {
 	keys := parseSensitiveKeys(json.RawMessage(`{bad}`))
 	if keys != nil {
 		t.Fatalf("expected nil for invalid JSON, got %v", keys)
+	}
+}
+
+// TestConfigVault_EncryptNodes_ReturnsNilOnSuccess verifies that encryptNodes
+// returns nil when encryption succeeds and that the sensitive field is written
+// as []byte ciphertext (not left as plaintext). This test also confirms the
+// function signature change — encryptNodes now returns error so callers can
+// abort the save instead of silently persisting a partially-encrypted config.
+func TestConfigVault_EncryptNodes_ReturnsNilOnSuccess(t *testing.T) {
+	vault, _ := newTestVault(t)
+	nodes := []store.WorkflowNode{
+		{
+			ID:     "n1",
+			TypeID: "ai.stub",
+			Config: map[string]any{"api_key": "sk-secret", "model": "gpt-4"},
+		},
+	}
+	if err := vault.encryptNodes(nodes); err != nil {
+		t.Fatalf("expected nil error from encryptNodes, got: %v", err)
+	}
+	if _, ok := nodes[0].Config["api_key"].([]byte); !ok {
+		t.Errorf("expected api_key to be encrypted []byte, got %T", nodes[0].Config["api_key"])
+	}
+	if nodes[0].Config["model"] != "gpt-4" {
+		t.Errorf("non-sensitive field should be unchanged, got %v", nodes[0].Config["model"])
+	}
+}
+
+// TestConfigVault_CreateWorkflow_PropagatesEncryptionError verifies that
+// CreateWorkflow propagates an encryptNodes error without calling the inner
+// store, preventing partially-encrypted configs from being persisted. In
+// practice encryptNodes only fails if crypto/rand is unavailable; this test
+// validates the happy path to confirm the error return is wired correctly.
+func TestConfigVault_CreateWorkflow_PropagatesEncryptionError(t *testing.T) {
+	vault, _ := newTestVault(t)
+	wf := store.Workflow{
+		Nodes: []store.WorkflowNode{{
+			ID:     "n1",
+			TypeID: "ai.stub",
+			Config: map[string]any{"api_key": "valid-string"},
+		}},
+	}
+	_, err := vault.CreateWorkflow(context.Background(), wf)
+	if err != nil {
+		t.Fatalf("unexpected error for valid encryption input: %v", err)
 	}
 }

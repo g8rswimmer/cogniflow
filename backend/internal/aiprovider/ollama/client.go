@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/aiprovider"
+	"github.com/g8rswimmer/cogniflow/internal/aiprovider/httpclient"
 )
 
 const (
@@ -47,13 +48,18 @@ type Client struct {
 }
 
 // New returns a new Ollama Client targeting baseURL (e.g. "http://localhost:11434").
-// If baseURL is empty, the default "http://localhost:11434" is used.
+// If baseURL is empty, the default "http://localhost:11434" is used. A retry
+// transport is applied by default (3 attempts, 1 s base delay); WithTransport
+// bypasses it.
 func New(baseURL string, opts ...Option) *Client {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
 	c := &Client{
-		http:    &http.Client{Timeout: defaultTimeout},
+		http: &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: httpclient.NewRetryTransport(nil, 3, time.Second),
+		},
 		baseURL: strings.TrimRight(baseURL, "/"),
 	}
 	for _, o := range opts {

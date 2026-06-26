@@ -3,11 +3,8 @@ package db_write
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/g8rswimmer/cogniflow/internal/node"
 	"github.com/g8rswimmer/cogniflow/internal/node/builtin/nodeutil"
@@ -36,37 +33,11 @@ var outputSchema = json.RawMessage(`{
 // of the same workflow reuse an existing *sql.DB rather than opening and closing
 // a new one on every call.
 type Handler struct {
-	openDB  func(driver, dsn string) (*sql.DB, error)
-	poolsMu sync.Mutex
-	pools   map[string]*sql.DB // keyed by "driver\x00dsn"; nil in test-constructed instances
+	pool *nodeutil.DBPool
 }
 
 // New returns a Handler for the "db.write" node type.
-func New() *Handler { return &Handler{openDB: sql.Open, pools: make(map[string]*sql.DB)} }
-
-// getDB returns a pooled *sql.DB for the given driver/dsn pair, creating it on
-// first use. When pools is nil (Handler constructed directly in tests), it
-// opens a fresh connection and signals the caller to close it.
-func (h *Handler) getDB(driver, dsn string) (db *sql.DB, closeWhenDone bool, err error) {
-	if h.pools == nil {
-		db, err = h.openDB(driver, dsn)
-		return db, true, err
-	}
-	key := driver + "\x00" + dsn
-	h.poolsMu.Lock()
-	defer h.poolsMu.Unlock()
-	if db, ok := h.pools[key]; ok {
-		return db, false, nil
-	}
-	db, err = h.openDB(driver, dsn)
-	if err != nil {
-		return nil, false, err
-	}
-	db.SetMaxOpenConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	h.pools[key] = db
-	return db, false, nil
-}
+func New() *Handler { return &Handler{pool: nodeutil.NewDBPool()} }
 
 func (h *Handler) Meta() node.NodeMeta {
 	return node.NodeMeta{
@@ -81,17 +52,17 @@ func (h *Handler) Meta() node.NodeMeta {
 
 // Execute runs the configured SQL write statement and returns the affected row count.
 func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeOutput, error) {
-	dsn, _ := input.Config["dsn"].(string)
-	if dsn == "" {
-		return node.NodeOutput{}, fmt.Errorf("db.write: dsn is required")
+	dsn, err := nodeutil.GetRequiredString(input.Config, "dsn")
+	if err != nil {
+		return node.NodeOutput{}, fmt.Errorf("db.write: %w", err)
 	}
 
-	rawQuery, _ := input.Config["query"].(string)
-	if rawQuery == "" {
-		return node.NodeOutput{}, fmt.Errorf("db.write: query is required")
+	rawQuery, err := nodeutil.GetRequiredString(input.Config, "query")
+	if err != nil {
+		return node.NodeOutput{}, fmt.Errorf("db.write: %w", err)
 	}
 
-	driver, _ := input.Config["driver"].(string)
+	driver, _ := nodeutil.GetOptionalString(input.Config, "driver")
 	if driver == "" {
 		driver = "mysql"
 	}
@@ -106,7 +77,7 @@ func (h *Handler) Execute(ctx context.Context, input node.NodeInput) (node.NodeO
 		return node.NodeOutput{}, fmt.Errorf("db.write: %w", err)
 	}
 
-	db, closeWhenDone, err := h.getDB(driver, renderedDSN)
+	db, closeWhenDone, err := h.pool.Get(driver, renderedDSN)
 	if err != nil {
 		return node.NodeOutput{}, fmt.Errorf("db.write: open: %w", err)
 	}

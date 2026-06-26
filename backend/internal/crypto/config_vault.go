@@ -142,7 +142,9 @@ func (v *ConfigVault) decryptString(encrypted string) (string, error) {
 // After a successful write, version 1 is snapshotted so the initial state is always
 // recoverable, consistent with how PUT snapshots every subsequent save.
 func (v *ConfigVault) CreateWorkflow(ctx context.Context, w store.Workflow) (store.Workflow, error) {
-	v.encryptNodes(w.Nodes)
+	if err := v.encryptNodes(w.Nodes); err != nil {
+		return store.Workflow{}, err
+	}
 	created, err := v.inner.CreateWorkflow(ctx, w)
 	if err != nil {
 		return store.Workflow{}, err
@@ -150,6 +152,9 @@ func (v *ConfigVault) CreateWorkflow(ctx context.Context, w store.Workflow) (sto
 	if vErr := v.inner.CreateWorkflowVersion(ctx, created); vErr != nil {
 		slog.WarnContext(ctx, "config vault: initial workflow version snapshot failed",
 			"workflow_id", created.ID, "error", vErr)
+	}
+	if err := v.decryptNodes(created.Nodes); err != nil {
+		return store.Workflow{}, fmt.Errorf("config vault: decrypt workflow %s after create: %w", created.ID, err)
 	}
 	return created, nil
 }
@@ -189,7 +194,9 @@ func (v *ConfigVault) UpdateWorkflow(ctx context.Context, w store.Workflow) (sto
 	for i := range existing.Nodes {
 		existingByID[existing.Nodes[i].ID] = &existing.Nodes[i]
 	}
-	v.encryptNodesPreserving(w.Nodes, existingByID)
+	if err := v.encryptNodesPreserving(w.Nodes, existingByID); err != nil {
+		return store.Workflow{}, err
+	}
 	updated, err := v.inner.UpdateWorkflow(ctx, w)
 	if err != nil {
 		return store.Workflow{}, err
@@ -201,13 +208,18 @@ func (v *ConfigVault) UpdateWorkflow(ctx context.Context, w store.Workflow) (sto
 		slog.WarnContext(ctx, "config vault: workflow version snapshot failed",
 			"workflow_id", w.ID, "error", vErr)
 	}
+	if err := v.decryptNodes(updated.Nodes); err != nil {
+		return store.Workflow{}, fmt.Errorf("config vault: decrypt workflow %s after update: %w", w.ID, err)
+	}
 	return updated, nil
 }
 
 // encryptNodesPreserving encrypts like encryptNodes but, for any sensitive
 // field whose incoming value is the masked sentinel "***", copies the existing
 // raw ciphertext from the stored node instead of re-encrypting.
-func (v *ConfigVault) encryptNodesPreserving(nodes []store.WorkflowNode, existing map[string]*store.WorkflowNode) {
+// Returns an error on the first cipher failure so callers can abort the save
+// rather than persisting a partially-encrypted config.
+func (v *ConfigVault) encryptNodesPreserving(nodes []store.WorkflowNode, existing map[string]*store.WorkflowNode) error {
 	for i := range nodes {
 		n := &nodes[i]
 		if n.Config == nil {
@@ -247,13 +259,13 @@ func (v *ConfigVault) encryptNodesPreserving(nodes []store.WorkflowNode, existin
 			}
 			ciphertext, err := v.cipher.Encrypt([]byte(strVal))
 			if err != nil {
-				slog.Error("config vault: encrypt failed", "node", n.ID, "key", key, "error", err)
-				continue
+				return fmt.Errorf("config vault: encrypt node %s field %q: %w", n.ID, key, err)
 			}
 			n.Config[key] = ciphertext
 			n.SensitiveKeys[key] = true
 		}
 	}
+	return nil
 }
 
 // DeleteWorkflow delegates directly.
@@ -456,7 +468,9 @@ func (v *ConfigVault) ListTestCaseResults(ctx context.Context, evalRunID string)
 
 // encryptNodes mutates nodes in place: sensitive values become ciphertext ([]byte)
 // and SensitiveKeys is populated. Unknown node types are stored unencrypted.
-func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) {
+// Returns an error on the first encryption failure so callers can abort the save
+// rather than persisting a partially-encrypted config.
+func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) error {
 	for i := range nodes {
 		n := &nodes[i]
 		if n.Config == nil {
@@ -479,13 +493,13 @@ func (v *ConfigVault) encryptNodes(nodes []store.WorkflowNode) {
 			}
 			ciphertext, err := v.cipher.Encrypt([]byte(strVal))
 			if err != nil {
-				slog.Error("config vault: encrypt failed", "node", n.ID, "key", key, "error", err)
-				continue
+				return fmt.Errorf("config vault: encrypt node %s field %q: %w", n.ID, key, err)
 			}
 			n.Config[key] = ciphertext
 			n.SensitiveKeys[key] = true
 		}
 	}
+	return nil
 }
 
 // decryptNodes mutates nodes in place: []byte ciphertext values in SensitiveKeys

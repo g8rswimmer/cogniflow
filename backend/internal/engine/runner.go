@@ -162,66 +162,8 @@ func runDAG(
 		// reset body node pending counts and re-dispatch body roots. Skip normal
 		// OutEdge routing so the "loop_body" forward edge does not double-dispatch.
 		if dag.Nodes[result.nodeID].TypeID == loopControllerTypeID {
-			action, _ := result.routingOutput["action"].(string)
-			maxIter := maxIterFromConfig(dag.Nodes[result.nodeID].Config)
-
-			if action == "loop_body" && loopIterations[result.nodeID] < maxIter {
-				loopIterations[result.nodeID]++
-
-				// Inject iteration state into execCtx so the controller reads the
-				// correct iteration number on its next Execute() call.
-				execCtx.set("_loop_state", map[string]any{
-					"iteration": loopIterations[result.nodeID],
-				})
-				// Ensure "_loop_state" is visible in the controller's mergeUpstream.
-				if !sliceContains(dag.Ancestors[result.nodeID], "_loop_state") {
-					dag.Ancestors[result.nodeID] = append(dag.Ancestors[result.nodeID], "_loop_state")
-				}
-
-				// Add body nodes to the controller's Ancestors so that on subsequent
-				// Execute() calls, mergeUpstream returns the body nodes' latest outputs.
-				// Ancestors is only read by goroutines dispatched after this point so
-				// mutating it here (single-threaded supervisor) is race-free.
-				bodyNodes := dag.LoopBodyNodes[result.nodeID]
-				for bodyID := range bodyNodes {
-					if !sliceContains(dag.Ancestors[result.nodeID], bodyID) {
-						dag.Ancestors[result.nodeID] = append(dag.Ancestors[result.nodeID], bodyID)
-					}
-				}
-
-				// Reset pending counts for all body nodes.
-				for bodyID := range bodyNodes {
-					pending[bodyID] = countBodyInternalPredecessors(dag, bodyID, bodyNodes)
-					delete(skipped, bodyID)
-					delete(hasLive, bodyID)
-				}
-
-				// Reset pending for the controller to the number of loop-back edges
-				// targeting it; when all body sinks complete those edges will fire
-				// and the controller will be re-dispatched automatically.
-				loopBackCount := 0
-				for _, lbe := range dag.LoopBackEdges {
-					if lbe.TargetID == result.nodeID {
-						loopBackCount++
-					}
-				}
-				pending[result.nodeID] = loopBackCount
-
-				// Dispatch root body nodes (those with no in-body predecessors).
-				for bodyID := range bodyNodes {
-					if pending[bodyID] == 0 {
-						hasLive[bodyID] = true
-						dispatch(bodyID)
-					}
-				}
-				continue // skip normal OutEdge routing for this iteration
-			}
-
-			// Loop is exiting (action="exit" or max_iterations reached).
-			// Pre-mark all body nodes as skipped so that propagateSkip for the
-			// suppressed "loop_body" outgoing edge does not re-dispatch them.
-			for bodyID := range dag.LoopBodyNodes[result.nodeID] {
-				skipped[bodyID] = true
+			if handleLoopIteration(result, dag, execCtx, pending, skipped, hasLive, loopIterations, dispatch) {
+				continue
 			}
 		}
 
@@ -268,6 +210,83 @@ func runDAG(
 		}
 	}
 	return finalOutput, nodeResults, nil
+}
+
+// handleLoopIteration processes a loop.controller result. If the controller
+// chose to iterate (action="loop_body" and max_iterations not reached), it resets
+// body node state, re-dispatches body roots, and returns true so the supervisor
+// skips normal OutEdge routing. If the loop is exiting it pre-marks all body
+// nodes as skipped and returns false so normal routing fires the "exit" branch.
+func handleLoopIteration(
+	result nodeResult,
+	dag *DAG,
+	execCtx *ExecutionContext,
+	pending map[string]int,
+	skipped map[string]bool,
+	hasLive map[string]bool,
+	loopIterations map[string]int,
+	dispatch func(string),
+) bool {
+	action, _ := result.routingOutput["action"].(string)
+	maxIter := maxIterFromConfig(dag.Nodes[result.nodeID].Config)
+
+	if action == "loop_body" && loopIterations[result.nodeID] < maxIter {
+		loopIterations[result.nodeID]++
+
+		// Inject iteration state so the controller reads the correct iteration number
+		// on its next Execute() call.
+		execCtx.set("_loop_state", map[string]any{"iteration": loopIterations[result.nodeID]})
+
+		// Ensure "_loop_state" is visible in the controller's mergeUpstream.
+		if !sliceContains(dag.Ancestors[result.nodeID], "_loop_state") {
+			dag.Ancestors[result.nodeID] = append(dag.Ancestors[result.nodeID], "_loop_state")
+		}
+
+		// Add body nodes to the controller's Ancestors so subsequent Execute() calls
+		// receive the body nodes' latest outputs. Ancestors is only read by goroutines
+		// dispatched after this point, so mutating it here (single-threaded supervisor)
+		// is race-free.
+		bodyNodes := dag.LoopBodyNodes[result.nodeID]
+		for bodyID := range bodyNodes {
+			if !sliceContains(dag.Ancestors[result.nodeID], bodyID) {
+				dag.Ancestors[result.nodeID] = append(dag.Ancestors[result.nodeID], bodyID)
+			}
+		}
+
+		// Reset pending counts for all body nodes.
+		for bodyID := range bodyNodes {
+			pending[bodyID] = countBodyInternalPredecessors(dag, bodyID, bodyNodes)
+			delete(skipped, bodyID)
+			delete(hasLive, bodyID)
+		}
+
+		// Reset pending for the controller to the number of loop-back edges targeting
+		// it; when all body sinks complete those edges will re-dispatch the controller.
+		loopBackCount := 0
+		for _, lbe := range dag.LoopBackEdges {
+			if lbe.TargetID == result.nodeID {
+				loopBackCount++
+			}
+		}
+		pending[result.nodeID] = loopBackCount
+
+		// Dispatch root body nodes (those with no in-body predecessors).
+		for bodyID := range bodyNodes {
+			if pending[bodyID] == 0 {
+				hasLive[bodyID] = true
+				dispatch(bodyID)
+			}
+		}
+		return true // skip normal OutEdge routing for this iteration
+	}
+
+	// Loop is exiting (action="exit" or max_iterations reached).
+	// Pre-mark all body nodes as skipped so propagateSkip for the suppressed
+	// "loop_body" outgoing edge does not re-dispatch them.
+	for bodyID := range dag.LoopBodyNodes[result.nodeID] {
+		skipped[bodyID] = true
+	}
+	return false
 }
 
 // branchAllows reports whether the given edge should fire given the completed
@@ -449,6 +468,9 @@ func executeNode(
 	resultCh <- nodeResult{nodeID: nodeID, output: outData, routingOutput: routingOutput}
 }
 
+// newTimer creates a timer that fires after d. Overridable in tests to avoid real sleeps.
+var newTimer = time.NewTimer
+
 // executeWithRetry calls handler.Execute, retrying up to MaxRetries times with linear backoff.
 func executeWithRetry(ctx context.Context, runID, nodeID string, n store.WorkflowNode, input node.NodeInput, handler node.NodeHandler) (node.NodeOutput, error) {
 	maxRetries := 0
@@ -471,7 +493,7 @@ func executeWithRetry(ctx context.Context, runID, nodeID string, n store.Workflo
 				"backoff_ms", delay.Milliseconds(),
 				"last_error", lastErr,
 			)
-			t := time.NewTimer(delay)
+			t := newTimer(delay)
 			select {
 			case <-ctx.Done():
 				t.Stop()
